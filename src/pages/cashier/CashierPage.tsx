@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now, addToSyncQueue } from '@/lib/db'
 import { useCartStore } from '@/store/cart'
 import { useAuthStore } from '@/store/auth'
-import { STORE_ID, supabase } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { formatRupiah, generateReceiptNo, calcPackaging } from '@/lib/utils'
 import type { Product, PaymentMethod } from '@/types'
 import { ShoppingCart, Plus, Minus, Trash2, X, CheckCircle, Package } from 'lucide-react'
@@ -27,6 +27,7 @@ interface CartPaketItem {
 
 export default function CashierPage() {
   const { user, activeShift } = useAuthStore()
+  const STORE_ID = user?.store_id || ''
   const { items, addItem, removeItem, updateQty, clearCart, total, subtotal, totalDiscount } = useCartStore()
 
   const [selectedCat, setSelectedCat]       = useState<string>('all')

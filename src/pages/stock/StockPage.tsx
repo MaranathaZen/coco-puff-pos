@@ -1,7 +1,6 @@
 // src/pages/stock/StockPage.tsx
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now, addToSyncQueue } from '@/lib/db'
-import { STORE_ID } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { useState } from 'react'
 import { formatDate } from '@/lib/utils'
@@ -10,6 +9,7 @@ import toast from 'react-hot-toast'
 
 export default function StockPage() {
   const { user } = useAuthStore()
+  const STORE_ID = user?.store_id || ''
   const [showAdd, setShowAdd] = useState(false)
 
   const stocks = useLiveQuery(async () => {
@@ -17,7 +17,7 @@ export default function StockPage() {
     const ings = await db.ingredients.toArray()
     const ingMap = Object.fromEntries(ings.map(i => [i.id, i]))
     return all.map(s => ({ ...s, ingredient: ingMap[s.ingredient_id] }))
-  }, [])
+  }, [STORE_ID])
 
   return (
     <div className="p-4 space-y-4">
@@ -47,19 +47,23 @@ export default function StockPage() {
       </div>
 
       {showAdd && (
-        <StockInputForm onClose={() => setShowAdd(false)} userId={user!.id} />
+        <StockInputForm storeId={STORE_ID} onClose={() => setShowAdd(false)} userId={user!.id} />
       )}
     </div>
   )
 }
 
-function StockInputForm({ onClose, userId }: { onClose: () => void; userId: string }) {
+function StockInputForm({ onClose, userId, storeId }: {
+  onClose: () => void
+  userId: string
+  storeId: string
+}) {
   const ingredients = useLiveQuery(() => db.ingredients.filter(i => i.is_active).toArray(), [])
-  const [ingId, setIngId]     = useState('')
-  const [qty, setQty]         = useState('')
-  const [note, setNote]       = useState('')
-  const [type, setType]       = useState<'purchase' | 'adjustment'>('purchase')
-  const [saving, setSaving]   = useState(false)
+  const [ingId, setIngId]   = useState('')
+  const [qty, setQty]       = useState('')
+  const [note, setNote]     = useState('')
+  const [type, setType]     = useState<'purchase' | 'adjustment'>('purchase')
+  const [saving, setSaving] = useState(false)
 
   async function handleSave() {
     if (!ingId || !qty) return toast.error('Pilih bahan dan masukkan qty')
@@ -67,36 +71,36 @@ function StockInputForm({ onClose, userId }: { onClose: () => void; userId: stri
     try {
       const existing = await db.stock
         .where('[store_id+ingredient_id]')
-        .equals([STORE_ID, ingId]).first()
+        .equals([storeId, ingId]).first()
 
       const qtyBefore = existing?.qty_on_hand ?? 0
       const qtyNum    = Number(qty)
       const qtyAfter  = type === 'adjustment' ? qtyNum : qtyBefore + qtyNum
 
       const stockData = {
-        id:           existing?.id || generateId(),
-        store_id:     STORE_ID,
+        id:            existing?.id || generateId(),
+        store_id:      storeId,
         ingredient_id: ingId,
-        qty_on_hand:  qtyAfter,
-        last_updated: now(),
+        qty_on_hand:   qtyAfter,
+        last_updated:  now(),
       }
       await db.stock.put(stockData)
-      await addToSyncQueue('stock', stockData.id, existing ? 'update' : 'insert', stockData, STORE_ID)
+      await addToSyncQueue('stock', stockData.id, existing ? 'update' : 'insert', stockData, storeId)
 
       const mutation = {
-        id: generateId(),
-        store_id: STORE_ID,
+        id:            generateId(),
+        store_id:      storeId,
         ingredient_id: ingId,
         mutation_type: type as any,
-        qty: type === 'adjustment' ? qtyNum - qtyBefore : qtyNum,
-        qty_before: qtyBefore,
-        qty_after: qtyAfter,
+        qty:           type === 'adjustment' ? qtyNum - qtyBefore : qtyNum,
+        qty_before:    qtyBefore,
+        qty_after:     qtyAfter,
         note,
-        created_by: userId,
-        created_at: now(),
+        created_by:    userId,
+        created_at:    now(),
       }
       await db.stock_mutations.add(mutation)
-      await addToSyncQueue('stock_mutations', mutation.id, 'insert', mutation, STORE_ID)
+      await addToSyncQueue('stock_mutations', mutation.id, 'insert', mutation, storeId)
 
       toast.success('Stok berhasil diupdate')
       onClose()
@@ -134,11 +138,13 @@ function StockInputForm({ onClose, userId }: { onClose: () => void; userId: stri
             <label className="text-sm font-medium text-gray-700 mb-1 block">
               {type === 'adjustment' ? 'Stok Aktual' : 'Qty Masuk'}
             </label>
-            <input className="input" type="number" value={qty} onChange={e => setQty(e.target.value)} placeholder="0" />
+            <input className="input" type="number" value={qty}
+              onChange={e => setQty(e.target.value)} placeholder="0" />
           </div>
           <div>
             <label className="text-sm font-medium text-gray-700 mb-1 block">Catatan</label>
-            <input className="input" value={note} onChange={e => setNote(e.target.value)} placeholder="Opsional" />
+            <input className="input" value={note}
+              onChange={e => setNote(e.target.value)} placeholder="Opsional" />
           </div>
         </div>
         <div className="flex gap-3">

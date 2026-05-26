@@ -1,30 +1,31 @@
 /**
- * Auth store — menyimpan user yang sedang login dan shift aktif.
- * Zustand = pengganti useState tapi bisa diakses dari mana saja.
+ * Auth store — menyimpan user yang login, store aktif, dan shift.
+ * STORE_ID diambil dari data user, bukan env variable.
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { User, Shift } from '@/types'
+import type { User, Shift, Store } from '@/types'
 import { db } from '@/lib/db'
 import { hashPassword } from '@/lib/utils'
-import { STORE_ID } from '@/lib/supabase'
 
 interface AuthState {
   user:        User | null
+  store:       Store | null   // ← toko aktif user yang login
   activeShift: Shift | null
   isLoading:   boolean
   error:       string | null
 
-  login:       (username: string, password: string) => Promise<boolean>
-  logout:      () => void
-  setShift:    (shift: Shift | null) => void
-  clearError:  () => void
+  login:      (username: string, password: string) => Promise<boolean>
+  logout:     () => void
+  setShift:   (shift: Shift | null) => void
+  clearError: () => void
 }
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       user:        null,
+      store:       null,
       activeShift: null,
       isLoading:   false,
       error:       null,
@@ -33,9 +34,10 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null })
         try {
           const hashed = await hashPassword(password)
-          const user   = await db.users
+
+          // Cari user (bisa by username atau by id untuk kasir PIN)
+          const user = await db.users
             .where('username').equals(username)
-            .filter(u => u.store_id === STORE_ID || u.role === 'owner')
             .filter(u => u.is_active)
             .first()
 
@@ -44,9 +46,12 @@ export const useAuthStore = create<AuthState>()(
             return false
           }
           if (user.password_hash !== hashed) {
-            set({ error: 'Password salah', isLoading: false })
+            set({ error: 'PIN atau password salah', isLoading: false })
             return false
           }
+
+          // Ambil data toko dari store_id user
+          const store = await db.stores.get(user.store_id) || null
 
           // Cek shift aktif
           const shift = await db.shifts
@@ -54,7 +59,7 @@ export const useAuthStore = create<AuthState>()(
             .filter(s => s.status === 'open')
             .last()
 
-          set({ user, activeShift: shift || null, isLoading: false })
+          set({ user, store, activeShift: shift || null, isLoading: false })
           return true
         } catch (e) {
           set({ error: 'Terjadi kesalahan', isLoading: false })
@@ -62,7 +67,7 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      logout: () => set({ user: null, activeShift: null }),
+      logout: () => set({ user: null, store: null, activeShift: null }),
 
       setShift: (shift) => set({ activeShift: shift }),
 
@@ -70,7 +75,16 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'cocopuff-auth',
-      partialize: (state) => ({ user: state.user, activeShift: state.activeShift }),
+      partialize: (state) => ({
+        user: state.user,
+        store: state.store,
+        activeShift: state.activeShift,
+      }),
     }
   )
 )
+
+// ── Helper: ambil STORE_ID dari user yang login ───────────────
+export function getStoreId(user: User | null): string {
+  return user?.store_id || 'unknown'
+}

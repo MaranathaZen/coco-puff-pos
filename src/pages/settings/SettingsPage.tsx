@@ -2,7 +2,6 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now, addToSyncQueue } from '@/lib/db'
-import { STORE_ID, STORE_NAME } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { hashPassword } from '@/lib/utils'
 import toast from 'react-hot-toast'
@@ -26,22 +25,23 @@ export default function SettingsPage() {
       </div>
 
       {tab === 'users' && <UsersTab currentUser={user!} />}
-      {tab === 'password' && <ChangePasswordTab userId={user!.id} />}
+      {tab === 'password' && <ChangePasswordTab userId={user!.id} storeId={user!.store_id} />}
     </div>
   )
 }
 
 function UsersTab({ currentUser }: { currentUser: User }) {
+  const { store } = useAuthStore()
   const [showForm, setShowForm] = useState(false)
   const [editUser, setEdit]     = useState<User | null>(null)
 
   const users = useLiveQuery(() =>
-    db.users.where('store_id').equals(STORE_ID).toArray(), [])
+    db.users.where('store_id').equals(currentUser.store_id).toArray(), [currentUser.store_id])
 
   return (
     <div className="space-y-3">
       <div className="flex justify-between items-center">
-        <p className="text-sm text-gray-500">{STORE_NAME}</p>
+        <p className="text-sm text-gray-500">{store?.name || ''}</p>
         {currentUser.role === 'owner' && (
           <button onClick={() => { setEdit(null); setShowForm(true) }}
             className="btn-primary text-sm px-3 py-2">
@@ -67,18 +67,22 @@ function UsersTab({ currentUser }: { currentUser: User }) {
         </div>
       ))}
       {showForm && (
-        <UserForm user={editUser} onClose={() => setShowForm(false)} />
+        <UserForm user={editUser} storeId={currentUser.store_id} onClose={() => setShowForm(false)} />
       )}
     </div>
   )
 }
 
-function UserForm({ user, onClose }: { user: User | null; onClose: () => void }) {
-  const [name, setName]       = useState(user?.name || '')
-  const [username, setUname]  = useState(user?.username || '')
-  const [password, setPass]   = useState('')
-  const [role, setRole]       = useState<Role>(user?.role || 'kasir')
-  const [saving, setSaving]   = useState(false)
+function UserForm({ user, onClose, storeId }: {
+  user: User | null
+  onClose: () => void
+  storeId: string
+}) {
+  const [name, setName]     = useState(user?.name || '')
+  const [username, setUname]= useState(user?.username || '')
+  const [password, setPass] = useState('')
+  const [role, setRole]     = useState<Role>(user?.role || 'kasir')
+  const [saving, setSaving] = useState(false)
 
   async function handleSave() {
     if (!name || !username) return toast.error('Nama dan username wajib diisi')
@@ -88,7 +92,7 @@ function UserForm({ user, onClose }: { user: User | null; onClose: () => void })
       const isNew = !user
       const data: User = {
         id:            user?.id || generateId(),
-        store_id:      STORE_ID,
+        store_id:      storeId,
         name,
         username,
         password_hash: password ? await hashPassword(password) : user!.password_hash,
@@ -97,7 +101,7 @@ function UserForm({ user, onClose }: { user: User | null; onClose: () => void })
         created_at:    user?.created_at || now(),
       }
       await db.users.put(data)
-      await addToSyncQueue('users', data.id, isNew ? 'insert' : 'update', data, STORE_ID)
+      await addToSyncQueue('users', data.id, isNew ? 'insert' : 'update', data, storeId)
       toast.success(isNew ? 'User ditambahkan' : 'User diupdate')
       onClose()
     } finally {
@@ -145,9 +149,9 @@ function UserForm({ user, onClose }: { user: User | null; onClose: () => void })
   )
 }
 
-function ChangePasswordTab({ userId }: { userId: string }) {
-  const [oldPass, setOld]  = useState('')
-  const [newPass, setNew]  = useState('')
+function ChangePasswordTab({ userId, storeId }: { userId: string; storeId: string }) {
+  const [oldPass, setOld]   = useState('')
+  const [newPass, setNew]   = useState('')
   const [saving, setSaving] = useState(false)
 
   async function handleChange() {
@@ -163,7 +167,7 @@ function ChangePasswordTab({ userId }: { userId: string }) {
       }
       const newHash = await hashPassword(newPass)
       await db.users.update(userId, { password_hash: newHash })
-      await addToSyncQueue('users', userId, 'update', { id: userId, password_hash: newHash }, STORE_ID)
+      await addToSyncQueue('users', userId, 'update', { id: userId, password_hash: newHash }, storeId)
       toast.success('Password berhasil diubah')
       setOld(''); setNew('')
     } finally {

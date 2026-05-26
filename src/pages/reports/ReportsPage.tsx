@@ -2,14 +2,14 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/lib/db'
-import { STORE_ID } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { formatRupiah, formatDate } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth'
-import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 
 export default function ReportsPage() {
   const { user } = useAuthStore()
+  const STORE_ID = user?.store_id || ''
   const today    = new Date().toISOString().slice(0, 10)
   const [dateFrom, setFrom] = useState(today)
   const [dateTo, setTo]     = useState(today)
@@ -21,7 +21,7 @@ export default function ReportsPage() {
       .where('store_id').equals(STORE_ID)
       .filter(t => t.created_at >= from && t.created_at <= to)
       .reverse().sortBy('created_at')
-  }, [dateFrom, dateTo])
+  }, [dateFrom, dateTo, STORE_ID])
 
   const totalOmzet = transactions?.filter(t => t.status === 'completed')
     .reduce((s, t) => s + t.total, 0) || 0
@@ -91,10 +91,7 @@ export default function ReportsPage() {
               </div>
             </div>
             {tx.status === 'completed' && ['owner', 'manager'].includes(user?.role || '') && (
-              <button
-                onClick={() => handleVoid(tx.id)}
-                className="mt-2 text-xs text-red-500 underline"
-              >
+              <button onClick={() => handleVoid(tx.id)} className="mt-2 text-xs text-red-500 underline">
                 Void transaksi
               </button>
             )}

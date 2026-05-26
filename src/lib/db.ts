@@ -10,24 +10,40 @@ import type {
   Stock, StockMutation, SyncQueueItem
 } from '@/types'
 
+export interface Package {
+  id: string
+  name: string
+  description?: string
+  qty_total: number
+  price: number
+  is_mix: boolean
+  is_active: boolean
+  store_id?: string
+  created_at: string
+  updated_at: string
+}
+
 export class CocoPuffDB extends Dexie {
-  stores!:              Table<Store>
-  users!:               Table<User>
-  shifts!:              Table<Shift>
-  categories!:          Table<Category>
-  products!:            Table<Product>
-  store_product_prices!:Table<StoreProductPrice>
-  promotions!:          Table<Promotion>
-  ingredients!:         Table<Ingredient>
-  recipes!:             Table<Recipe>
-  transactions!:        Table<Transaction>
-  transaction_items!:   Table<TransactionItem>
-  stock!:               Table<Stock>
-  stock_mutations!:     Table<StockMutation>
-  sync_queue!:          Table<SyncQueueItem>
+  stores!:               Table<Store>
+  users!:                Table<User>
+  shifts!:               Table<Shift>
+  categories!:           Table<Category>
+  products!:             Table<Product>
+  store_product_prices!: Table<StoreProductPrice>
+  promotions!:           Table<Promotion>
+  ingredients!:          Table<Ingredient>
+  recipes!:              Table<Recipe>
+  transactions!:         Table<Transaction>
+  transaction_items!:    Table<TransactionItem>
+  stock!:                Table<Stock>
+  stock_mutations!:      Table<StockMutation>
+  packages!:             Table<Package>
+  sync_queue!:           Table<SyncQueueItem>
 
   constructor() {
     super('CocoPuffPOS')
+
+    // Version 1 — skema awal
     this.version(1).stores({
       stores:               'id, name, city, is_active',
       users:                'id, store_id, username, role, is_active',
@@ -44,22 +60,41 @@ export class CocoPuffDB extends Dexie {
       stock_mutations:      'id, store_id, ingredient_id, mutation_type, created_at',
       sync_queue:           'id, store_id, table_name, status, created_at',
     })
+
+    // Version 2 — tambah tabel packages
+    this.version(2).stores({
+      stores:               'id, name, city, is_active',
+      users:                'id, store_id, username, role, is_active',
+      shifts:               'id, store_id, user_id, status, opened_at',
+      categories:           'id, name, sort_order',
+      products:             'id, category_id, name, sku, is_active',
+      store_product_prices: 'id, store_id, product_id, [store_id+product_id]',
+      promotions:           'id, store_id, product_id, is_active',
+      ingredients:          'id, name, is_active',
+      recipes:              'id, product_id, ingredient_id, [product_id+ingredient_id]',
+      transactions:         'id, store_id, shift_id, cashier_id, receipt_no, status, created_at',
+      transaction_items:    'id, transaction_id, product_id',
+      stock:                'id, store_id, ingredient_id, [store_id+ingredient_id]',
+      stock_mutations:      'id, store_id, ingredient_id, mutation_type, created_at',
+      packages:             'id, is_active, store_id',
+      sync_queue:           'id, store_id, table_name, status, created_at',
+    })
   }
 }
 
 export const db = new CocoPuffDB()
 
-// ── Helper: generate UUID ────────────────────────────────────
+// ── Helper: generate UUID ─────────────────────────────────────
 export function generateId(): string {
   return crypto.randomUUID()
 }
 
-// ── Helper: timestamp sekarang ───────────────────────────────
+// ── Helper: timestamp sekarang ────────────────────────────────
 export function now(): string {
   return new Date().toISOString()
 }
 
-// ── Helper: tambah ke sync queue ─────────────────────────────
+// ── Helper: tambah ke sync queue ──────────────────────────────
 export async function addToSyncQueue(
   table_name: string,
   record_id: string,

@@ -8,7 +8,7 @@ import { db, now } from '@/lib/db'
 let syncInterval: ReturnType<typeof setInterval> | null = null
 let isSyncing = false
 
-// ── Pull: ambil data master dari Supabase ke lokal ───────────
+// ── Pull: ambil data master dari Supabase ke lokal ────────────
 export async function pullFromSupabase() {
   try {
     // Categories
@@ -38,6 +38,13 @@ export async function pullFromSupabase() {
     const { data: promos } = await supabase.from('promotions')
       .select('*').eq('store_id', STORE_ID).eq('is_active', true)
     if (promos?.length) await db.promotions.bulkPut(promos)
+
+    // Paket aktif (berlaku semua toko atau toko ini)
+    const { data: pkgs } = await supabase.from('packages')
+      .select('*')
+      .eq('is_active', true)
+      .or(`store_id.is.null,store_id.eq.${STORE_ID}`)
+    if (pkgs?.length) await db.packages.bulkPut(pkgs)
 
     // Users toko ini
     const { data: users } = await supabase.from('users')

@@ -1,5 +1,5 @@
 // src/pages/settings/SettingsPage.tsx
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now, addToSyncQueue } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
@@ -10,7 +10,7 @@ import toast from 'react-hot-toast'
 import type { User, Role } from '@/types'
 import type { Supplier, Partner, MenuRoleConfig } from '@/lib/db'
 
-type Tab = 'users' | 'supplier' | 'mitra' | 'menu' | 'password'
+type Tab = 'users' | 'supplier' | 'mitra' | 'menu' | 'toko' | 'password'
 
 // Semua menu yang tersedia di sistem
 const ALL_MENUS = [
@@ -39,6 +39,7 @@ export default function SettingsPage() {
     { id: 'supplier', label: 'Supplier' },
     { id: 'mitra',    label: 'Franchise' },
     { id: 'menu',     label: 'Menu', ownerOnly: true },
+    { id: 'toko',     label: 'Toko', ownerOnly: true },
     { id: 'password', label: 'Password' },
   ].filter(t => !t.ownerOnly || isOwner)
 
@@ -64,6 +65,7 @@ export default function SettingsPage() {
         {tab === 'supplier' && <SupplierTab />}
         {tab === 'mitra'    && <MitraTab />}
         {tab === 'menu'     && <MenuConfigTab />}
+        {tab === 'toko'     && <TokoTab />}
         {tab === 'password' && <ChangePasswordTab userId={user!.id} storeId={user!.store_id} />}
       </div>
     </div>
@@ -334,6 +336,92 @@ function ChangePasswordTab({ userId, storeId }: { userId: string; storeId: strin
         {saving ? 'Menyimpan...' : 'Ganti Password'}
       </button>
     </div>
+  )
+}
+
+
+// ── TOKO TAB ──────────────────────────────────────────────────
+function TokoTab() {
+  const [stores, setStores]   = useState<any[]>([])
+  const [editStore, setEdit]  = useState<any | null>(null)
+  const [showForm, setForm]   = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function load() {
+      const { data } = await supabase.from('stores').select('*').order('created_at')
+      if (data) { setStores(data); await db.stores.bulkPut(data) }
+      setLoading(false)
+    }
+    load()
+  }, [])
+
+  return (
+    <div className="p-4 space-y-3">
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        {loading ? (
+          <div className="py-8 text-center text-sm text-gray-400">Memuat...</div>
+        ) : stores.map((s, idx) => (
+          <button key={s.id} onClick={() => { setEdit(s); setForm(true) }}
+            className={`w-full flex items-center px-4 py-3 text-left active:bg-gray-50 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-gray-900 truncate">{s.name}</p>
+              <p className="text-xs text-gray-400">{s.city} {s.phone ? `· ${s.phone}` : ''}</p>
+            </div>
+            {!s.is_active && <span className="text-xs text-gray-400 mr-2">nonaktif</span>}
+            <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
+          </button>
+        ))}
+      </div>
+
+      {showForm && editStore && (
+        <TokoForm store={editStore} onClose={() => { setForm(false); setEdit(null) }}
+          onSaved={(updated) => { setStores(prev => prev.map(s => s.id === updated.id ? updated : s)); setForm(false) }} />
+      )}
+    </div>
+  )
+}
+
+function TokoForm({ store, onClose, onSaved }: { store: any; onClose: () => void; onSaved: (s: any) => void }) {
+  const [name, setName]     = useState(store.name || '')
+  const [city, setCity]     = useState(store.city || '')
+  const [phone, setPhone]   = useState(store.phone || '')
+  const [address, setAddr]  = useState(store.address || '')
+  const [isActive, setAct]  = useState(store.is_active ?? true)
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    if (!name.trim()) return toast.error('Nama toko wajib diisi')
+    setSaving(true)
+    try {
+      const updated = { ...store, name: name.trim(), city, phone: phone || null, address: address || null, is_active: isActive }
+      await db.stores.put(updated)
+      await supabase.from('stores').update({ name: updated.name, city, phone: updated.phone, address: updated.address, is_active: isActive }).eq('id', store.id)
+      toast.success('Toko diupdate')
+      onSaved(updated)
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title="Edit Toko" onClose={onClose}>
+      <div><Label>Nama Toko</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
+      <div><Label>Kota</Label><input className="input" value={city} onChange={e => setCity(e.target.value)} placeholder="Surabaya" /></div>
+      <div><Label>No. Telepon</Label><input className="input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="031-xxxx" /></div>
+      <div><Label>Alamat</Label><input className="input" value={address} onChange={e => setAddr(e.target.value)} placeholder="Opsional" /></div>
+      <div className="flex items-center justify-between py-2 border-t border-gray-100">
+        <p className="text-sm text-gray-700">Aktif</p>
+        <button onClick={() => setAct(!isActive)}
+          className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
+          <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} />
+        </button>
+      </div>
+      <div className="flex gap-3 pt-1 border-t border-gray-100">
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+          {saving ? 'Menyimpan...' : 'Simpan'}
+        </button>
+      </div>
+    </Modal>
   )
 }
 

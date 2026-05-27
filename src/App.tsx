@@ -15,6 +15,7 @@ import OwnerPage         from '@/pages/owner/OwnerPage'
 import GudangPage        from '@/pages/gudang/GudangPage'
 import ProduksiPage      from '@/pages/produksi/ProduksiPage'
 import LaporanGudangPage from '@/pages/laporan/LaporanGudangPage'
+import EndOfDayPage     from '@/pages/cashier/EndOfDayPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const user = useAuthStore(s => s.user)
@@ -52,6 +53,7 @@ export default function App() {
         <Route path="owner" element={<RequireRole roles={['owner']}><OwnerPage /></RequireRole>} />
         <Route path="gudang" element={<RequireRole roles={['owner','manager','gudang']}><GudangPage /></RequireRole>} />
         <Route path="produksi" element={<RequireRole roles={['owner','manager','produksi']}><ProduksiPage /></RequireRole>} />
+        <Route path="tutup-toko" element={<RequireRole roles={['owner','manager','kasir']}><EndOfDayPage /></RequireRole>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

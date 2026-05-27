@@ -23,6 +23,7 @@ const ALL_MENUS = [
   { path: '/laporan-gudang',label: 'Lap. Gudang' },
   { path: '/owner',         label: 'Dashboard' },
   { path: '/pengaturan',    label: 'Setting' },
+  { path: '/tutup-toko',     label: 'Tutup Toko' },
 ]
 
 const ROLES = ['owner', 'manager', 'kasir', 'gudang', 'produksi']
@@ -36,7 +37,7 @@ export default function SettingsPage() {
   const tabs: { id: Tab; label: string; ownerOnly?: boolean }[] = [
     { id: 'users',    label: 'User' },
     { id: 'supplier', label: 'Supplier' },
-    { id: 'mitra',    label: 'Mitra' },
+    { id: 'mitra',    label: 'Franchise' },
     { id: 'menu',     label: 'Menu', ownerOnly: true },
     { id: 'password', label: 'Password' },
   ].filter(t => !t.ownerOnly || isOwner)
@@ -266,7 +267,7 @@ function MitraTab() {
       <div className="flex justify-end">
         <button onClick={() => { setEditItem(null); setShowForm(true) }}
           className="flex items-center gap-1.5 text-sm font-medium text-gray-900 bg-white border border-gray-200 px-3 py-1.5 rounded-lg">
-          <Plus size={14} /> Tambah Mitra
+          <Plus size={14} /> Tambah Franchise
         </button>
       </div>
 
@@ -282,7 +283,7 @@ function MitraTab() {
             <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
           </button>
         ))}
-        {partners?.length === 0 && <div className="py-8 text-center text-sm text-gray-400">Belum ada mitra</div>}
+        {partners?.length === 0 && <div className="py-8 text-center text-sm text-gray-400">Belum ada franchise</div>}
       </div>
 
       {showForm && <MitraForm partner={editItem} onClose={() => { setShowForm(false); setEditItem(null) }} />}
@@ -487,14 +488,14 @@ function MitraForm({ partner, onClose }: { partner: Partner | null; onClose: () 
       }
       await db.partners.put(data)
       await supabase.from('partners').upsert(data)
-      toast.success(partner ? 'Mitra diupdate' : 'Mitra ditambahkan')
+      toast.success(partner ? 'Franchise diupdate' : 'Franchise ditambahkan')
       onClose()
     } finally { setSaving(false) }
   }
 
   return (
-    <Modal title={partner ? 'Edit Mitra' : 'Tambah Mitra'} onClose={onClose}>
-      <div><Label>Nama Mitra / Franchise</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
+    <Modal title={partner ? 'Edit Mitra' : 'Tambah Franchise'} onClose={onClose}>
+      <div><Label>Nama Franchise</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
       <div className="grid grid-cols-2 gap-3">
         <div><Label>Kota</Label><input className="input" value={city} onChange={e => setCity(e.target.value)} placeholder="Surabaya" /></div>
         <div><Label>Kontak</Label><input className="input" type="tel" value={contact} onChange={e => setContact(e.target.value)} placeholder="08xx-xxxx" /></div>

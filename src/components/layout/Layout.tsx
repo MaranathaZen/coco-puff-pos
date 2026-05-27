@@ -5,7 +5,7 @@ import { db } from '@/lib/db'
 import { supabase, APP_NAME } from '@/lib/supabase'
 import { isOnline } from '@/lib/sync'
 import { cn } from '@/lib/utils'
-import { LogOut, Wifi, WifiOff, FileText,
+import { LogOut, Wifi, WifiOff, FileText, DoorClosed,
   ShoppingCart, Package, Warehouse, FlaskConical,
   BarChart3, LayoutDashboard, Settings, Layers,
   LucideIcon } from 'lucide-react'
@@ -20,7 +20,8 @@ const ICON_MAP: Record<string, LucideIcon> = {
   '/laporan':        BarChart3,
   '/laporan-gudang': FileText,
   '/owner':     LayoutDashboard,
-  '/pengaturan': Settings,
+  '/pengaturan':    Settings,
+  '/tutup-toko':    DoorClosed,
 }
 
 export default function Layout() {

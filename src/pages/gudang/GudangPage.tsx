@@ -11,7 +11,7 @@ import type { Material, WarehouseStock, Purchase, WarehouseMutation, WarehouseMu
 
 type Tab = 'stok' | 'pembelian' | 'mutasi' | 'biaya'
 
-const SATUAN = ['kg','gram','liter','ml','butir','pcs','dus','pack']
+const SATUAN = ['kg','gram','ons','liter','ml','butir','pcs','buah','dus','karton','pack','sachet','roll','lembar','loyang','batch']
 
 const KATEGORI = [
   { value: 'bahan_baku',          label: 'Bahan Baku',          desc: 'Tepung, gula, telur, dll' },
@@ -522,8 +522,18 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
         await supabase.from('warehouse_stock').upsert(wsd)
 
         if (Number(item.unit_cost) > 0) {
-          await db.materials.update(item.material_id, { unit_cost: Number(item.unit_cost), updated_at: now() })
-          await supabase.from('materials').update({ unit_cost: Number(item.unit_cost) }).eq('id', item.material_id)
+          // Hitung moving average cost
+          const mat = await db.materials.get(item.material_id)
+          if (mat) {
+            const prevQty  = (mat as any).total_qty_purchased || 0
+            const prevCost = (mat as any).total_cost_purchased || 0
+            const newQty   = prevQty + Number(item.qty)
+            const newCost  = prevCost + (Number(item.qty) * Number(item.unit_cost))
+            const avgCost  = newQty > 0 ? newCost / newQty : Number(item.unit_cost)
+            const updates  = { unit_cost: avgCost, avg_cost: avgCost, total_qty_purchased: newQty, total_cost_purchased: newCost, updated_at: now() }
+            await db.materials.update(item.material_id, updates)
+            await supabase.from('materials').update({ unit_cost: avgCost, avg_cost: avgCost, total_qty_purchased: newQty, total_cost_purchased: newCost }).eq('id', item.material_id)
+          }
         }
       }
       toast.success('Pembelian dicatat')

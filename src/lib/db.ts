@@ -117,6 +117,28 @@ export interface MenuRoleConfig {
   menu_label: string; is_visible: boolean; sort_order: number
 }
 
+
+// ── Resep Toko (BOM Kasir) ────────────────────────────────────
+// Resep penjualan: produk menu → bahan/komponen yang terpakai saat terjual
+export interface StoreRecipe {
+  id: string
+  store_id: string
+  product_id: string   // produk menu kasir
+  product_name: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface StoreRecipeItem {
+  id: string
+  recipe_id: string
+  material_id: string  // bahan dari warehouse/production stock
+  qty_used: number     // qty per 1 pcs terjual
+  source: 'warehouse' | 'production' // ambil dari stok mana
+  notes?: string
+}
+
 export class CocoPuffDB extends Dexie {
   stores!:                    Table<Store>
   users!:                     Table<User>
@@ -152,6 +174,8 @@ export class CocoPuffDB extends Dexie {
   production_mutation_items!: Table<ProductionMutationItem>
   warehouse_expenses!:        Table<WarehouseExpense>
   menu_role_config!:          Table<MenuRoleConfig>
+  store_recipes!:             Table<StoreRecipe>
+  store_recipe_items!:        Table<StoreRecipeItem>
 
   constructor() {
     super('CocoPuffPOS')
@@ -203,13 +227,23 @@ export class CocoPuffDB extends Dexie {
       warehouse_expenses: 'id, category, expense_date, created_at',
       menu_role_config:   'id, role, menu_path, [role+menu_path]',
     })
-    // v5: tambah index po_number di purchases, payment_method di expenses
+    // v5: tambah index po_number di purchases
     this.version(5).stores({
       ...base,
       ...v3v4shared,
       warehouse_expenses: 'id, category, expense_date, created_at',
       menu_role_config:   'id, role, menu_path, [role+menu_path]',
       purchases:          'id, supplier_id, status, created_at, po_number',
+    })
+    // v6: tambah store_recipes untuk BOM kasir
+    this.version(6).stores({
+      ...base,
+      ...v3v4shared,
+      warehouse_expenses:  'id, category, expense_date, created_at',
+      menu_role_config:    'id, role, menu_path, [role+menu_path]',
+      purchases:           'id, supplier_id, status, created_at, po_number',
+      store_recipes:       'id, store_id, product_id, [store_id+product_id], is_active',
+      store_recipe_items:  'id, recipe_id, material_id',
     })
   }
 }

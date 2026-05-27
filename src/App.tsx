@@ -8,6 +8,7 @@ import LoginPage         from '@/pages/auth/LoginPage'
 import Layout            from '@/components/layout/Layout'
 import CashierPage       from '@/pages/cashier/CashierPage'
 import ProductsPage      from '@/pages/products/ProductsPage'
+import StoreRecipePage   from '@/pages/products/StoreRecipePage'
 import StockPage         from '@/pages/stock/StockPage'
 import ReportsPage       from '@/pages/reports/ReportsPage'
 import SettingsPage      from '@/pages/settings/SettingsPage'
@@ -15,7 +16,7 @@ import OwnerPage         from '@/pages/owner/OwnerPage'
 import GudangPage        from '@/pages/gudang/GudangPage'
 import ProduksiPage      from '@/pages/produksi/ProduksiPage'
 import LaporanGudangPage from '@/pages/laporan/LaporanGudangPage'
-import EndOfDayPage     from '@/pages/cashier/EndOfDayPage'
+import EndOfDayPage      from '@/pages/cashier/EndOfDayPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const user = useAuthStore(s => s.user)
@@ -44,16 +45,17 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
         <Route index element={<RoleRedirect />} />
-        <Route path="kasir" element={<CashierPage />} />
-        <Route path="produk" element={<RequireRole roles={['owner','manager']}><ProductsPage /></RequireRole>} />
-        <Route path="stok" element={<RequireRole roles={['owner','manager','gudang']}><StockPage /></RequireRole>} />
-        <Route path="laporan" element={<RequireRole roles={['owner','manager']}><ReportsPage /></RequireRole>} />
+        <Route path="kasir"         element={<CashierPage />} />
+        <Route path="produk"        element={<RequireRole roles={['owner','manager']}><ProductsPage /></RequireRole>} />
+        <Route path="resep-toko"    element={<RequireRole roles={['owner','manager']}><StoreRecipePage /></RequireRole>} />
+        <Route path="stok"          element={<RequireRole roles={['owner','manager','gudang']}><StockPage /></RequireRole>} />
+        <Route path="laporan"       element={<RequireRole roles={['owner','manager']}><ReportsPage /></RequireRole>} />
         <Route path="laporan-gudang" element={<RequireRole roles={['owner','manager','gudang']}><LaporanGudangPage /></RequireRole>} />
-        <Route path="pengaturan" element={<RequireRole roles={['owner','manager']}><SettingsPage /></RequireRole>} />
-        <Route path="owner" element={<RequireRole roles={['owner']}><OwnerPage /></RequireRole>} />
-        <Route path="gudang" element={<RequireRole roles={['owner','manager','gudang']}><GudangPage /></RequireRole>} />
-        <Route path="produksi" element={<RequireRole roles={['owner','manager','produksi']}><ProduksiPage /></RequireRole>} />
-        <Route path="tutup-toko" element={<RequireRole roles={['owner','manager','kasir']}><EndOfDayPage /></RequireRole>} />
+        <Route path="pengaturan"    element={<RequireRole roles={['owner','manager']}><SettingsPage /></RequireRole>} />
+        <Route path="owner"         element={<RequireRole roles={['owner']}><OwnerPage /></RequireRole>} />
+        <Route path="gudang"        element={<RequireRole roles={['owner','manager','gudang']}><GudangPage /></RequireRole>} />
+        <Route path="produksi"      element={<RequireRole roles={['owner','manager','produksi']}><ProduksiPage /></RequireRole>} />
+        <Route path="tutup-toko"    element={<RequireRole roles={['owner','manager','kasir']}><EndOfDayPage /></RequireRole>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

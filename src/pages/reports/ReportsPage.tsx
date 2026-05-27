@@ -1,293 +1,213 @@
 // src/pages/reports/ReportsPage.tsx
-import { useState } from 'react'
+// Laporan simple — ringkasan harian, per produk, per kasir
+import { useState, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/lib/db'
-import { supabase } from '@/lib/supabase'
-import { formatRupiah, formatDate } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth'
-import { RefreshCw, Printer } from 'lucide-react'
-import { PrintReceipt } from '@/components/PrintReceipt'
-import toast from 'react-hot-toast'
+import { formatRupiah } from '@/lib/utils'
+import { TrendingUp, ShoppingBag, Users, Calendar } from 'lucide-react'
 
-type Tab = 'ringkasan' | 'transaksi' | 'produk' | 'kasir'
+type Period = 'hari' | 'minggu' | 'bulan'
 
 export default function ReportsPage() {
   const { user } = useAuthStore()
   const STORE_ID = user?.store_id || ''
-  const today    = new Date().toISOString().slice(0, 10)
-  const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
+  const [period, setPeriod] = useState<Period>('hari')
 
-  const [tab, setTab]           = useState<Tab>('ringkasan')
-  const [dateFrom, setFrom]     = useState(firstDay)
-  const [dateTo, setTo]         = useState(today)
-  const [syncing, setSyncing]   = useState(false)
-  const [printData, setPrintData] = useState<any>(null)
-
-  async function syncData() {
-    setSyncing(true)
-    try {
-      const from = dateFrom + 'T00:00:00.000Z'
-      const to   = dateTo   + 'T23:59:59.999Z'
-      const { data: txs } = await supabase.from('transactions')
-        .select('*').eq('store_id', STORE_ID)
-        .gte('created_at', from).lte('created_at', to)
-      if (txs?.length) await db.transactions.bulkPut(txs)
-      const { data: items } = await supabase.from('transaction_items').select('*')
-      if (items?.length) await db.transaction_items.bulkPut(items)
-      toast.success('Data diperbarui')
-    } catch { toast.error('Gagal sync') }
-    finally { setSyncing(false) }
-  }
-
-  const from = new Date(dateFrom + 'T00:00:00').toISOString()
-  const to   = new Date(dateTo   + 'T23:59:59').toISOString()
+  const dateRange = useMemo(() => {
+    const now = new Date()
+    const end = new Date(now)
+    end.setHours(23, 59, 59, 999)
+    const start = new Date(now)
+    if (period === 'hari')   start.setHours(0, 0, 0, 0)
+    if (period === 'minggu') { start.setDate(now.getDate() - 6); start.setHours(0,0,0,0) }
+    if (period === 'bulan')  { start.setDate(1); start.setHours(0,0,0,0) }
+    return { start: start.toISOString(), end: end.toISOString() }
+  }, [period])
 
   const transactions = useLiveQuery(async () => {
-    return db.transactions
+    const txs = await db.transactions
       .where('store_id').equals(STORE_ID)
-      .filter(t => t.created_at >= from && t.created_at <= to)
-      .reverse().sortBy('created_at')
-  }, [dateFrom, dateTo, STORE_ID])
-
-  const completed = transactions?.filter(t => t.status === 'completed') || []
-  const totalOmzet    = completed.reduce((s, t) => s + t.total, 0)
-  const totalDiscount = completed.reduce((s, t) => s + (t.discount || 0), 0)
-  const totalCash     = completed.filter(t => t.payment_method === 'cash').reduce((s, t) => s + t.total, 0)
-  const totalQris     = completed.filter(t => t.payment_method === 'qris').reduce((s, t) => s + t.total, 0)
-  const totalTransfer = completed.filter(t => t.payment_method === 'transfer').reduce((s, t) => s + t.total, 0)
-  const totalVoid     = transactions?.filter(t => t.status === 'voided').length || 0
-
-  // Per produk
-  const perProduk = useLiveQuery(async () => {
-    const txIds = new Set(completed.map(t => t.id))
+      .filter(t =>
+        t.status === 'completed' &&
+        t.created_at >= dateRange.start &&
+        t.created_at <= dateRange.end
+      ).toArray()
     const items = await db.transaction_items.toArray()
-    const filtered = items.filter(i => txIds.has(i.transaction_id))
-    const map: Record<string, { name: string; qty: number; total: number }> = {}
-    for (const i of filtered) {
-      if (!map[i.product_id]) map[i.product_id] = { name: i.product_name, qty: 0, total: 0 }
-      map[i.product_id].qty   += i.qty_eceran || 1
-      map[i.product_id].total += i.subtotal
-    }
-    return Object.values(map).sort((a, b) => b.total - a.total)
-  }, [transactions])
-
-  // Per kasir
-  const perKasir = useLiveQuery(async () => {
     const users = await db.users.toArray()
     const userMap = Object.fromEntries(users.map(u => [u.id, u]))
-    const map: Record<string, { name: string; trx: number; total: number }> = {}
-    for (const t of completed) {
-      const key = t.cashier_id
-      const name = userMap[key]?.name || key
-      if (!map[key]) map[key] = { name, trx: 0, total: 0 }
-      map[key].trx   += 1
-      map[key].total += t.total
+    return txs.map(t => ({
+      ...t,
+      items: items.filter(i => i.transaction_id === t.id),
+      cashier: userMap[t.cashier_id],
+    }))
+  }, [STORE_ID, dateRange])
+
+  const stats = useMemo(() => {
+    if (!transactions) return null
+    const total     = transactions.reduce((s, t) => s + t.total, 0)
+    const count     = transactions.length
+    const avgTrx    = count > 0 ? total / count : 0
+    const byMethod  = transactions.reduce((acc, t) => {
+      acc[t.payment_method] = (acc[t.payment_method] || 0) + t.total
+      return acc
+    }, {} as Record<string, number>)
+
+    // Per produk
+    const prodMap: Record<string, { name: string; qty: number; revenue: number }> = {}
+    for (const t of transactions) {
+      for (const i of t.items) {
+        if (!prodMap[i.product_id]) prodMap[i.product_id] = { name: i.product_name, qty: 0, revenue: 0 }
+        prodMap[i.product_id].qty     += i.qty_eceran + (i.qty_dus || 0)
+        prodMap[i.product_id].revenue += i.subtotal
+      }
     }
-    return Object.values(map).sort((a, b) => b.total - a.total)
+    const topProducts = Object.values(prodMap).sort((a, b) => b.revenue - a.revenue).slice(0, 10)
+
+    // Per kasir
+    const kasirMap: Record<string, { name: string; trx: number; revenue: number }> = {}
+    for (const t of transactions) {
+      const id = t.cashier_id
+      if (!kasirMap[id]) kasirMap[id] = { name: t.cashier?.name || id, trx: 0, revenue: 0 }
+      kasirMap[id].trx++
+      kasirMap[id].revenue += t.total
+    }
+    const byCashier = Object.values(kasirMap).sort((a, b) => b.revenue - a.revenue)
+
+    return { total, count, avgTrx, byMethod, topProducts, byCashier }
   }, [transactions])
 
-  async function handlePrint(tx: any) {
-    const items = await db.transaction_items
-      .where('transaction_id').equals(tx.id).toArray()
-    const users = await db.users.toArray()
-    const stores = await db.stores.toArray()
-    const userMap = Object.fromEntries(users.map(u => [u.id, u]))
-    const storeMap = Object.fromEntries(stores.map(s => [s.id, s]))
-    setPrintData({
-      receipt_no:     tx.receipt_no,
-      store_name:     storeMap[tx.store_id]?.name || 'Coco Puff POS',
-      cashier_name:   userMap[tx.cashier_id]?.name || '-',
-      created_at:     tx.created_at,
-      items:          items,
-      subtotal:       tx.subtotal,
-      discount:       tx.discount || 0,
-      total:          tx.total,
-      payment_method: tx.payment_method,
-      cash_paid:      tx.cash_paid || tx.total,
-      change_given:   tx.change_given || 0,
-    })
-  }
-
-  async function handleVoid(txId: string) {
-    if (!['owner', 'manager'].includes(user?.role || '')) return toast.error('Tidak ada akses void')
-    const reason = prompt('Alasan void:')
-    if (!reason) return
-    const updated = { status: 'voided' as const, void_reason: reason, voided_by: user!.id, voided_at: new Date().toISOString() }
-    await db.transactions.update(txId, updated)
-    await supabase.from('transactions').update(updated).eq('id', txId)
-    toast.success('Transaksi di-void')
-  }
-
-  const tabs: { id: Tab; label: string }[] = [
-    { id: 'ringkasan',  label: 'Ringkasan' },
-    { id: 'transaksi',  label: 'Transaksi' },
-    { id: 'produk',     label: 'Per Produk' },
-    { id: 'kasir',      label: 'Per Kasir' },
-  ]
+  const periodLabel = { hari: 'Hari Ini', minggu: '7 Hari Terakhir', bulan: 'Bulan Ini' }
 
   return (
-    <div className="flex flex-col h-full bg-white">
-      <div className="px-4 pt-4 pb-0 flex items-center justify-between flex-shrink-0">
-        <h1 className="text-lg font-semibold text-gray-900">Laporan Penjualan</h1>
-        <button onClick={syncData} disabled={syncing} className="p-2 rounded-full text-gray-400">
-          <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
-        </button>
-      </div>
-
-      {/* Filter tanggal */}
-      <div className="px-4 mt-3 grid grid-cols-2 gap-2 flex-shrink-0">
-        <div>
-          <p className="text-xs text-gray-400 mb-1">Dari</p>
-          <input className="input text-sm" type="date" value={dateFrom} onChange={e => setFrom(e.target.value)} />
-        </div>
-        <div>
-          <p className="text-xs text-gray-400 mb-1">Sampai</p>
-          <input className="input text-sm" type="date" value={dateTo} onChange={e => setTo(e.target.value)} />
+    <div className="flex flex-col h-full bg-gray-50">
+      {/* Header */}
+      <div className="bg-white px-4 pt-4 pb-3 flex-shrink-0">
+        <h1 className="text-lg font-semibold text-gray-900 mb-3">Laporan</h1>
+        <div className="flex gap-2">
+          {(['hari','minggu','bulan'] as Period[]).map(p => (
+            <button key={p} onClick={() => setPeriod(p)}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                period === p ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'
+              }`}>{periodLabel[p]}</button>
+          ))}
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="px-4 mt-3 flex gap-0 border-b border-gray-100 flex-shrink-0 overflow-x-auto">
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            className={`pb-2.5 mr-5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-              tab === t.id ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'
-            }`}>{t.label}</button>
-        ))}
-      </div>
-
-      <div className="flex-1 overflow-auto bg-gray-50">
-        <div className="p-4 space-y-3">
-
-          {/* ── RINGKASAN ── */}
-          {tab === 'ringkasan' && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-white rounded-xl border border-gray-100 p-4">
-                  <p className="text-xs text-gray-400 mb-1">Total Omzet</p>
-                  <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalOmzet)}</p>
+      <div className="flex-1 overflow-auto p-4 space-y-4">
+        {!stats ? (
+          <div className="py-16 text-center text-sm text-gray-400">Memuat...</div>
+        ) : stats.count === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-100 py-16 text-center">
+            <p className="text-sm text-gray-400">Belum ada transaksi {periodLabel[period].toLowerCase()}</p>
+          </div>
+        ) : (
+          <>
+            {/* Summary cards */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-white rounded-xl border border-gray-100 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <TrendingUp size={16} className="text-green-500" />
+                  <p className="text-xs text-gray-400">Total Omzet</p>
                 </div>
-                <div className="bg-white rounded-xl border border-gray-100 p-4">
-                  <p className="text-xs text-gray-400 mb-1">Transaksi</p>
-                  <p className="text-xl font-semibold text-gray-900">{completed.length}</p>
-                  {totalVoid > 0 && <p className="text-xs text-red-400">{totalVoid} void</p>}
-                </div>
-                <div className="bg-white rounded-xl border border-gray-100 p-4">
-                  <p className="text-xs text-gray-400 mb-1">Rata-rata / Transaksi</p>
-                  <p className="text-lg font-semibold text-gray-900">
-                    {formatRupiah(completed.length > 0 ? totalOmzet / completed.length : 0)}
-                  </p>
-                </div>
-                <div className="bg-white rounded-xl border border-gray-100 p-4">
-                  <p className="text-xs text-gray-400 mb-1">Total Diskon</p>
-                  <p className="text-lg font-semibold text-gray-900">{formatRupiah(totalDiscount)}</p>
-                </div>
+                <p className="text-xl font-bold text-gray-900">{formatRupiah(stats.total)}</p>
               </div>
+              <div className="bg-white rounded-xl border border-gray-100 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <ShoppingBag size={16} className="text-blue-500" />
+                  <p className="text-xs text-gray-400">Total Transaksi</p>
+                </div>
+                <p className="text-xl font-bold text-gray-900">{stats.count}</p>
+                <p className="text-xs text-gray-400 mt-0.5">Rata-rata {formatRupiah(stats.avgTrx)}</p>
+              </div>
+            </div>
 
-              {/* Metode bayar */}
+            {/* Metode bayar */}
+            <div className="bg-white rounded-xl border border-gray-100 p-4">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Metode Pembayaran</p>
+              <div className="space-y-2">
+                {Object.entries(stats.byMethod).map(([method, amount]) => {
+                  const pct = stats.total > 0 ? (amount / stats.total) * 100 : 0
+                  const label = method === 'cash' ? 'Tunai' : method === 'qris' ? 'QRIS' : 'Transfer'
+                  return (
+                    <div key={method}>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="text-gray-700">{label}</span>
+                        <span className="font-medium text-gray-900">{formatRupiah(amount)}</span>
+                      </div>
+                      <div className="w-full bg-gray-100 rounded-full h-1.5">
+                        <div className="bg-gray-900 h-1.5 rounded-full" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Top produk */}
+            {stats.topProducts.length > 0 && (
               <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                 <div className="px-4 py-3 border-b border-gray-50">
-                  <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Metode Pembayaran</p>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Produk Terlaris</p>
                 </div>
-                {[
-                  { label: 'Tunai',    value: totalCash },
-                  { label: 'QRIS',     value: totalQris },
-                  { label: 'Transfer', value: totalTransfer },
-                ].map((m, i) => (
-                  <div key={i} className={`px-4 py-3 flex justify-between ${i !== 0 ? 'border-t border-gray-50' : ''}`}>
-                    <p className="text-sm text-gray-700">{m.label}</p>
-                    <p className="text-sm font-medium text-gray-900">{formatRupiah(m.value)}</p>
+                {stats.topProducts.map((p, idx) => (
+                  <div key={p.name} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                    <span className="text-xs text-gray-400 w-5 flex-shrink-0">{idx + 1}</span>
+                    <p className="flex-1 text-sm text-gray-800 truncate ml-2">{p.name}</p>
+                    <div className="text-right">
+                      <p className="text-sm font-medium text-gray-900">{formatRupiah(p.revenue)}</p>
+                      <p className="text-xs text-gray-400">{p.qty} pcs</p>
+                    </div>
                   </div>
                 ))}
               </div>
-            </>
-          )}
+            )}
 
-          {/* ── TRANSAKSI ── */}
-          {tab === 'transaksi' && (
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              {transactions?.map((tx, idx) => (
-                <div key={tx.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{tx.receipt_no}</p>
-                      <p className="text-xs text-gray-400">{formatDate(tx.created_at)}</p>
-                      <p className="text-xs text-gray-400 capitalize">{tx.payment_method}</p>
+            {/* Per kasir */}
+            {stats.byCashier.length > 0 && (
+              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-50 flex items-center gap-2">
+                  <Users size={14} className="text-gray-400" />
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Per Kasir</p>
+                </div>
+                {stats.byCashier.map((k, idx) => (
+                  <div key={k.name} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                    <div className="w-7 h-7 bg-gray-100 rounded-full flex items-center justify-center text-xs font-semibold text-gray-600 flex-shrink-0">
+                      {k.name[0]?.toUpperCase()}
                     </div>
+                    <p className="flex-1 text-sm text-gray-800 ml-2.5">{k.name}</p>
                     <div className="text-right">
-                      <p className="text-sm font-semibold text-gray-900">{formatRupiah(tx.total)}</p>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        tx.status === 'voided' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'
-                      }`}>{tx.status === 'voided' ? 'Void' : 'Selesai'}</span>
+                      <p className="text-sm font-medium text-gray-900">{formatRupiah(k.revenue)}</p>
+                      <p className="text-xs text-gray-400">{k.trx} transaksi</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 mt-1.5">
-                    <button onClick={() => handlePrint(tx)}
-                      className="text-xs text-gray-400 flex items-center gap-1">
-                      <Printer size={11} /> Cetak
-                    </button>
-                    {tx.status === 'completed' && ['owner','manager'].includes(user?.role || '') && (
-                      <button onClick={() => handleVoid(tx.id)} className="text-xs text-red-400 underline">
-                        Void
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {transactions?.length === 0 && (
-                <div className="py-12 text-center text-sm text-gray-400">Tidak ada transaksi</div>
-              )}
-            </div>
-          )}
-
-          {/* ── PER PRODUK ── */}
-          {tab === 'produk' && (
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-50">
-                <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Produk Terlaris</p>
+                ))}
               </div>
-              {perProduk?.map((p, idx) => (
-                <div key={idx} className={`px-4 py-3 flex items-center justify-between ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{p.name}</p>
-                    <p className="text-xs text-gray-400">{p.qty} pcs terjual</p>
-                  </div>
-                  <p className="text-sm font-semibold text-gray-900">{formatRupiah(p.total)}</p>
-                </div>
-              ))}
-              {perProduk?.length === 0 && (
-                <div className="py-12 text-center text-sm text-gray-400">Tidak ada data produk</div>
-              )}
-            </div>
-          )}
+            )}
 
-          {/* ── PER KASIR ── */}
-          {tab === 'kasir' && (
+            {/* List transaksi */}
             <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-50">
-                <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Performa Kasir</p>
+              <div className="px-4 py-3 border-b border-gray-50 flex items-center gap-2">
+                <Calendar size={14} className="text-gray-400" />
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Riwayat Transaksi</p>
               </div>
-              {perKasir?.map((k, idx) => (
-                <div key={idx} className={`px-4 py-3 flex items-center justify-between ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{k.name}</p>
-                    <p className="text-xs text-gray-400">{k.trx} transaksi</p>
+              {transactions?.slice(0, 50).map((t, idx) => (
+                <div key={t.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 font-mono">{t.receipt_no}</p>
+                    <p className="text-xs text-gray-400">
+                      {new Date(t.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                      {' · '}{t.cashier?.name || '-'}
+                      {' · '}{t.payment_method === 'cash' ? 'Tunai' : t.payment_method.toUpperCase()}
+                    </p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-gray-900">{formatRupiah(k.total)}</p>
-                    <p className="text-xs text-gray-400">{formatRupiah(k.trx > 0 ? k.total / k.trx : 0)}/trx</p>
-                  </div>
+                  <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(t.total)}</p>
                 </div>
               ))}
-              {perKasir?.length === 0 && (
-                <div className="py-12 text-center text-sm text-gray-400">Tidak ada data kasir</div>
-              )}
             </div>
-          )}
-
-        </div>
+          </>
+        )}
       </div>
-      {printData && <PrintReceipt data={printData} onClose={() => setPrintData(null)} />}
     </div>
   )
 }

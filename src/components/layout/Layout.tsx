@@ -25,6 +25,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   '/owner':          LayoutDashboard,
   '/pengaturan':     Settings,
   '/tutup-toko':     DoorClosed,
+  '/resep-toko':     FlaskConical,
 }
 
 // Default menu per role — fallback kalau menu_role_config belum di-set di DB
@@ -38,6 +39,7 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
     { path: '/laporan',        label: 'Laporan' },
     { path: '/laporan-gudang', label: 'Lap. Gudang' },
     { path: '/pengaturan',     label: 'Setting' },
+    { path: '/resep-toko',     label: 'Resep Toko' },
     { path: '/tutup-toko',     label: 'Tutup Toko' },
   ],
   // Manager: Kasir · Gudang · Produksi · Laporan · [Lainnya: Setting, Tutup Toko]
@@ -46,6 +48,7 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
     { path: '/gudang',         label: 'Gudang' },
     { path: '/produksi',       label: 'Produksi' },
     { path: '/laporan',        label: 'Laporan' },
+    { path: '/resep-toko',     label: 'Resep Toko' },
     { path: '/pengaturan',     label: 'Setting' },
     { path: '/tutup-toko',     label: 'Tutup Toko' },
   ],
@@ -91,10 +94,19 @@ export default function Layout() {
   }, [user?.role])
 
   // Pakai DB config kalau ada, fallback ke default
+  // DEFAULT_MENUS jadi master — DB hanya filter visibility per menu
   const allMenus: { menu_path: string; menu_label: string }[] = (() => {
-    if (dbMenus && dbMenus.length > 0) return dbMenus
     const defaults = DEFAULT_MENUS[user?.role || ''] || []
-    return defaults.map(d => ({ menu_path: d.path, menu_label: d.label }))
+    if (!dbMenus || dbMenus.length === 0) {
+      // Belum ada config di DB — pakai semua default
+      return defaults.map(d => ({ menu_path: d.path, menu_label: d.label }))
+    }
+    // Ada config di DB — filter: tampilkan default yang is_visible=true di DB
+    // Menu yang tidak ada di DB config → tetap tampil (default on)
+    const dbMap = Object.fromEntries(dbMenus.map(m => [m.menu_path, m.is_visible]))
+    return defaults
+      .filter(d => dbMap[d.path] !== false) // false = explicitly hidden
+      .map(d => ({ menu_path: d.path, menu_label: d.label }))
   })()
 
   const navMenus  = allMenus.slice(0, MAX_NAV)

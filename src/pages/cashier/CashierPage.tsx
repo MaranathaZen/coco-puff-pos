@@ -165,6 +165,50 @@ export default function CashierPage() {
   const grandTotal     = total() + totalPakets
   const totalQtyPilih  = paketPilihan.reduce((s, p) => s + p.qty, 0)
 
+
+  // ── Kurangi stok bahan berdasarkan resep toko ───────────────
+  async function deductStockFromRecipes(txItems: any[], storeId: string) {
+    try {
+      // Ambil semua resep aktif untuk toko ini
+      const recipes = await db.store_recipes
+        .where('store_id').equals(storeId)
+        .filter(r => r.is_active)
+        .toArray()
+      const recipeItems = await db.store_recipe_items.toArray()
+
+      for (const txItem of txItems) {
+        const recipe = recipes.find(r => r.product_id === txItem.product_id)
+        if (!recipe) continue
+
+        const riList = recipeItems.filter(ri => ri.recipe_id === recipe.id)
+        const totalQty = txItem.qty_eceran + (txItem.qty_dus || 0)
+
+        for (const ri of riList) {
+          const qtyToDeduct = ri.qty_used * totalQty
+          if (ri.source === 'warehouse') {
+            const ws = await db.warehouse_stock.where('material_id').equals(ri.material_id).first()
+            if (ws) {
+              const newQty = Math.max(0, ws.qty_on_hand - qtyToDeduct)
+              await db.warehouse_stock.update(ws.id, { qty_on_hand: newQty, last_updated: now() })
+              // Sync ke Supabase async (tidak block checkout)
+              supabase.from('warehouse_stock').update({ qty_on_hand: newQty }).eq('id', ws.id).then(() => {})
+            }
+          } else {
+            const ps = await db.production_stock.where('material_id').equals(ri.material_id).first()
+            if (ps) {
+              const newQty = Math.max(0, ps.qty_on_hand - qtyToDeduct)
+              await db.production_stock.update(ps.id, { qty_on_hand: newQty, last_updated: now() })
+              supabase.from('production_stock').update({ qty_on_hand: newQty }).eq('id', ps.id).then(() => {})
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Jangan block checkout jika deduct gagal
+      console.warn('[BOM] Gagal kurangi stok:', e)
+    }
+  }
+
   // ── Checkout ────────────────────────────────────────────────
   async function handleCheckout() {
     if (items.length === 0 && cartPakets.length === 0) return toast.error('Keranjang kosong')
@@ -212,6 +256,9 @@ export default function CashierPage() {
       for (const item of [...txItems, ...txPaketItems]) {
         await addToSyncQueue('transaction_items', item.id, 'insert', item, STORE_ID)
       }
+      // Kurangi stok bahan berdasarkan resep toko (BOM)
+      await deductStockFromRecipes([...txItems, ...txPaketItems], STORE_ID)
+
       clearCart(); setCartPakets([]); setShowCheckout(false); setCashPaid('')
       toast.success(`Transaksi ${receiptNo} berhasil!`)
     } catch (e) {

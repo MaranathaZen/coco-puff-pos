@@ -12,7 +12,6 @@ import type { Supplier, Partner, MenuRoleConfig } from '@/lib/db'
 
 type Tab = 'users' | 'supplier' | 'mitra' | 'menu' | 'toko' | 'password'
 
-// Semua menu yang tersedia di sistem
 const ALL_MENUS = [
   { path: '/kasir',         label: 'Kasir' },
   { path: '/produk',        label: 'Produk' },
@@ -76,11 +75,9 @@ export default function SettingsPage() {
 function MenuConfigTab() {
   const [selectedRole, setSelectedRole] = useState('kasir')
   const [saving, setSaving] = useState(false)
-  // State lokal untuk visibility — tidak bergantung pada DB re-fetch
   const [visibilityMap, setVisibilityMap] = useState<Record<string, boolean>>({})
   const [loaded, setLoaded] = useState(false)
 
-  // Load config saat role berubah
   async function loadConfigs(role: string) {
     setLoaded(false)
     try {
@@ -93,7 +90,6 @@ function MenuConfigTab() {
     } finally { setLoaded(true) }
   }
 
-  // Load saat pertama kali dan saat role berubah
   useState(() => { loadConfigs(selectedRole) })
 
   function handleRoleChange(role: string) {
@@ -104,15 +100,11 @@ function MenuConfigTab() {
   async function toggleMenu(path: string, label: string) {
     const currentVisible = visibilityMap[path] ?? false
     const newVisible = !currentVisible
-
-    // Update state lokal dulu (optimistic)
     setVisibilityMap(prev => ({ ...prev, [path]: newVisible }))
-
     setSaving(true)
     try {
       const existing = await db.menu_role_config
         .where('[role+menu_path]').equals([selectedRole, path]).first()
-
       if (existing) {
         const updated = { ...existing, is_visible: newVisible }
         await db.menu_role_config.put(updated)
@@ -128,7 +120,6 @@ function MenuConfigTab() {
         await supabase.from('menu_role_config').upsert(newConfig)
       }
     } catch {
-      // Rollback jika gagal
       setVisibilityMap(prev => ({ ...prev, [path]: currentVisible }))
       toast.error('Gagal menyimpan')
     } finally { setSaving(false) }
@@ -137,7 +128,6 @@ function MenuConfigTab() {
   return (
     <div className="p-4 space-y-3">
       <p className="text-xs text-gray-400">Pilih role lalu centang menu yang ingin ditampilkan</p>
-
       <div className="flex flex-wrap gap-2">
         {ROLES.map(r => (
           <button key={r} onClick={() => handleRoleChange(r)}
@@ -146,7 +136,6 @@ function MenuConfigTab() {
             }`}>{r}</button>
         ))}
       </div>
-
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {!loaded ? (
           <div className="py-8 text-center text-sm text-gray-400">Memuat...</div>
@@ -155,9 +144,7 @@ function MenuConfigTab() {
           return (
             <button key={menu.path} onClick={() => toggleMenu(menu.path, menu.label)}
               disabled={saving}
-              className={`w-full flex items-center px-4 py-3 text-left active:bg-gray-50 ${
-                idx !== 0 ? 'border-t border-gray-50' : ''
-              }`}>
+              className={`w-full flex items-center px-4 py-3 text-left active:bg-gray-50 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
               <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center mr-3 flex-shrink-0 transition-colors ${
                 visible ? 'bg-gray-900 border-gray-900' : 'border-gray-300'
               }`}>
@@ -169,7 +156,6 @@ function MenuConfigTab() {
           )
         })}
       </div>
-
       <p className="text-xs text-gray-400 text-center">Perubahan aktif saat user login ulang</p>
     </div>
   )
@@ -195,7 +181,6 @@ function UsersTab({ currentUser }: { currentUser: User }) {
           </button>
         )}
       </div>
-
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {users?.map((u, idx) => (
           <button key={u.id} onClick={() => currentUser.role === 'owner' && u.id !== currentUser.id && (setEdit(u), setShowForm(true))}
@@ -215,7 +200,6 @@ function UsersTab({ currentUser }: { currentUser: User }) {
         ))}
         {users?.length === 0 && <div className="py-8 text-center text-sm text-gray-400">Belum ada user</div>}
       </div>
-
       {showForm && <UserForm user={editUser} storeId={currentUser.store_id} onClose={() => { setShowForm(false); setEdit(null) }} />}
     </div>
   )
@@ -225,7 +209,6 @@ function UsersTab({ currentUser }: { currentUser: User }) {
 function SupplierTab() {
   const [showForm, setShowForm] = useState(false)
   const [editItem, setEditItem] = useState<Supplier | null>(null)
-
   const suppliers = useLiveQuery(() => db.suppliers.toArray(), [])
 
   return (
@@ -236,7 +219,6 @@ function SupplierTab() {
           <Plus size={14} /> Tambah Supplier
         </button>
       </div>
-
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {suppliers?.map((s, idx) => (
           <button key={s.id} onClick={() => { setEditItem(s); setShowForm(true) }}
@@ -251,7 +233,6 @@ function SupplierTab() {
         ))}
         {suppliers?.length === 0 && <div className="py-8 text-center text-sm text-gray-400">Belum ada supplier</div>}
       </div>
-
       {showForm && <SupplierForm supplier={editItem} onClose={() => { setShowForm(false); setEditItem(null) }} />}
     </div>
   )
@@ -261,7 +242,6 @@ function SupplierTab() {
 function MitraTab() {
   const [showForm, setShowForm] = useState(false)
   const [editItem, setEditItem] = useState<Partner | null>(null)
-
   const partners = useLiveQuery(() => db.partners.toArray(), [])
 
   return (
@@ -272,7 +252,6 @@ function MitraTab() {
           <Plus size={14} /> Tambah Franchise
         </button>
       </div>
-
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {partners?.map((p, idx) => (
           <button key={p.id} onClick={() => { setEditItem(p); setShowForm(true) }}
@@ -287,7 +266,6 @@ function MitraTab() {
         ))}
         {partners?.length === 0 && <div className="py-8 text-center text-sm text-gray-400">Belum ada franchise</div>}
       </div>
-
       {showForm && <MitraForm partner={editItem} onClose={() => { setShowForm(false); setEditItem(null) }} />}
     </div>
   )
@@ -295,6 +273,7 @@ function MitraTab() {
 
 // ── PASSWORD TAB ──────────────────────────────────────────────
 function ChangePasswordTab({ userId, storeId }: { userId: string; storeId: string }) {
+  const { forceLogout } = useAuthStore()
   const [oldPass, setOld]   = useState('')
   const [newPass, setNew]   = useState('')
   const [saving, setSaving] = useState(false)
@@ -312,8 +291,10 @@ function ChangePasswordTab({ userId, storeId }: { userId: string; storeId: strin
       await db.users.update(userId, { password_hash: newHash })
       await supabase.from('users').update({ password_hash: newHash }).eq('id', userId)
       await addToSyncQueue('users', userId, 'update', { id: userId, password_hash: newHash }, storeId)
-      toast.success('Password berhasil diubah')
+      toast.success('Password berhasil diubah. Silakan login ulang.')
       setOld(''); setNew('')
+      // Auto logout setelah 1.5 detik agar toast sempat tampil
+      forceLogout()
     } finally { setSaving(false) }
   }
 
@@ -335,10 +316,10 @@ function ChangePasswordTab({ userId, storeId }: { userId: string; storeId: strin
         className="w-full mt-3 py-3 bg-gray-900 text-white rounded-xl text-sm font-medium disabled:opacity-50">
         {saving ? 'Menyimpan...' : 'Ganti Password'}
       </button>
+      <p className="text-xs text-gray-400 text-center mt-2">Setelah disimpan, Anda akan logout otomatis</p>
     </div>
   )
 }
-
 
 // ── TOKO TAB ──────────────────────────────────────────────────
 function TokoTab() {
@@ -373,7 +354,6 @@ function TokoTab() {
           </button>
         ))}
       </div>
-
       {showForm && editStore && (
         <TokoForm store={editStore} onClose={() => { setForm(false); setEdit(null) }}
           onSaved={(updated) => { setStores(prev => prev.map(s => s.id === updated.id ? updated : s)); setForm(false) }} />
@@ -387,16 +367,26 @@ function TokoForm({ store, onClose, onSaved }: { store: any; onClose: () => void
   const [city, setCity]     = useState(store.city || '')
   const [phone, setPhone]   = useState(store.phone || '')
   const [address, setAddr]  = useState(store.address || '')
+  const [accessCode, setAccessCode] = useState(store.access_code || '')
   const [isActive, setAct]  = useState(store.is_active ?? true)
   const [saving, setSaving] = useState(false)
 
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama toko wajib diisi')
+    if (!accessCode.trim()) return toast.error('Kode toko wajib diisi')
     setSaving(true)
     try {
-      const updated = { ...store, name: name.trim(), city, phone: phone || null, address: address || null, is_active: isActive }
+      const updated = {
+        ...store, name: name.trim(), city, phone: phone || null,
+        address: address || null, is_active: isActive,
+        access_code: accessCode.trim().toUpperCase(),
+      }
       await db.stores.put(updated)
-      await supabase.from('stores').update({ name: updated.name, city, phone: updated.phone, address: updated.address, is_active: isActive }).eq('id', store.id)
+      await supabase.from('stores').update({
+        name: updated.name, city, phone: updated.phone,
+        address: updated.address, is_active: isActive,
+        access_code: updated.access_code,
+      }).eq('id', store.id)
       toast.success('Toko diupdate')
       onSaved(updated)
     } finally { setSaving(false) }
@@ -405,6 +395,13 @@ function TokoForm({ store, onClose, onSaved }: { store: any; onClose: () => void
   return (
     <Modal title="Edit Toko" onClose={onClose}>
       <div><Label>Nama Toko</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
+      <div>
+        <Label>Kode Toko</Label>
+        <input className="input uppercase tracking-widest font-bold" value={accessCode}
+          onChange={e => setAccessCode(e.target.value.toUpperCase())}
+          placeholder="Contoh: MLNG01" maxLength={8} />
+        <p className="text-xs text-gray-400 mt-1">Kode ini digunakan kasir untuk masuk ke halaman login toko</p>
+      </div>
       <div><Label>Kota</Label><input className="input" value={city} onChange={e => setCity(e.target.value)} placeholder="Surabaya" /></div>
       <div><Label>No. Telepon</Label><input className="input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="031-xxxx" /></div>
       <div><Label>Alamat</Label><input className="input" value={address} onChange={e => setAddr(e.target.value)} placeholder="Opsional" /></div>

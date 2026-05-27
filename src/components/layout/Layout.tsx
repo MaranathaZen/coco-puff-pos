@@ -50,8 +50,7 @@ export default function Layout() {
     if (confirm('Yakin ingin keluar?')) { logout(); navigate('/login') }
   }
 
-  const storeName = user?.role === 'owner' ? APP_NAME : (store?.name || APP_NAME)
-  const roleLabel = user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : ''
+  const storeName = store?.name || APP_NAME
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -59,7 +58,7 @@ export default function Layout() {
       <header className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
         <div>
           <h1 className="font-semibold text-gray-800 text-sm leading-tight">{storeName}</h1>
-          <p className="text-xs text-gray-500">{roleLabel}</p>
+          <p className="text-xs text-gray-500">{user?.role === 'owner' ? 'Owner' : `${user?.name} · ${roleLabel}`}</p>
         </div>
         <div className="flex items-center gap-3">
           {online ? <Wifi size={16} className="text-green-500" /> : <WifiOff size={16} className="text-gray-400" />}

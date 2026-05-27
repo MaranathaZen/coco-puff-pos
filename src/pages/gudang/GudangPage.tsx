@@ -1,5 +1,5 @@
 // src/pages/gudang/GudangPage.tsx
-import { useState } from 'react'
+import { useState, useEffect, createContext, useContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
@@ -10,6 +10,12 @@ import toast from 'react-hot-toast'
 import type { Material, WarehouseStock, Purchase, WarehouseMutation, WarehouseMutationItem, WarehouseExpense } from '@/lib/db'
 
 type Tab = 'stok' | 'pembelian' | 'mutasi' | 'biaya'
+
+// Context untuk toolbar actions dari child tab ke parent
+import { createContext, useContext } from 'react'
+const ToolbarCtx = createContext<{
+  setStokActions: (actions: React.ReactNode) => void
+}>({ setStokActions: () => {} })
 
 const SATUAN = ['kg','gram','ons','liter','ml','butir','pcs','buah','dus','karton','pack','sachet','roll','lembar','loyang','batch']
 
@@ -33,10 +39,14 @@ async function generatePONumber(): Promise<string> {
   return `${prefix}${seq}`
 }
 
+// Context untuk register toolbar actions dari StokTab ke parent
+const StokToolbarCtx = createContext<(node: React.ReactNode) => void>(() => {})
+
 export default function GudangPage() {
   const { user } = useAuthStore()
   const [tab, setTab] = useState<Tab>('stok')
   const [syncing, setSyncing] = useState(false)
+  const [stokActions, setStokActions] = useState<React.ReactNode>(null)
 
   async function syncData() {
     setSyncing(true)
@@ -73,10 +83,13 @@ export default function GudangPage() {
     <div className="flex flex-col h-full bg-white">
       <div className="px-4 pt-4 pb-0 flex items-center justify-between">
         <h1 className="text-lg font-semibold text-gray-900">Gudang</h1>
-        <button onClick={syncData} disabled={syncing}
-          className="p-2 rounded-full text-gray-400 hover:text-gray-600 transition-colors">
-          <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
-        </button>
+        <div className="flex items-center gap-2">
+          {tab === 'stok' && stokActions}
+          <button onClick={syncData} disabled={syncing}
+            className="p-2 rounded-full text-gray-400 hover:text-gray-600 transition-colors">
+            <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
+          </button>
+        </div>
       </div>
 
       <div className="px-4 mt-3 flex gap-0 border-b border-gray-100">
@@ -88,23 +101,44 @@ export default function GudangPage() {
         ))}
       </div>
 
+      <StokToolbarCtx.Provider value={setStokActions}>
       <div className="flex-1 overflow-auto bg-gray-50">
         {tab === 'stok'      && <StokTab userId={user!.id} />}
         {tab === 'pembelian' && <PembelianTab userId={user!.id} />}
         {tab === 'mutasi'    && <MutasiTab userId={user!.id} />}
         {tab === 'biaya'     && <BiayaTab userId={user!.id} />}
       </div>
+      </StokToolbarCtx.Provider>
     </div>
   )
 }
 
 // ── STOK ──────────────────────────────────────────────────────
 function StokTab({ userId }: { userId: string }) {
+  const setToolbar                      = useContext(StokToolbarCtx)
   const [showForm, setShowForm]         = useState(false)
   const [showOpening, setShowOpening]   = useState(false)
   const [editMat, setEditMat]           = useState<Material | null>(null)
-  const [openingMat, setOpeningMat]     = useState<(Material & { qty: number }) | null>(null)
   const [filter, setFilter]             = useState('semua')
+
+  // Register toolbar buttons ke parent header
+  useEffect(() => {
+    setToolbar(
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setShowOpening(true)}
+          className="flex items-center gap-1.5 text-xs font-medium text-blue-600 border border-blue-200 bg-blue-50 px-2.5 py-1.5 rounded-lg active:bg-blue-100 transition-colors">
+          <Package size={13} /> Stok Awal
+        </button>
+        <button
+          onClick={() => { setEditMat(null); setShowForm(true) }}
+          className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg active:bg-gray-50 transition-colors">
+          <Plus size={13} /> Tambah
+        </button>
+      </div>
+    )
+    return () => setToolbar(null)
+  }, [])
 
   const items = useLiveQuery(async () => {
     const mats   = await db.materials.toArray()
@@ -179,17 +213,7 @@ function StokTab({ userId }: { userId: string }) {
         )}
       </div>
 
-      {/* Action buttons */}
-      <div className="grid grid-cols-2 gap-2">
-        <button onClick={() => { setEditMat(null); setShowForm(true) }}
-          className="flex items-center justify-center gap-2 py-3 rounded-xl border border-dashed border-gray-300 text-sm text-gray-500 font-medium transition-colors active:bg-gray-50">
-          <Plus size={15} /> Tambah Bahan
-        </button>
-        <button onClick={() => setShowOpening(true)}
-          className="flex items-center justify-center gap-2 py-3 rounded-xl border border-dashed border-blue-200 text-sm text-blue-600 font-medium transition-colors active:bg-blue-50">
-          <Package size={15} /> Stok Awal
-        </button>
-      </div>
+
 
       {showForm && <MaterialForm material={editMat} onClose={() => { setShowForm(false); setEditMat(null) }} />}
       {showOpening && <OpeningStockForm onClose={() => setShowOpening(false)} />}

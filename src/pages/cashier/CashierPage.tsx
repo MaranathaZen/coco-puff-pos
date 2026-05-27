@@ -400,9 +400,9 @@ export default function CashierPage() {
         </div>
       )}
 
-      {/* Mobile tombol bayar */}
+      {/* Mobile tombol bayar — sticky di dalam area kasir, tidak overlap bottom nav */}
       {mainTab === 'kasir' && (items.length > 0 || cartPakets.length > 0) && (
-        <div className="md:hidden fixed bottom-16 left-0 right-0 p-4 bg-white border-t border-gray-100">
+        <div className="md:hidden bg-white border-t border-gray-100 px-4 py-3 flex-shrink-0">
           <button onClick={() => setShowCheckout(true)}
             className="btn-primary w-full flex items-center justify-between">
             <span className="flex items-center gap-2">

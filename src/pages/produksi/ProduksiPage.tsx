@@ -582,7 +582,7 @@ function MutasiProduksiForm({ userId, onClose }: { userId: string; onClose: () =
 
 // ── FORM: Resep Baru/Edit ────────────────────────────────────
 function ResepForm({ recipe, onClose }: { recipe: ProductionRecipe | null; onClose: () => void }) {
-  const materials = useLiveQuery(() => db.materials.filter(m => m.is_active && m.category === 'bahan').toArray(), [])
+  const materials = useLiveQuery(() => db.materials.filter(m => m.is_active && m.category === 'bahan_baku').toArray(), [])
 
   const [name, setName]           = useState(recipe?.name || '')
   const [batchYield, setBatch]    = useState(String(recipe?.batch_yield || '120'))

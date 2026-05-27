@@ -11,7 +11,7 @@ import type { Material, WarehouseStock, Purchase, WarehouseMutation, WarehouseMu
 
 type Tab = 'stok' | 'pembelian' | 'mutasi' | 'biaya'
 
-const SATUAN = ['kg','gram','ons','liter','ml','butir','pcs','buah','dus','karton','pack','sachet','roll','lembar','loyang','batch']
+const SATUAN = ['kg','gram','liter','ml','butir','pcs','dus','pack']
 
 const KATEGORI = [
   { value: 'bahan_baku',          label: 'Bahan Baku',          desc: 'Tepung, gula, telur, dll' },

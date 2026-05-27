@@ -41,7 +41,7 @@ export default function ProduksiPage() {
       const { data: prods } = await supabase.from('products').select('*').eq('is_active', true)
       if (prods?.length) await db.products.bulkPut(prods)
       toast.success('Data produksi diperbarui')
-    } catch (e) {
+    } catch {
       toast.error('Gagal sync data')
     } finally {
       setIsSyncing(false)
@@ -86,61 +86,86 @@ export default function ProduksiPage() {
   )
 }
 
-// ── TAB STOK PRODUKSI ────────────────────────────────────────
+// ── TAB STOK PRODUKSI ─────────────────────────────────────────
 function StokProduksiTab({ userId }: { userId: string }) {
   const stocks = useLiveQuery(async () => {
-    const ps   = await db.production_stock.toArray()
-    const mats = await db.materials.toArray()
+    const ps     = await db.production_stock.toArray()
+    const mats   = await db.materials.toArray()
     const matMap = Object.fromEntries(mats.map(m => [m.id, m]))
     return ps.map(s => ({ ...s, material: matMap[s.material_id] }))
   }, [])
 
-  const fgStocks = useLiveQuery(async () => {
-    return db.finished_goods_stock.toArray()
-  }, [])
+  const fgStocks = useLiveQuery(() => db.finished_goods_stock.toArray(), [])
+
+  // Hitung total nilai
+  const totalNilaiBahan = stocks?.reduce((s, i) =>
+    s + i.qty_on_hand * (i.material?.unit_cost || 0), 0) || 0
+
+  const totalQtyProdukJadi = fgStocks?.reduce((s, i) => s + i.qty_on_hand, 0) || 0
 
   return (
     <div className="p-4 space-y-4">
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-white rounded-xl border border-gray-100 p-3">
+          <p className="text-xs text-gray-400 mb-0.5">Nilai Bahan Baku</p>
+          <p className="text-base font-semibold text-gray-900 truncate">{formatRupiah(totalNilaiBahan)}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{stocks?.length || 0} jenis bahan</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-100 p-3">
+          <p className="text-xs text-gray-400 mb-0.5">Produk Jadi</p>
+          <p className="text-base font-semibold text-brand-600">{totalQtyProdukJadi} pcs</p>
+          <p className="text-xs text-gray-400 mt-0.5">{fgStocks?.length || 0} jenis produk</p>
+        </div>
+      </div>
+
       {/* Stok bahan di produksi */}
       <div>
-        <h3 className="font-medium text-gray-700 mb-2">Stok Bahan Baku</h3>
-        <div className="space-y-2">
-          {stocks?.map(s => (
-            <div key={s.id} className="card flex items-center justify-between">
-              <div>
-                <p className="font-medium text-gray-800">{s.material?.name || '-'}</p>
-                <p className="text-xs text-gray-500">{s.material?.category}</p>
+        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Stok Bahan Baku</p>
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          {stocks?.map((s, idx) => (
+            <div key={s.id}
+              className={`flex items-center justify-between px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-800 truncate">{s.material?.name || '-'}</p>
+                <p className="text-xs text-gray-400">{formatRupiah(s.material?.unit_cost || 0)}/{s.material?.unit}</p>
               </div>
               <div className="text-right">
-                <p className="font-bold text-lg text-gray-800">{s.qty_on_hand}</p>
-                <p className="text-xs text-gray-400">{s.material?.unit}</p>
+                <p className="text-sm font-semibold text-gray-900">
+                  {s.qty_on_hand} <span className="font-normal text-gray-400 text-xs">{s.material?.unit}</span>
+                </p>
+                <p className="text-xs text-gray-400">
+                  {formatRupiah(s.qty_on_hand * (s.material?.unit_cost || 0))}
+                </p>
               </div>
             </div>
           ))}
           {stocks?.length === 0 && (
-            <div className="text-center text-gray-400 py-6 text-sm">Belum ada stok bahan di produksi</div>
+            <div className="text-center text-gray-400 py-8 text-sm">Belum ada stok bahan di produksi</div>
           )}
         </div>
       </div>
 
       {/* Stok produk jadi */}
       <div>
-        <h3 className="font-medium text-gray-700 mb-2">Stok Produk Jadi</h3>
-        <div className="space-y-2">
-          {fgStocks?.map(s => (
-            <div key={s.id} className="card flex items-center justify-between">
+        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Stok Produk Jadi</p>
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          {fgStocks?.map((s, idx) => (
+            <div key={s.id}
+              className={`flex items-center justify-between px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
               <div>
-                <p className="font-medium text-gray-800">{s.product_name}</p>
-                <p className="text-xs text-gray-500">Siap kirim</p>
+                <p className="text-sm font-medium text-gray-800">{s.product_name}</p>
+                <p className="text-xs text-gray-400">Siap kirim</p>
               </div>
               <div className="text-right">
-                <p className="font-bold text-lg text-brand-600">{s.qty_on_hand}</p>
+                <p className="text-sm font-bold text-brand-600">{s.qty_on_hand}</p>
                 <p className="text-xs text-gray-400">pcs</p>
               </div>
             </div>
           ))}
           {fgStocks?.length === 0 && (
-            <div className="text-center text-gray-400 py-6 text-sm">Belum ada produk jadi</div>
+            <div className="text-center text-gray-400 py-8 text-sm">Belum ada produk jadi</div>
           )}
         </div>
       </div>
@@ -148,7 +173,7 @@ function StokProduksiTab({ userId }: { userId: string }) {
   )
 }
 
-// ── TAB CATAT PRODUKSI ───────────────────────────────────────
+// ── TAB CATAT PRODUKSI ────────────────────────────────────────
 function CatatProduksiTab({ userId }: { userId: string }) {
   const [showForm, setShowForm] = useState(false)
 
@@ -168,17 +193,16 @@ function CatatProduksiTab({ userId }: { userId: string }) {
         </button>
       </div>
 
-      <div className="space-y-2">
-        {logs?.map(log => (
-          <div key={log.id} className="card">
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        {logs?.map((log, idx) => (
+          <div key={log.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
             <div className="flex items-center justify-between">
               <div>
-                <p className="font-medium text-gray-800">{log.recipe?.name || '-'}</p>
-                <p className="text-xs text-gray-500">{formatDate(log.created_at)}</p>
-                {log.notes && <p className="text-xs text-gray-400">{log.notes}</p>}
+                <p className="text-sm font-medium text-gray-800">{log.recipe?.name || '-'}</p>
+                <p className="text-xs text-gray-400">{formatDate(log.created_at)}{log.notes ? ` · ${log.notes}` : ''}</p>
               </div>
               <div className="text-right">
-                <p className="font-bold text-lg text-brand-600">{log.total_yield}</p>
+                <p className="text-sm font-bold text-brand-600">{log.total_yield}</p>
                 <p className="text-xs text-gray-400">{log.batch_count} batch</p>
               </div>
             </div>
@@ -194,19 +218,25 @@ function CatatProduksiTab({ userId }: { userId: string }) {
   )
 }
 
-// ── TAB MUTASI PRODUKSI (kirim ke toko/mitra) ────────────────
+// ── TAB MUTASI PRODUKSI ───────────────────────────────────────
 function MutasiProduksiTab({ userId }: { userId: string }) {
   const [showForm, setShowForm] = useState(false)
 
-  const mutations = useLiveQuery(async () => {
-    return db.production_mutations.orderBy('created_at').reverse().limit(30).toArray()
-  }, [])
+  const mutations = useLiveQuery(() =>
+    db.production_mutations.orderBy('created_at').reverse().limit(30).toArray(), [])
 
   const typeLabel: Record<string, string> = {
     to_store:           '→ Toko',
     to_partner:         '→ Mitra',
     return_from_store:  '← Retur Toko',
     adjustment:         'Koreksi',
+  }
+
+  const typeColor: Record<string, string> = {
+    to_store:           'text-green-600 bg-green-50',
+    to_partner:         'text-purple-600 bg-purple-50',
+    return_from_store:  'text-orange-600 bg-orange-50',
+    adjustment:         'text-gray-600 bg-gray-100',
   }
 
   return (
@@ -218,20 +248,19 @@ function MutasiProduksiTab({ userId }: { userId: string }) {
         </button>
       </div>
 
-      <div className="space-y-2">
-        {mutations?.map(m => (
-          <div key={m.id} className="card">
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        {mutations?.map((m, idx) => (
+          <div key={m.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
             <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium text-gray-800">{typeLabel[m.mutation_type] || m.mutation_type}</p>
-                {m.destination_name && <p className="text-xs text-gray-500">ke: {m.destination_name}</p>}
-                <p className="text-xs text-gray-400">{formatDate(m.created_at)}</p>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${typeColor[m.mutation_type] || 'text-gray-600 bg-gray-100'}`}>
+                  {typeLabel[m.mutation_type] || m.mutation_type}
+                </span>
+                {m.destination_name && <span className="text-xs text-gray-500">{m.destination_name}</span>}
               </div>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${
-                m.status === 'confirmed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-              }`}>{m.status}</span>
+              <p className="text-xs text-gray-400">{formatDate(m.created_at)}</p>
             </div>
-            {m.notes && <p className="text-xs text-gray-500 mt-1">{m.notes}</p>}
+            {m.notes && <p className="text-xs text-gray-400 mt-1">{m.notes}</p>}
           </div>
         ))}
         {mutations?.length === 0 && (
@@ -244,15 +273,15 @@ function MutasiProduksiTab({ userId }: { userId: string }) {
   )
 }
 
-// ── TAB RESEP ────────────────────────────────────────────────
+// ── TAB RESEP ─────────────────────────────────────────────────
 function ResepTab({ userId }: { userId: string }) {
-  const [showForm, setShowForm] = useState(false)
+  const [showForm, setShowForm]     = useState(false)
   const [editRecipe, setEditRecipe] = useState<ProductionRecipe | null>(null)
 
   const recipes = useLiveQuery(async () => {
-    const r = await db.production_recipes.filter(r => r.is_active).toArray()
+    const r    = await db.production_recipes.filter(r => r.is_active).toArray()
     const items = await db.production_recipe_items.toArray()
-    const mats = await db.materials.toArray()
+    const mats  = await db.materials.toArray()
     const matMap = Object.fromEntries(mats.map(m => [m.id, m]))
     return r.map(recipe => ({
       ...recipe,
@@ -271,24 +300,24 @@ function ResepTab({ userId }: { userId: string }) {
         </button>
       </div>
 
-      <div className="space-y-3">
-        {recipes?.map(recipe => (
-          <div key={recipe.id} className="card">
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        {recipes?.map((recipe, idx) => (
+          <div key={recipe.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
             <div className="flex items-center justify-between mb-2">
-              <p className="font-semibold text-gray-800">{recipe.name}</p>
-              <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold text-gray-800">{recipe.name}</p>
+              <div className="flex items-center gap-3">
                 <span className="text-sm text-brand-600 font-medium">
                   {recipe.batch_yield} {recipe.yield_unit}/batch
                 </span>
                 <button onClick={() => { setEditRecipe(recipe); setShowForm(true) }}
-                  className="text-xs text-gray-400">Edit</button>
+                  className="text-xs text-gray-400 underline">Edit</button>
               </div>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               {recipe.items.map(item => (
-                <div key={item.id} className="flex justify-between text-sm">
-                  <span className="text-gray-600">{item.material?.name || '-'}</span>
-                  <span className="text-gray-500">{item.qty_per_batch} {item.material?.unit}/batch</span>
+                <div key={item.id} className="flex justify-between text-xs text-gray-400">
+                  <span>{item.material?.name || '-'}</span>
+                  <span>{item.qty_per_batch} {item.material?.unit}/batch</span>
                 </div>
               ))}
             </div>
@@ -304,9 +333,9 @@ function ResepTab({ userId }: { userId: string }) {
   )
 }
 
-// ── FORM: Catat Produksi ─────────────────────────────────────
+// ── FORM: Catat Produksi ──────────────────────────────────────
 function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void }) {
-  const recipes = useLiveQuery(() => db.production_recipes.filter(r => r.is_active).toArray(), [])
+  const recipes  = useLiveQuery(() => db.production_recipes.filter(r => r.is_active).toArray(), [])
   const products = useLiveQuery(() => db.products.filter(p => p.is_active).toArray(), [])
 
   const [recipeId, setRecipeId]   = useState('')
@@ -319,11 +348,10 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
   const totalYield = selectedRecipe ? selectedRecipe.batch_yield * Number(batchCount) : 0
 
   async function handleSave() {
-    if (!recipeId) return toast.error('Pilih resep')
-    if (!productId) return toast.error('Pilih produk yang dihasilkan')
+    if (!recipeId)   return toast.error('Pilih resep')
+    if (!productId)  return toast.error('Pilih produk yang dihasilkan')
     setSaving(true)
     try {
-      // Ambil recipe items untuk hitung bahan terpakai
       const recipeItems = await db.production_recipe_items
         .where('recipe_id').equals(recipeId).toArray()
 
@@ -338,10 +366,8 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
       await db.production_logs.add(log)
       await supabase.from('production_logs').insert(log)
 
-      // Catat pemakaian bahan + kurangi stok produksi
       for (const ri of recipeItems) {
         const qtyUsed = ri.qty_per_batch * Number(batchCount)
-
         const logMat: any = {
           id: generateId(), log_id: logId,
           material_id: ri.material_id, qty_used: qtyUsed,
@@ -349,7 +375,6 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
         await db.production_log_materials.add(logMat)
         await supabase.from('production_log_materials').insert(logMat)
 
-        // Kurangi stok bahan di produksi
         const ps = await db.production_stock.where('material_id').equals(ri.material_id).first()
         if (ps) {
           const newQty = Math.max(0, ps.qty_on_hand - qtyUsed)
@@ -358,7 +383,6 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
         }
       }
 
-      // Tambah stok produk jadi
       const product = products?.find(p => p.id === productId)
       const fgs = await db.finished_goods_stock.where('product_id').equals(productId).first()
       const fgsData: any = {
@@ -395,13 +419,11 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
               ))}
             </select>
           </div>
-
           <div>
             <label className="text-sm font-medium text-gray-700 mb-1 block">Jumlah Batch</label>
             <input className="input" type="number" min="1" value={batchCount}
               onChange={e => setBatch(e.target.value)} />
           </div>
-
           {selectedRecipe && (
             <div className="bg-brand-50 rounded-xl p-3">
               <p className="text-sm font-medium text-brand-800">
@@ -409,7 +431,6 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
               </p>
             </div>
           )}
-
           <div>
             <label className="text-sm font-medium text-gray-700 mb-1 block">Produk yang Dihasilkan</label>
             <select className="input" value={productId} onChange={e => setProductId(e.target.value)}>
@@ -417,7 +438,6 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
               {products?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>
-
           <div>
             <label className="text-sm font-medium text-gray-700 mb-1 block">Catatan</label>
             <input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opsional" />
@@ -434,7 +454,7 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
   )
 }
 
-// ── FORM: Kirim Produk ke Toko/Mitra ────────────────────────
+// ── FORM: Kirim Produk ────────────────────────────────────────
 function MutasiProduksiForm({ userId, onClose }: { userId: string; onClose: () => void }) {
   const stores   = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
   const partners = useLiveQuery(() => db.partners.filter(p => p.is_active).toArray(), [])
@@ -452,14 +472,15 @@ function MutasiProduksiForm({ userId, onClose }: { userId: string; onClose: () =
   }
 
   async function handleSave() {
-    const validItems = items.filter(i => i.product_id && i.qty && Number(i.qty) > 0)
-    if (validItems.length === 0) return toast.error('Tambahkan minimal 1 produk')
+    const validItems = items.filter(i => i.product_id && Number(i.qty) > 0)
+    if (!validItems.length) return toast.error('Tambahkan minimal 1 produk')
     setSaving(true)
     try {
       let destName = ''
-      if (type === 'to_store') destName = stores?.find(s => s.id === destId)?.name || ''
-      else if (type === 'to_partner') destName = partners?.find(p => p.id === destId)?.name || ''
-      else if (type === 'return_from_store') destName = stores?.find(s => s.id === destId)?.name || ''
+      if (type === 'to_store' || type === 'return_from_store')
+        destName = stores?.find(s => s.id === destId)?.name || ''
+      else if (type === 'to_partner')
+        destName = partners?.find(p => p.id === destId)?.name || ''
 
       const mutId = generateId()
       const mut: ProductionMutation = {
@@ -484,17 +505,15 @@ function MutasiProduksiForm({ userId, onClose }: { userId: string; onClose: () =
         await db.production_mutation_items.add(mi)
         await supabase.from('production_mutation_items').insert(mi)
 
-        // Update stok produk jadi
         if (fg) {
           const isReturn = type === 'return_from_store'
-          const newQty = isReturn
+          const newQty   = isReturn
             ? fg.qty_on_hand + Number(item.qty)
             : Math.max(0, fg.qty_on_hand - Number(item.qty))
           await db.finished_goods_stock.update(fg.id, { qty_on_hand: newQty, last_updated: now() })
           await supabase.from('finished_goods_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', fg.id)
         }
       }
-
       toast.success('Pengiriman berhasil dicatat')
       onClose()
     } catch (e) {
@@ -520,7 +539,7 @@ function MutasiProduksiForm({ userId, onClose }: { userId: string; onClose: () =
                 { v: 'adjustment',        l: 'Koreksi' },
               ] as const).map(t => (
                 <button key={t.v} onClick={() => setType(t.v)}
-                  className={`py-2 rounded-xl text-sm font-medium border ${
+                  className={`py-2 rounded-xl text-sm font-medium border transition-colors ${
                     type === t.v ? 'bg-brand-600 text-white border-brand-600' : 'border-gray-200 text-gray-700'
                   }`}>{t.l}</button>
               ))}
@@ -580,9 +599,10 @@ function MutasiProduksiForm({ userId, onClose }: { userId: string; onClose: () =
   )
 }
 
-// ── FORM: Resep Baru/Edit ────────────────────────────────────
+// ── FORM: Resep ───────────────────────────────────────────────
 function ResepForm({ recipe, onClose }: { recipe: ProductionRecipe | null; onClose: () => void }) {
-  const materials = useLiveQuery(() => db.materials.filter(m => m.is_active && m.category === 'bahan_baku').toArray(), [])
+  const materials = useLiveQuery(() =>
+    db.materials.filter(m => m.is_active && m.category === 'bahan_baku').toArray(), [])
 
   const [name, setName]           = useState(recipe?.name || '')
   const [batchYield, setBatch]    = useState(String(recipe?.batch_yield || '120'))
@@ -597,11 +617,11 @@ function ResepForm({ recipe, onClose }: { recipe: ProductionRecipe | null; onClo
 
   async function handleSave() {
     if (!name) return toast.error('Nama resep wajib diisi')
-    const validItems = items.filter(i => i.material_id && i.qty && Number(i.qty) > 0)
-    if (validItems.length === 0) return toast.error('Tambahkan minimal 1 bahan')
+    const validItems = items.filter(i => i.material_id && Number(i.qty) > 0)
+    if (!validItems.length) return toast.error('Tambahkan minimal 1 bahan')
     setSaving(true)
     try {
-      const isNew = !recipe
+      const isNew    = !recipe
       const recipeId = recipe?.id || generateId()
       const data: ProductionRecipe = {
         id: recipeId, name,
@@ -613,7 +633,6 @@ function ResepForm({ recipe, onClose }: { recipe: ProductionRecipe | null; onClo
       await db.production_recipes.put(data)
       await supabase.from('production_recipes').upsert(data)
 
-      // Hapus items lama kalau edit
       if (!isNew) {
         await db.production_recipe_items.where('recipe_id').equals(recipeId).delete()
         await supabase.from('production_recipe_items').delete().eq('recipe_id', recipeId)
@@ -658,7 +677,6 @@ function ResepForm({ recipe, onClose }: { recipe: ProductionRecipe | null; onClo
               <input className="input" value={yieldUnit} onChange={e => setYieldUnit(e.target.value)} placeholder="pcs" />
             </div>
           </div>
-
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700 block">Bahan per Batch</label>
             {items.map((item, i) => (

@@ -7,12 +7,14 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Paksa service worker baru langsung aktif tanpa tunggu tab lama ditutup
+      injectRegister: 'auto',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
       manifest: {
         name: 'Coco Puff POS',
         short_name: 'CocoPuff',
         description: 'Point of Sale Coco Puff',
-        theme_color: '#16a34a',
+        theme_color: '#ffffff',
         background_color: '#ffffff',
         display: 'standalone',
         orientation: 'portrait',
@@ -22,7 +24,13 @@ export default defineConfig({
         ]
       },
       workbox: {
+        // Paksa service worker baru langsung claim semua client
+        clientsClaim: true,
+        skipWaiting: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        // Jangan cache index.html — selalu ambil dari network
+        navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/^\/api/, /^\/sw/],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,

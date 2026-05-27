@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
 import { seedIfEmpty } from '@/lib/seed'
@@ -30,8 +30,99 @@ function RequireRole({ roles, children }: { roles: string[]; children: React.Rea
   return <>{children}</>
 }
 
+
+// ── Auto-update notifier ──────────────────────────────────────
+// Deteksi saat service worker baru tersedia, reload otomatis
+function useAutoUpdate() {
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+
+    // Listen untuk pesan dari service worker baru
+    const handleSWMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'SW_UPDATED') {
+        window.location.reload()
+      }
+    }
+    navigator.serviceWorker.addEventListener('message', handleSWMessage)
+
+    // Cek update setiap kali tab menjadi aktif kembali
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        navigator.serviceWorker.getRegistration().then(reg => {
+          if (reg) reg.update()
+        })
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    // Cek update saat online kembali
+    const handleOnline = () => {
+      navigator.serviceWorker.getRegistration().then(reg => {
+        if (reg) reg.update()
+      })
+    }
+    window.addEventListener('online', handleOnline)
+
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handleSWMessage)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('online', handleOnline)
+    }
+  }, [])
+}
+
+function UpdateBanner() {
+  const [showBanner, setShowBanner] = useState(false)
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+
+    navigator.serviceWorker.ready.then(reg => {
+      // Saat ada service worker baru menunggu
+      const checkWaiting = () => {
+        if (reg.waiting) {
+          setShowBanner(true)
+          // Kirim pesan ke SW baru untuk skipWaiting
+          reg.waiting.postMessage({ type: 'SKIP_WAITING' })
+        }
+      }
+
+      checkWaiting()
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing
+        if (!newWorker) return
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            setShowBanner(true)
+            // Auto reload setelah 2 detik
+            setTimeout(() => window.location.reload(), 2000)
+          }
+        })
+      })
+    })
+
+    // Reload otomatis saat SW baru aktif
+    let refreshing = false
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!refreshing) {
+        refreshing = true
+        window.location.reload()
+      }
+    })
+  }, [])
+
+  if (!showBanner) return null
+
+  return (
+    <div className="fixed top-0 left-0 right-0 z-[9999] bg-gray-900 text-white text-xs text-center py-2 px-4">
+      Memperbarui aplikasi...
+    </div>
+  )
+}
+
 export default function App() {
   const user = useAuthStore(s => s.user)
+  useAutoUpdate()
 
   useEffect(() => { seedIfEmpty() }, [])
 
@@ -41,6 +132,8 @@ export default function App() {
   }, [user?.store_id])
 
   return (
+    <>
+    <UpdateBanner />
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
@@ -59,6 +152,7 @@ export default function App() {
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   )
 }
 

@@ -5,7 +5,7 @@ import { db, generateId, now } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah, formatDate } from '@/lib/utils'
-import { Plus, RefreshCw, X, ChevronRight, AlertCircle } from 'lucide-react'
+import { Plus, RefreshCw, X, ChevronRight, AlertCircle, Package } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { Material, WarehouseStock, Purchase, WarehouseMutation, WarehouseMutationItem, WarehouseExpense } from '@/lib/db'
 
@@ -14,12 +14,24 @@ type Tab = 'stok' | 'pembelian' | 'mutasi' | 'biaya'
 const SATUAN = ['kg','gram','ons','liter','ml','butir','pcs','buah','dus','karton','pack','sachet','roll','lembar','loyang','batch']
 
 const KATEGORI = [
-  { value: 'bahan_baku',          label: 'Bahan Baku',          desc: 'Tepung, gula, telur, dll' },
-  { value: 'bahan_setengah_jadi', label: 'Setengah Jadi',       desc: 'Premix, adonan siap pakai' },
-  { value: 'packaging',           label: 'Packaging',            desc: 'Dus, plastik, kresek, dll' },
-  { value: 'non_produksi',        label: 'Non Produksi / ATK',   desc: 'Alat tulis, kebersihan' },
-  { value: 'operasional',         label: 'Operasional',          desc: 'Bahan bakar, gas, dll' },
+  { value: 'bahan_baku',          label: 'Bahan Baku',        desc: 'Tepung, gula, telur, dll' },
+  { value: 'bahan_setengah_jadi', label: 'Setengah Jadi',     desc: 'Premix, adonan siap pakai' },
+  { value: 'packaging',           label: 'Packaging',          desc: 'Dus, plastik, kresek, dll' },
+  { value: 'non_produksi',        label: 'Non Produksi / ATK', desc: 'Alat tulis, kebersihan' },
+  { value: 'operasional',         label: 'Operasional',        desc: 'Bahan bakar, gas, dll' },
 ]
+
+// Generate nomor PO: PO-YYYYMMDD-XXX
+async function generatePONumber(): Promise<string> {
+  const today = new Date()
+  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '')
+  const prefix = `PO-${dateStr}-`
+  const existing = await db.purchases
+    .filter(p => (p as any).po_number?.startsWith(prefix))
+    .toArray()
+  const seq = String(existing.length + 1).padStart(3, '0')
+  return `${prefix}${seq}`
+}
 
 export default function GudangPage() {
   const { user } = useAuthStore()
@@ -59,7 +71,6 @@ export default function GudangPage() {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Header */}
       <div className="px-4 pt-4 pb-0 flex items-center justify-between">
         <h1 className="text-lg font-semibold text-gray-900">Gudang</h1>
         <button onClick={syncData} disabled={syncing}
@@ -68,17 +79,12 @@ export default function GudangPage() {
         </button>
       </div>
 
-      {/* Tabs */}
       <div className="px-4 mt-3 flex gap-0 border-b border-gray-100">
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             className={`pb-2.5 mr-5 text-sm font-medium border-b-2 transition-colors ${
-              tab === t.id
-                ? 'border-gray-900 text-gray-900'
-                : 'border-transparent text-gray-400'
-            }`}>
-            {t.label}
-          </button>
+              tab === t.id ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'
+            }`}>{t.label}</button>
         ))}
       </div>
 
@@ -92,11 +98,13 @@ export default function GudangPage() {
   )
 }
 
-// ── STOK ─────────────────────────────────────────────────────
+// ── STOK ──────────────────────────────────────────────────────
 function StokTab({ userId }: { userId: string }) {
-  const [showForm, setShowForm] = useState(false)
-  const [editMat, setEditMat]   = useState<Material | null>(null)
-  const [filter, setFilter]     = useState('semua')
+  const [showForm, setShowForm]         = useState(false)
+  const [showOpening, setShowOpening]   = useState(false)
+  const [editMat, setEditMat]           = useState<Material | null>(null)
+  const [openingMat, setOpeningMat]     = useState<(Material & { qty: number }) | null>(null)
+  const [filter, setFilter]             = useState('semua')
 
   const items = useLiveQuery(async () => {
     const mats   = await db.materials.toArray()
@@ -107,10 +115,12 @@ function StokTab({ userId }: { userId: string }) {
       .map(m => ({ ...m, qty: map[m.id]?.qty_on_hand ?? 0 }))
   }, [filter])
 
-  const lowStock = items?.filter(i => i.qty <= i.min_stock && i.is_active) || []
+  const lowStock   = items?.filter(i => i.qty <= i.min_stock && i.is_active) || []
+  const totalNilai = items?.reduce((s, i) => s + i.qty * (i.unit_cost || 0), 0) || 0
 
   return (
     <div className="p-4 space-y-3">
+      {/* Alert stok rendah */}
       {lowStock.length > 0 && (
         <div className="flex items-start gap-2.5 bg-red-50 border border-red-100 rounded-xl p-3">
           <AlertCircle size={15} className="text-red-500 flex-shrink-0 mt-0.5" />
@@ -121,19 +131,28 @@ function StokTab({ userId }: { userId: string }) {
         </div>
       )}
 
+      {/* Summary nilai stok */}
+      <div className="bg-white rounded-xl border border-gray-100 p-4 flex items-center justify-between">
+        <div>
+          <p className="text-xs text-gray-400 mb-0.5">Total Nilai Stok Gudang</p>
+          <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalNilai)}</p>
+        </div>
+        <div className="w-10 h-10 bg-gray-50 rounded-xl flex items-center justify-center">
+          <Package size={18} className="text-gray-400" />
+        </div>
+      </div>
+
       {/* Filter pills */}
       <div className="flex gap-2 overflow-x-auto pb-1">
         {[{ value: 'semua', label: 'Semua' }, ...KATEGORI.map(k => ({ value: k.value, label: k.label }))].map(f => (
           <button key={f.value} onClick={() => setFilter(f.value)}
             className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors ${
-              filter === f.value
-                ? 'bg-gray-900 text-white'
-                : 'bg-white text-gray-500 border border-gray-200'
+              filter === f.value ? 'bg-gray-900 text-white' : 'bg-white text-gray-500 border border-gray-200'
             }`}>{f.label}</button>
         ))}
       </div>
 
-      {/* List */}
+      {/* List stok */}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {items?.map((item, idx) => (
           <button key={item.id} onClick={() => { setEditMat(item); setShowForm(true) }}
@@ -142,12 +161,15 @@ function StokTab({ userId }: { userId: string }) {
             } ${!item.is_active ? 'opacity-40' : ''}`}>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
-              <p className="text-xs text-gray-400 mt-0.5">{KATEGORI.find(k => k.value === item.category)?.label} · {formatRupiah(item.unit_cost)}/{item.unit}</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {KATEGORI.find(k => k.value === item.category)?.label} · {formatRupiah(item.unit_cost)}/{item.unit}
+              </p>
             </div>
             <div className="text-right mr-3">
               <p className={`text-sm font-semibold ${item.qty <= item.min_stock ? 'text-red-500' : 'text-gray-900'}`}>
                 {item.qty} <span className="font-normal text-gray-400">{item.unit}</span>
               </p>
+              <p className="text-xs text-gray-400">{formatRupiah(item.qty * (item.unit_cost || 0))}</p>
             </div>
             <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
           </button>
@@ -157,12 +179,20 @@ function StokTab({ userId }: { userId: string }) {
         )}
       </div>
 
-      <button onClick={() => { setEditMat(null); setShowForm(true) }}
-        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-dashed border-gray-300 text-sm text-gray-500 font-medium transition-colors active:bg-gray-50">
-        <Plus size={15} /> Tambah Bahan
-      </button>
+      {/* Action buttons */}
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={() => { setEditMat(null); setShowForm(true) }}
+          className="flex items-center justify-center gap-2 py-3 rounded-xl border border-dashed border-gray-300 text-sm text-gray-500 font-medium transition-colors active:bg-gray-50">
+          <Plus size={15} /> Tambah Bahan
+        </button>
+        <button onClick={() => setShowOpening(true)}
+          className="flex items-center justify-center gap-2 py-3 rounded-xl border border-dashed border-blue-200 text-sm text-blue-600 font-medium transition-colors active:bg-blue-50">
+          <Package size={15} /> Stok Awal
+        </button>
+      </div>
 
       {showForm && <MaterialForm material={editMat} onClose={() => { setShowForm(false); setEditMat(null) }} />}
+      {showOpening && <OpeningStockForm onClose={() => setShowOpening(false)} />}
     </div>
   )
 }
@@ -195,12 +225,18 @@ function PembelianTab({ userId }: { userId: string }) {
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {purchases?.map((p, idx) => (
           <div key={p.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-            <div className="flex items-start justify-between mb-1.5">
-              <div>
+            <div className="flex items-start justify-between mb-1">
+              <div className="flex-1 min-w-0">
+                {/* ID Pembelian */}
+                {(p as any).po_number && (
+                  <p className="text-xs font-mono font-medium text-blue-600 mb-0.5">{(p as any).po_number}</p>
+                )}
                 <p className="text-sm font-medium text-gray-900">{p.supplier?.name || 'Tanpa Supplier'}</p>
-                <p className="text-xs text-gray-400">{formatDate(p.created_at)}{p.invoice_no ? ` · ${p.invoice_no}` : ''}</p>
+                <p className="text-xs text-gray-400">
+                  {formatDate(p.created_at)}{p.invoice_no ? ` · Invoice: ${p.invoice_no}` : ''}
+                </p>
               </div>
-              <p className="text-sm font-semibold text-gray-900">{formatRupiah(p.total_amount)}</p>
+              <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(p.total_amount)}</p>
             </div>
             {p.items.length > 0 && (
               <div className="mt-2 space-y-0.5">
@@ -244,6 +280,7 @@ function MutasiTab({ userId }: { userId: string }) {
     to_store:      { label: 'ke Toko',      color: 'text-green-600 bg-green-50' },
     to_partner:    { label: 'ke Mitra',     color: 'text-purple-600 bg-purple-50' },
     adjustment:    { label: 'Koreksi',      color: 'text-gray-600 bg-gray-100' },
+    opening_stock: { label: 'Stok Awal',    color: 'text-orange-600 bg-orange-50' },
   }
 
   return (
@@ -308,7 +345,6 @@ function BiayaTab({ userId }: { userId: string }) {
 
   return (
     <div className="p-4 space-y-3">
-      {/* Summary card */}
       <div className="bg-white rounded-xl border border-gray-100 p-4">
         <p className="text-xs text-gray-400 mb-1">Total Biaya Bulan Ini</p>
         <p className="text-2xl font-semibold text-gray-900">{formatRupiah(totalBulanIni)}</p>
@@ -350,9 +386,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
             <X size={18} />
           </button>
         </div>
-        <div className="overflow-auto flex-1 px-5 py-4 space-y-4">
-          {children}
-        </div>
+        <div className="overflow-auto flex-1 px-5 py-4 space-y-4">{children}</div>
       </div>
     </div>
   )
@@ -360,6 +394,146 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 
 function Label({ children }: { children: React.ReactNode }) {
   return <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">{children}</label>
+}
+
+// ── FORM: Opening Stock ───────────────────────────────────────
+function OpeningStockForm({ onClose }: { onClose: () => void }) {
+  const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
+  const [items, setItems] = useState([{ material_id: '', qty: '', unit_cost: '' }])
+  const [date, setDate]   = useState(new Date().toISOString().slice(0, 10))
+  const [notes, setNotes] = useState('Saldo awal migrasi')
+  const [saving, setSaving] = useState(false)
+
+  function addItem() { setItems(p => [...p, { material_id: '', qty: '', unit_cost: '' }]) }
+  function updateItem(i: number, f: string, v: string) {
+    setItems(p => p.map((item, idx) => {
+      if (idx !== i) return item
+      const updated = { ...item, [f]: v }
+      // Auto-fill harga dari master bahan
+      if (f === 'material_id') {
+        const mat = materials?.find(m => m.id === v)
+        if (mat?.unit_cost) updated.unit_cost = String(mat.unit_cost)
+      }
+      return updated
+    }))
+  }
+
+  async function handleSave() {
+    const valid = items.filter(i => i.material_id && Number(i.qty) > 0)
+    if (!valid.length) return toast.error('Tambahkan minimal 1 item')
+    setSaving(true)
+    try {
+      for (const item of valid) {
+        const qty  = Number(item.qty)
+        const cost = Number(item.unit_cost) || 0
+
+        // Update warehouse_stock
+        const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
+        const wsd: WarehouseStock = {
+          id: ws?.id || generateId(),
+          material_id: item.material_id,
+          qty_on_hand: qty,
+          last_updated: now(),
+        }
+        await db.warehouse_stock.put(wsd)
+        await supabase.from('warehouse_stock').upsert(wsd)
+
+        // Update unit_cost di material jika diisi
+        if (cost > 0) {
+          await db.materials.update(item.material_id, { unit_cost: cost, updated_at: now() })
+          await supabase.from('materials').update({ unit_cost: cost }).eq('id', item.material_id)
+        }
+
+        // Catat ke mutasi sebagai opening_stock untuk audit trail
+        const mutId = generateId()
+        const mut = {
+          id: mutId, mutation_type: 'opening_stock',
+          destination_name: 'Saldo Awal',
+          notes: notes || 'Stok awal', status: 'confirmed',
+          created_by: 'system', created_at: `${date}T00:00:00.000Z`,
+          confirmed_at: now(), confirmed_by: 'system',
+        }
+        await db.warehouse_mutations.add(mut as any)
+        await supabase.from('warehouse_mutations').insert(mut)
+
+        const mi = {
+          id: generateId(), mutation_id: mutId,
+          material_id: item.material_id, qty, unit_cost: cost,
+        }
+        await db.warehouse_mutation_items.add(mi)
+        await supabase.from('warehouse_mutation_items').insert(mi)
+      }
+      toast.success(`${valid.length} item stok awal disimpan`)
+      onClose()
+    } catch (e) {
+      console.error(e)
+      toast.error('Gagal menyimpan')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title="Input Stok Awal" onClose={onClose}>
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
+        <p className="text-xs text-blue-700 font-medium mb-0.5">Untuk migrasi dari sistem lama</p>
+        <p className="text-xs text-blue-500">Qty akan di-set langsung (bukan ditambah). Harga akan update harga default bahan.</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label>Tanggal Efektif</Label>
+          <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} />
+        </div>
+        <div>
+          <Label>Keterangan</Label>
+          <input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Saldo awal..." />
+        </div>
+      </div>
+
+      <div>
+        <Label>Item Stok Awal</Label>
+        <div className="space-y-2">
+          {items.map((item, i) => {
+            const mat = materials?.find(m => m.id === item.material_id)
+            return (
+              <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
+                <select className="input text-sm" value={item.material_id}
+                  onChange={e => updateItem(i, 'material_id', e.target.value)}>
+                  <option value="">Pilih bahan</option>
+                  {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
+                </select>
+                <div className="grid grid-cols-2 gap-2">
+                  <input className="input text-sm" type="number"
+                    placeholder={`Qty (${mat?.unit || 'unit'})`}
+                    value={item.qty} onChange={e => updateItem(i, 'qty', e.target.value)} />
+                  <input className="input text-sm" type="number"
+                    placeholder="Harga/unit (Rp)"
+                    value={item.unit_cost} onChange={e => updateItem(i, 'unit_cost', e.target.value)} />
+                </div>
+                {item.qty && item.unit_cost && (
+                  <p className="text-xs text-gray-400">
+                    Nilai: {formatRupiah(Number(item.qty) * Number(item.unit_cost))}
+                  </p>
+                )}
+                {items.length > 1 && (
+                  <button onClick={() => setItems(p => p.filter((_, idx) => idx !== i))}
+                    className="text-xs text-red-400">Hapus</button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        <button onClick={addItem} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
+      </div>
+
+      <div className="flex gap-3 pt-1 border-t border-gray-100">
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving}
+          className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+          {saving ? 'Menyimpan...' : 'Simpan Stok Awal'}
+        </button>
+      </div>
+    </Modal>
+  )
 }
 
 // ── FORM: Bahan ───────────────────────────────────────────────
@@ -410,9 +584,7 @@ function MaterialForm({ material, onClose }: { material: Material | null; onClos
                 <p className="text-sm font-medium text-gray-800">{k.label}</p>
                 <p className="text-xs text-gray-400">{k.desc}</p>
               </div>
-              {category === k.value && (
-                <div className="w-4 h-4 rounded-full bg-gray-900 flex-shrink-0" />
-              )}
+              {category === k.value && <div className="w-4 h-4 rounded-full bg-gray-900 flex-shrink-0" />}
             </button>
           ))}
         </div>
@@ -486,7 +658,15 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
   function addItem() { setItems(p => [...p, { material_id: '', qty: '', unit_cost: '' }]) }
   function removeItem(i: number) { setItems(p => p.filter((_, idx) => idx !== i)) }
   function updateItem(i: number, f: string, v: string) {
-    setItems(p => p.map((item, idx) => idx === i ? { ...item, [f]: v } : item))
+    setItems(p => p.map((item, idx) => {
+      if (idx !== i) return item
+      const updated = { ...item, [f]: v }
+      if (f === 'material_id') {
+        const m = materials?.find(m => m.id === v)
+        if (m?.unit_cost) updated.unit_cost = String(m.unit_cost)
+      }
+      return updated
+    }))
   }
 
   async function handleSave() {
@@ -494,9 +674,11 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
     if (!valid.length) return toast.error('Tambahkan minimal 1 item')
     setSaving(true)
     try {
-      const purchId = generateId()
-      const purch: Purchase = {
-        id: purchId, supplier_id: supplierId || undefined,
+      const poNumber = await generatePONumber()
+      const purchId  = generateId()
+      const purch: any = {
+        id: purchId, po_number: poNumber,
+        supplier_id: supplierId || undefined,
         invoice_no: invoiceNo || undefined, total_amount: total,
         status: 'received', notes: notes || undefined,
         created_by: userId, created_at: now(),
@@ -522,7 +704,6 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
         await supabase.from('warehouse_stock').upsert(wsd)
 
         if (Number(item.unit_cost) > 0) {
-          // Hitung moving average cost
           const mat = await db.materials.get(item.material_id)
           if (mat) {
             const prevQty  = (mat as any).total_qty_purchased || 0
@@ -536,7 +717,7 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
           }
         }
       }
-      toast.success('Pembelian dicatat')
+      toast.success(`Pembelian ${poNumber} dicatat`)
       onClose()
     } catch { toast.error('Gagal menyimpan') }
     finally { setSaving(false) }
@@ -566,11 +747,7 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
             return (
               <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
                 <select className="input text-sm" value={item.material_id}
-                  onChange={e => {
-                    const m = materials?.find(m => m.id === e.target.value)
-                    updateItem(i, 'material_id', e.target.value)
-                    if (m?.unit_cost) updateItem(i, 'unit_cost', String(m.unit_cost))
-                  }}>
+                  onChange={e => updateItem(i, 'material_id', e.target.value)}>
                   <option value="">Pilih bahan</option>
                   {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
                 </select>
@@ -580,6 +757,9 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
                   <input className="input text-sm" type="number" placeholder="Harga/unit"
                     value={item.unit_cost} onChange={e => updateItem(i, 'unit_cost', e.target.value)} />
                 </div>
+                {item.qty && item.unit_cost && (
+                  <p className="text-xs text-gray-400">Subtotal: {formatRupiah(Number(item.qty) * Number(item.unit_cost))}</p>
+                )}
                 {items.length > 1 && (
                   <button onClick={() => removeItem(i)} className="text-xs text-red-400">Hapus item</button>
                 )}

@@ -59,7 +59,7 @@ export default function Layout() {
       <header className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
         <div>
           <h1 className="font-semibold text-gray-800 text-sm leading-tight">{storeName}</h1>
-          <p className="text-xs text-gray-500">{user?.name} · {roleLabel}</p>
+          <p className="text-xs text-gray-500">{roleLabel}</p>
         </div>
         <div className="flex items-center gap-3">
           {online ? <Wifi size={16} className="text-green-500" /> : <WifiOff size={16} className="text-gray-400" />}

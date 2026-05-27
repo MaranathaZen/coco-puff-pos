@@ -5,7 +5,7 @@ import { db } from '@/lib/db'
 import { supabase, APP_NAME } from '@/lib/supabase'
 import { isOnline } from '@/lib/sync'
 import { cn } from '@/lib/utils'
-import { LogOut, Wifi, WifiOff,
+import { LogOut, Wifi, WifiOff, FileText,
   ShoppingCart, Package, Warehouse, FlaskConical,
   BarChart3, LayoutDashboard, Settings, Layers,
   LucideIcon } from 'lucide-react'
@@ -17,7 +17,8 @@ const ICON_MAP: Record<string, LucideIcon> = {
   '/stok':      Layers,
   '/gudang':    Warehouse,
   '/produksi':  FlaskConical,
-  '/laporan':   BarChart3,
+  '/laporan':        BarChart3,
+  '/laporan-gudang': FileText,
   '/owner':     LayoutDashboard,
   '/pengaturan': Settings,
 }

@@ -4,16 +4,17 @@ import { useAuthStore } from '@/store/auth'
 import { seedIfEmpty } from '@/lib/seed'
 import { startSyncWorker, stopSyncWorker } from '@/lib/sync'
 
-import LoginPage    from '@/pages/auth/LoginPage'
-import Layout       from '@/components/layout/Layout'
-import CashierPage  from '@/pages/cashier/CashierPage'
-import ProductsPage from '@/pages/products/ProductsPage'
-import StockPage    from '@/pages/stock/StockPage'
-import ReportsPage  from '@/pages/reports/ReportsPage'
-import SettingsPage from '@/pages/settings/SettingsPage'
-import OwnerPage    from '@/pages/owner/OwnerPage'
-import GudangPage   from '@/pages/gudang/GudangPage'
-import ProduksiPage from '@/pages/produksi/ProduksiPage'
+import LoginPage         from '@/pages/auth/LoginPage'
+import Layout            from '@/components/layout/Layout'
+import CashierPage       from '@/pages/cashier/CashierPage'
+import ProductsPage      from '@/pages/products/ProductsPage'
+import StockPage         from '@/pages/stock/StockPage'
+import ReportsPage       from '@/pages/reports/ReportsPage'
+import SettingsPage      from '@/pages/settings/SettingsPage'
+import OwnerPage         from '@/pages/owner/OwnerPage'
+import GudangPage        from '@/pages/gudang/GudangPage'
+import ProduksiPage      from '@/pages/produksi/ProduksiPage'
+import LaporanGudangPage from '@/pages/laporan/LaporanGudangPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const user = useAuthStore(s => s.user)
@@ -46,6 +47,7 @@ export default function App() {
         <Route path="produk" element={<RequireRole roles={['owner','manager']}><ProductsPage /></RequireRole>} />
         <Route path="stok" element={<RequireRole roles={['owner','manager','gudang']}><StockPage /></RequireRole>} />
         <Route path="laporan" element={<RequireRole roles={['owner','manager']}><ReportsPage /></RequireRole>} />
+        <Route path="laporan-gudang" element={<RequireRole roles={['owner','manager','gudang']}><LaporanGudangPage /></RequireRole>} />
         <Route path="pengaturan" element={<RequireRole roles={['owner','manager']}><SettingsPage /></RequireRole>} />
         <Route path="owner" element={<RequireRole roles={['owner']}><OwnerPage /></RequireRole>} />
         <Route path="gudang" element={<RequireRole roles={['owner','manager','gudang']}><GudangPage /></RequireRole>} />

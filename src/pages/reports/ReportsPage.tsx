@@ -5,7 +5,8 @@ import { db } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { formatRupiah, formatDate } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth'
-import { RefreshCw, ChevronRight } from 'lucide-react'
+import { RefreshCw, Printer } from 'lucide-react'
+import { PrintReceipt } from '@/components/PrintReceipt'
 import toast from 'react-hot-toast'
 
 type Tab = 'ringkasan' | 'transaksi' | 'produk' | 'kasir'
@@ -20,6 +21,7 @@ export default function ReportsPage() {
   const [dateFrom, setFrom]     = useState(firstDay)
   const [dateTo, setTo]         = useState(today)
   const [syncing, setSyncing]   = useState(false)
+  const [printData, setPrintData] = useState<any>(null)
 
   async function syncData() {
     setSyncing(true)
@@ -83,6 +85,28 @@ export default function ReportsPage() {
     }
     return Object.values(map).sort((a, b) => b.total - a.total)
   }, [transactions])
+
+  async function handlePrint(tx: any) {
+    const items = await db.transaction_items
+      .where('transaction_id').equals(tx.id).toArray()
+    const users = await db.users.toArray()
+    const stores = await db.stores.toArray()
+    const userMap = Object.fromEntries(users.map(u => [u.id, u]))
+    const storeMap = Object.fromEntries(stores.map(s => [s.id, s]))
+    setPrintData({
+      receipt_no:     tx.receipt_no,
+      store_name:     storeMap[tx.store_id]?.name || 'Coco Puff POS',
+      cashier_name:   userMap[tx.cashier_id]?.name || '-',
+      created_at:     tx.created_at,
+      items:          items,
+      subtotal:       tx.subtotal,
+      discount:       tx.discount || 0,
+      total:          tx.total,
+      payment_method: tx.payment_method,
+      cash_paid:      tx.cash_paid || tx.total,
+      change_given:   tx.change_given || 0,
+    })
+  }
 
   async function handleVoid(txId: string) {
     if (!['owner', 'manager'].includes(user?.role || '')) return toast.error('Tidak ada akses void')
@@ -197,11 +221,17 @@ export default function ReportsPage() {
                       }`}>{tx.status === 'voided' ? 'Void' : 'Selesai'}</span>
                     </div>
                   </div>
-                  {tx.status === 'completed' && ['owner','manager'].includes(user?.role || '') && (
-                    <button onClick={() => handleVoid(tx.id)} className="mt-1.5 text-xs text-red-400 underline">
-                      Void
+                  <div className="flex items-center gap-3 mt-1.5">
+                    <button onClick={() => handlePrint(tx)}
+                      className="text-xs text-gray-400 flex items-center gap-1">
+                      <Printer size={11} /> Cetak
                     </button>
-                  )}
+                    {tx.status === 'completed' && ['owner','manager'].includes(user?.role || '') && (
+                      <button onClick={() => handleVoid(tx.id)} className="text-xs text-red-400 underline">
+                        Void
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
               {transactions?.length === 0 && (
@@ -257,6 +287,7 @@ export default function ReportsPage() {
 
         </div>
       </div>
+      {printData && <PrintReceipt data={printData} onClose={() => setPrintData(null)} />}
     </div>
   )
 }

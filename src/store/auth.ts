@@ -23,13 +23,11 @@ interface AuthState {
 }
 
 async function openShift(user: User): Promise<Shift> {
-  // Cek apakah sudah ada shift terbuka hari ini
-  const today = new Date().toISOString().slice(0, 10)
-  const existing = await db.shifts
+  // Cek apakah sudah ada shift terbuka
+  const allShifts = await db.shifts
     .where('user_id').equals(user.id)
-    .filter(s => s.status === 'open' && s.opened_at.startsWith(today))
-    .last()
-
+    .toArray()
+  const existing = allShifts.find(s => s.status === 'open')
   if (existing) return existing
 
   // Buat shift baru

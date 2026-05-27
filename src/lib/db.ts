@@ -1,6 +1,3 @@
-/**
- * Database lokal offline menggunakan Dexie (IndexedDB wrapper)
- */
 import Dexie, { type Table } from 'dexie'
 import type {
   Store, User, Shift, Category, Product, StoreProductPrice,
@@ -8,7 +5,6 @@ import type {
   Stock, StockMutation, SyncQueueItem
 } from '@/types'
 
-// ── Tipe tambahan ─────────────────────────────────────────────
 export interface Package {
   id: string; name: string; description?: string
   qty_total: number; price: number; is_mix: boolean
@@ -17,7 +13,7 @@ export interface Package {
 }
 export interface Material {
   id: string; name: string
-  category: 'bahan' | 'packaging' | 'lainnya'
+  category: 'bahan_baku'|'bahan_setengah_jadi'|'produk_menu'|'packaging'|'non_produksi'|'operasional'
   unit: string; unit_cost: number; min_stock: number
   is_active: boolean; created_at: string; updated_at: string
 }
@@ -84,6 +80,15 @@ export interface ProductionMutation {
 export interface ProductionMutationItem {
   id: string; mutation_id: string; product_id: string; product_name: string; qty: number
 }
+export interface WarehouseExpense {
+  id: string; name: string; amount: number
+  expense_date: string; category: string
+  notes?: string; created_by: string; created_at: string
+}
+export interface MenuRoleConfig {
+  id: string; role: string; menu_path: string
+  menu_label: string; is_visible: boolean; sort_order: number
+}
 
 export class CocoPuffDB extends Dexie {
   stores!:                   Table<Store>
@@ -118,6 +123,8 @@ export class CocoPuffDB extends Dexie {
   production_log_materials!: Table<ProductionLogMaterial>
   production_mutations!:     Table<ProductionMutation>
   production_mutation_items!:Table<ProductionMutationItem>
+  warehouse_expenses!:       Table<WarehouseExpense>
+  menu_role_config!:         Table<MenuRoleConfig>
 
   constructor() {
     super('CocoPuffPOS')
@@ -162,11 +169,33 @@ export class CocoPuffDB extends Dexie {
       production_mutations:      'id, mutation_type, status, created_at',
       production_mutation_items: 'id, mutation_id, product_id',
     })
+    this.version(4).stores({
+      ...base,
+      packages:                  'id, is_active, store_id',
+      materials:                 'id, name, category, is_active',
+      suppliers:                 'id, name, is_active',
+      partners:                  'id, name, is_active',
+      warehouse_stock:           'id, material_id',
+      production_stock:          'id, material_id',
+      finished_goods_stock:      'id, product_id',
+      purchases:                 'id, supplier_id, status, created_at',
+      purchase_items:            'id, purchase_id, material_id',
+      purchase_returns:          'id, purchase_id, material_id, created_at',
+      warehouse_mutations:       'id, mutation_type, status, created_at',
+      warehouse_mutation_items:  'id, mutation_id, material_id',
+      production_recipes:        'id, name, is_active',
+      production_recipe_items:   'id, recipe_id, material_id',
+      production_logs:           'id, recipe_id, created_at',
+      production_log_materials:  'id, log_id, material_id',
+      production_mutations:      'id, mutation_type, status, created_at',
+      production_mutation_items: 'id, mutation_id, product_id',
+      warehouse_expenses:        'id, category, expense_date, created_at',
+      menu_role_config:          'id, role, menu_path, [role+menu_path]',
+    })
   }
 }
 
 export const db = new CocoPuffDB()
-
 export function generateId(): string { return crypto.randomUUID() }
 export function now(): string { return new Date().toISOString() }
 

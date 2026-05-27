@@ -1,41 +1,63 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { useAuthStore } from '@/store/auth'
-import {
-  ShoppingCart, Package, BarChart3, Settings,
-  Layers, LogOut, Wifi, WifiOff, LayoutDashboard,
-  Warehouse, FlaskConical
-} from 'lucide-react'
-import { APP_NAME } from '@/lib/supabase'
+import { db } from '@/lib/db'
+import { supabase, APP_NAME } from '@/lib/supabase'
 import { isOnline } from '@/lib/sync'
 import { cn } from '@/lib/utils'
+import { LogOut, Wifi, WifiOff,
+  ShoppingCart, Package, Warehouse, FlaskConical,
+  BarChart3, LayoutDashboard, Settings, Layers,
+  LucideIcon } from 'lucide-react'
+import { useEffect } from 'react'
+
+const ICON_MAP: Record<string, LucideIcon> = {
+  '/kasir':     ShoppingCart,
+  '/produk':    Package,
+  '/stok':      Layers,
+  '/gudang':    Warehouse,
+  '/produksi':  FlaskConical,
+  '/laporan':   BarChart3,
+  '/owner':     LayoutDashboard,
+  '/pengaturan': Settings,
+}
 
 export default function Layout() {
   const { user, store, logout } = useAuthStore()
   const navigate = useNavigate()
   const online   = isOnline()
 
+  // Pull menu config dari Supabase saat pertama kali
+  useEffect(() => {
+    async function pullMenuConfig() {
+      const { data } = await supabase.from('menu_role_config').select('*')
+      if (data?.length) await db.menu_role_config.bulkPut(data)
+    }
+    pullMenuConfig()
+  }, [])
+
+  // Ambil menu dari DB berdasarkan role user
+  const menus = useLiveQuery(async () => {
+    if (!user) return []
+    const configs = await db.menu_role_config
+      .where('role').equals(user.role)
+      .filter(m => m.is_visible)
+      .sortBy('sort_order')
+    return configs
+  }, [user?.role]) || []
+
   function handleLogout() {
     if (confirm('Yakin ingin keluar?')) { logout(); navigate('/login') }
   }
-
-  const menus = [
-    { to: '/kasir',    icon: ShoppingCart,   label: 'Kasir',    roles: ['owner','manager','kasir'] },
-    { to: '/produk',   icon: Package,         label: 'Produk',   roles: ['owner','manager'] },
-    { to: '/stok',     icon: Layers,          label: 'Stok',     roles: ['owner','manager','gudang'] },
-    { to: '/gudang',   icon: Warehouse,       label: 'Gudang',   roles: ['owner','manager','gudang'] },
-    { to: '/produksi', icon: FlaskConical,    label: 'Produksi', roles: ['owner','manager','produksi'] },
-    { to: '/laporan',  icon: BarChart3,       label: 'Laporan',  roles: ['owner','manager'] },
-    { to: '/owner',    icon: LayoutDashboard, label: 'Dashboard',roles: ['owner'] },
-    { to: '/pengaturan',icon: Settings,       label: 'Setting',  roles: ['owner','manager'] },
-  ].filter(m => user && m.roles.includes(user.role))
 
   const storeName = store?.name || APP_NAME
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
+      {/* Header */}
       <header className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
         <div>
-          <h1 className="font-semibold text-gray-800 text-sm">{storeName}</h1>
+          <h1 className="font-semibold text-gray-800 text-sm leading-tight">{storeName}</h1>
           <p className="text-xs text-gray-500 capitalize">{user?.name} · {user?.role}</p>
         </div>
         <div className="flex items-center gap-3">
@@ -46,24 +68,31 @@ export default function Layout() {
         </div>
       </header>
 
-      <main className="flex-1 overflow-auto"><Outlet /></main>
+      {/* Main content */}
+      <main className="flex-1 overflow-auto min-h-0"><Outlet /></main>
 
-      <nav className="bg-white border-t border-gray-100 flex-shrink-0 pb-safe overflow-x-auto">
-        <div className="flex min-w-max">
-          {menus.map(({ to, icon: Icon, label }) => (
-            <NavLink key={to} to={to}
-              className={({ isActive }) => cn(
-                'flex flex-col items-center py-2.5 px-3 gap-1 text-xs transition-colors touch-manipulation min-w-[60px]',
-                isActive ? 'text-brand-600' : 'text-gray-400 active:text-gray-600'
-              )}>
-              {({ isActive }) => (
-                <>
-                  <Icon size={20} strokeWidth={isActive ? 2.5 : 1.8} />
-                  <span className={cn('font-medium', isActive && 'font-semibold')}>{label}</span>
-                </>
-              )}
-            </NavLink>
-          ))}
+      {/* Bottom navigation */}
+      <nav className="bg-white border-t border-gray-100 flex-shrink-0 overflow-x-auto">
+        <div className="flex">
+          {menus.map((menu) => {
+            const Icon = ICON_MAP[menu.menu_path] || Package
+            return (
+              <NavLink key={menu.menu_path} to={menu.menu_path}
+                className={({ isActive }) => cn(
+                  'flex-1 flex flex-col items-center py-2 gap-0.5 text-xs transition-colors min-w-[56px]',
+                  isActive ? 'text-brand-600' : 'text-gray-400'
+                )}>
+                {({ isActive }) => (
+                  <>
+                    <Icon size={20} strokeWidth={isActive ? 2.5 : 1.8} />
+                    <span className={cn('font-medium text-[10px]', isActive && 'font-semibold')}>
+                      {menu.menu_label}
+                    </span>
+                  </>
+                )}
+              </NavLink>
+            )
+          })}
         </div>
       </nav>
     </div>

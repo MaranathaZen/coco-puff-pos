@@ -11,120 +11,147 @@ export interface Package {
   is_active: boolean; store_id?: string
   created_at: string; updated_at: string
 }
+
+// Kategori material sesuai data nyata Coco Puff (tanpa produk_menu)
 export interface Material {
   id: string; name: string
-  category: 'bahan_baku'|'bahan_setengah_jadi'|'produk_menu'|'packaging'|'non_produksi'|'operasional'
+  category: 'bahan_baku' | 'bahan_setengah_jadi' | 'packaging' | 'non_produksi'
   unit: string; unit_cost: number; min_stock: number
   is_active: boolean; created_at: string; updated_at: string
+  // Moving average cost tracking
+  avg_cost?: number
+  total_qty_purchased?: number
+  total_cost_purchased?: number
 }
+
 export interface Supplier {
   id: string; name: string; phone?: string
   address?: string; is_active: boolean; created_at: string
 }
+
 export interface Partner {
   id: string; name: string; contact?: string
   address?: string; city?: string; is_active: boolean; created_at: string
 }
+
 export interface WarehouseStock {
   id: string; material_id: string; qty_on_hand: number; last_updated: string
 }
+
 export interface ProductionStock {
   id: string; material_id: string; qty_on_hand: number; last_updated: string
 }
+
 export interface FinishedGoodsStock {
   id: string; product_id: string; product_name: string
   qty_on_hand: number; last_updated: string
 }
+
 export interface Purchase {
   id: string; supplier_id?: string; invoice_no?: string
+  po_number?: string; payment_method?: string
   total_amount: number; status: string; notes?: string
   created_by: string; created_at: string
 }
+
 export interface PurchaseItem {
   id: string; purchase_id: string; material_id: string
   qty: number; unit_cost: number; subtotal: number; qty_returned: number
 }
+
 export interface PurchaseReturn {
   id: string; purchase_id?: string; material_id: string
   qty: number; reason?: string; created_by: string; created_at: string
 }
+
 export interface WarehouseMutation {
   id: string; mutation_type: string
   destination_id?: string; destination_name?: string
   notes?: string; status: string; created_by: string
   created_at: string; confirmed_at?: string; confirmed_by?: string
 }
+
 export interface WarehouseMutationItem {
   id: string; mutation_id: string; material_id: string; qty: number; unit_cost: number
 }
+
 export interface ProductionRecipe {
   id: string; name: string; batch_yield: number
   yield_unit: string; is_active: boolean; created_at: string
 }
+
 export interface ProductionRecipeItem {
-  id: string; recipe_id: string; material_id: string; qty_per_batch: number; notes?: string
+  id: string; recipe_id: string; material_id: string
+  qty_per_batch: number; notes?: string
 }
+
 export interface ProductionLog {
   id: string; recipe_id: string; batch_count: number
   total_yield: number; notes?: string; created_by: string; created_at: string
 }
+
 export interface ProductionLogMaterial {
   id: string; log_id: string; material_id: string; qty_used: number
 }
+
 export interface ProductionMutation {
   id: string; mutation_type: string
   destination_id?: string; destination_name?: string
   notes?: string; status: string; created_by: string
   created_at: string; confirmed_at?: string; confirmed_by?: string
 }
+
 export interface ProductionMutationItem {
   id: string; mutation_id: string; product_id: string; product_name: string; qty: number
 }
+
 export interface WarehouseExpense {
   id: string; name: string; amount: number
   expense_date: string; category: string
+  payment_method?: string
   notes?: string; created_by: string; created_at: string
 }
+
 export interface MenuRoleConfig {
   id: string; role: string; menu_path: string
   menu_label: string; is_visible: boolean; sort_order: number
 }
 
 export class CocoPuffDB extends Dexie {
-  stores!:                   Table<Store>
-  users!:                    Table<User>
-  shifts!:                   Table<Shift>
-  categories!:               Table<Category>
-  products!:                 Table<Product>
-  store_product_prices!:     Table<StoreProductPrice>
-  promotions!:               Table<Promotion>
-  ingredients!:              Table<Ingredient>
-  recipes!:                  Table<Recipe>
-  transactions!:             Table<Transaction>
-  transaction_items!:        Table<TransactionItem>
-  stock!:                    Table<Stock>
-  stock_mutations!:          Table<StockMutation>
-  packages!:                 Table<Package>
-  sync_queue!:               Table<SyncQueueItem>
-  materials!:                Table<Material>
-  suppliers!:                Table<Supplier>
-  partners!:                 Table<Partner>
-  warehouse_stock!:          Table<WarehouseStock>
-  production_stock!:         Table<ProductionStock>
-  finished_goods_stock!:     Table<FinishedGoodsStock>
-  purchases!:                Table<Purchase>
-  purchase_items!:           Table<PurchaseItem>
-  purchase_returns!:         Table<PurchaseReturn>
-  warehouse_mutations!:      Table<WarehouseMutation>
-  warehouse_mutation_items!: Table<WarehouseMutationItem>
-  production_recipes!:       Table<ProductionRecipe>
-  production_recipe_items!:  Table<ProductionRecipeItem>
-  production_logs!:          Table<ProductionLog>
-  production_log_materials!: Table<ProductionLogMaterial>
-  production_mutations!:     Table<ProductionMutation>
-  production_mutation_items!:Table<ProductionMutationItem>
-  warehouse_expenses!:       Table<WarehouseExpense>
-  menu_role_config!:         Table<MenuRoleConfig>
+  stores!:                    Table<Store>
+  users!:                     Table<User>
+  shifts!:                    Table<Shift>
+  categories!:                Table<Category>
+  products!:                  Table<Product>
+  store_product_prices!:      Table<StoreProductPrice>
+  promotions!:                Table<Promotion>
+  ingredients!:               Table<Ingredient>
+  recipes!:                   Table<Recipe>
+  transactions!:              Table<Transaction>
+  transaction_items!:         Table<TransactionItem>
+  stock!:                     Table<Stock>
+  stock_mutations!:           Table<StockMutation>
+  packages!:                  Table<Package>
+  sync_queue!:                Table<SyncQueueItem>
+  materials!:                 Table<Material>
+  suppliers!:                 Table<Supplier>
+  partners!:                  Table<Partner>
+  warehouse_stock!:           Table<WarehouseStock>
+  production_stock!:          Table<ProductionStock>
+  finished_goods_stock!:      Table<FinishedGoodsStock>
+  purchases!:                 Table<Purchase>
+  purchase_items!:            Table<PurchaseItem>
+  purchase_returns!:          Table<PurchaseReturn>
+  warehouse_mutations!:       Table<WarehouseMutation>
+  warehouse_mutation_items!:  Table<WarehouseMutationItem>
+  production_recipes!:        Table<ProductionRecipe>
+  production_recipe_items!:   Table<ProductionRecipeItem>
+  production_logs!:           Table<ProductionLog>
+  production_log_materials!:  Table<ProductionLogMaterial>
+  production_mutations!:      Table<ProductionMutation>
+  production_mutation_items!: Table<ProductionMutationItem>
+  warehouse_expenses!:        Table<WarehouseExpense>
+  menu_role_config!:          Table<MenuRoleConfig>
 
   constructor() {
     super('CocoPuffPOS')
@@ -146,51 +173,43 @@ export class CocoPuffDB extends Dexie {
       sync_queue:           'id, store_id, table_name, status, created_at',
     }
 
+    const v3v4shared = {
+      packages:                  'id, is_active, store_id',
+      materials:                 'id, name, category, is_active',
+      suppliers:                 'id, name, is_active',
+      partners:                  'id, name, is_active',
+      warehouse_stock:           'id, material_id',
+      production_stock:          'id, material_id',
+      finished_goods_stock:      'id, product_id',
+      purchases:                 'id, supplier_id, status, created_at',
+      purchase_items:            'id, purchase_id, material_id',
+      purchase_returns:          'id, purchase_id, material_id, created_at',
+      warehouse_mutations:       'id, mutation_type, status, created_at',
+      warehouse_mutation_items:  'id, mutation_id, material_id',
+      production_recipes:        'id, name, is_active',
+      production_recipe_items:   'id, recipe_id, material_id',
+      production_logs:           'id, recipe_id, created_at',
+      production_log_materials:  'id, log_id, material_id',
+      production_mutations:      'id, mutation_type, status, created_at',
+      production_mutation_items: 'id, mutation_id, product_id',
+    }
+
     this.version(1).stores(base)
     this.version(2).stores({ ...base, packages: 'id, is_active, store_id' })
-    this.version(3).stores({
-      ...base,
-      packages:                  'id, is_active, store_id',
-      materials:                 'id, name, category, is_active',
-      suppliers:                 'id, name, is_active',
-      partners:                  'id, name, is_active',
-      warehouse_stock:           'id, material_id',
-      production_stock:          'id, material_id',
-      finished_goods_stock:      'id, product_id',
-      purchases:                 'id, supplier_id, status, created_at',
-      purchase_items:            'id, purchase_id, material_id',
-      purchase_returns:          'id, purchase_id, material_id, created_at',
-      warehouse_mutations:       'id, mutation_type, status, created_at',
-      warehouse_mutation_items:  'id, mutation_id, material_id',
-      production_recipes:        'id, name, is_active',
-      production_recipe_items:   'id, recipe_id, material_id',
-      production_logs:           'id, recipe_id, created_at',
-      production_log_materials:  'id, log_id, material_id',
-      production_mutations:      'id, mutation_type, status, created_at',
-      production_mutation_items: 'id, mutation_id, product_id',
-    })
+    this.version(3).stores({ ...base, ...v3v4shared })
     this.version(4).stores({
       ...base,
-      packages:                  'id, is_active, store_id',
-      materials:                 'id, name, category, is_active',
-      suppliers:                 'id, name, is_active',
-      partners:                  'id, name, is_active',
-      warehouse_stock:           'id, material_id',
-      production_stock:          'id, material_id',
-      finished_goods_stock:      'id, product_id',
-      purchases:                 'id, supplier_id, status, created_at',
-      purchase_items:            'id, purchase_id, material_id',
-      purchase_returns:          'id, purchase_id, material_id, created_at',
-      warehouse_mutations:       'id, mutation_type, status, created_at',
-      warehouse_mutation_items:  'id, mutation_id, material_id',
-      production_recipes:        'id, name, is_active',
-      production_recipe_items:   'id, recipe_id, material_id',
-      production_logs:           'id, recipe_id, created_at',
-      production_log_materials:  'id, log_id, material_id',
-      production_mutations:      'id, mutation_type, status, created_at',
-      production_mutation_items: 'id, mutation_id, product_id',
-      warehouse_expenses:        'id, category, expense_date, created_at',
-      menu_role_config:          'id, role, menu_path, [role+menu_path]',
+      ...v3v4shared,
+      warehouse_expenses: 'id, category, expense_date, created_at',
+      menu_role_config:   'id, role, menu_path, [role+menu_path]',
+    })
+    // v5: tambah index po_number di purchases, payment_method di expenses
+    this.version(5).stores({
+      ...base,
+      ...v3v4shared,
+      warehouse_expenses: 'id, category, expense_date, created_at',
+      menu_role_config:   'id, role, menu_path, [role+menu_path]',
+      purchases:          'id, supplier_id, status, created_at, po_number',
     })
   }
 }
@@ -200,9 +219,11 @@ export function generateId(): string { return crypto.randomUUID() }
 export function now(): string { return new Date().toISOString() }
 
 export async function addToSyncQueue(
-  table_name: string, record_id: string,
+  table_name: string,
+  record_id: string,
   operation: 'insert' | 'update' | 'delete',
-  payload: object, store_id: string
+  payload: object,
+  store_id: string
 ) {
   await db.sync_queue.add({
     id: generateId(), store_id, table_name, record_id, operation,

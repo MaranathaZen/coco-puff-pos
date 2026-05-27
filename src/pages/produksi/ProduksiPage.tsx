@@ -302,18 +302,6 @@ function CatatProduksiTab({ userId }: { userId: string }) {
 
   return (
     <div className="p-4 space-y-3">
-      {/* Toolbar */}
-      <div className="flex gap-2">
-        <button onClick={() => setShowForm(true)}
-          className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium">
-          <Plus size={15} /> Catat Produksi
-        </button>
-        <button onClick={() => { setEditResep(null); setShowResep(true) }}
-          className="flex items-center gap-1.5 px-3 py-2.5 border border-gray-200 bg-white text-gray-700 rounded-xl text-sm font-medium">
-          Resep
-        </button>
-      </div>
-
       {/* Log produksi — grouped */}
       {(() => {
         const grouped = groupBy(logs || [], l => groupKey(l.created_at, groupMode))

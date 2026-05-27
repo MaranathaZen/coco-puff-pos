@@ -29,8 +29,19 @@ const ICON_MAP: Record<string, LucideIcon> = {
 
 // Default menu per role — fallback kalau menu_role_config belum di-set di DB
 const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
-  owner:    [
+  // Owner: Dashboard · Gudang · Produksi · Kasir · [Lainnya: Laporan, Setting, Tutup Toko]
+  owner: [
     { path: '/owner',          label: 'Dashboard' },
+    { path: '/gudang',         label: 'Gudang' },
+    { path: '/produksi',       label: 'Produksi' },
+    { path: '/kasir',          label: 'Kasir' },
+    { path: '/laporan',        label: 'Laporan' },
+    { path: '/laporan-gudang', label: 'Lap. Gudang' },
+    { path: '/pengaturan',     label: 'Setting' },
+    { path: '/tutup-toko',     label: 'Tutup Toko' },
+  ],
+  // Manager: Kasir · Gudang · Produksi · Laporan · [Lainnya: Setting, Tutup Toko]
+  manager: [
     { path: '/kasir',          label: 'Kasir' },
     { path: '/gudang',         label: 'Gudang' },
     { path: '/produksi',       label: 'Produksi' },
@@ -38,21 +49,17 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
     { path: '/pengaturan',     label: 'Setting' },
     { path: '/tutup-toko',     label: 'Tutup Toko' },
   ],
-  manager:  [
-    { path: '/kasir',          label: 'Kasir' },
-    { path: '/laporan',        label: 'Laporan' },
-    { path: '/gudang',         label: 'Gudang' },
-    { path: '/pengaturan',     label: 'Setting' },
-    { path: '/tutup-toko',     label: 'Tutup Toko' },
-  ],
-  kasir:    [
+  // Kasir: Kasir · Tutup Toko
+  kasir: [
     { path: '/kasir',          label: 'Kasir' },
     { path: '/tutup-toko',     label: 'Tutup Toko' },
   ],
-  gudang:   [
+  // Gudang: Gudang · Lap. Gudang
+  gudang: [
     { path: '/gudang',         label: 'Gudang' },
     { path: '/laporan-gudang', label: 'Lap. Gudang' },
   ],
+  // Produksi: Produksi saja
   produksi: [
     { path: '/produksi',       label: 'Produksi' },
   ],

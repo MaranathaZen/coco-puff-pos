@@ -10,7 +10,7 @@ import toast from 'react-hot-toast'
 import type { User, Role } from '@/types'
 import type { Supplier, Partner, MenuRoleConfig } from '@/lib/db'
 
-type Tab = 'users' | 'supplier' | 'mitra' | 'menu' | 'toko' | 'password'
+type Tab = 'users' | 'supplier' | 'mitra' | 'menu' | 'toko' | 'password' | 'ppn'
 
 const ALL_MENUS = [
   { path: '/kasir',         label: 'Kasir' },
@@ -40,6 +40,7 @@ export default function SettingsPage() {
     { id: 'menu',     label: 'Menu', ownerOnly: true },
     { id: 'toko',     label: 'Toko', ownerOnly: true },
     { id: 'password', label: 'Password' },
+    { id: 'ppn',      label: 'PPN', ownerOnly: true },
   ].filter(t => !t.ownerOnly || isOwner)
 
   return (
@@ -66,6 +67,7 @@ export default function SettingsPage() {
         {tab === 'menu'     && <MenuConfigTab />}
         {tab === 'toko'     && <TokoTab />}
         {tab === 'password' && <ChangePasswordTab userId={user!.id} storeId={user!.store_id} />}
+        {tab === 'ppn'      && <PPNTab storeId={user!.store_id} />}
       </div>
     </div>
   )
@@ -600,5 +602,138 @@ function MitraForm({ partner, onClose }: { partner: Partner | null; onClose: () 
         </button>
       </div>
     </Modal>
+  )
+}
+
+// ── PPN TAB ───────────────────────────────────────────────────
+function PPNTab({ storeId }: { storeId: string }) {
+  const [enabled, setEnabled]   = useState(false)
+  const [rate, setRate]         = useState('11')
+  const [mode, setMode]         = useState<'include' | 'exclude'>('include')
+  const [saving, setSaving]     = useState(false)
+  const [loaded, setLoaded]     = useState(false)
+
+  // Load dari localStorage per store
+  useEffect(() => {
+    const saved = localStorage.getItem(`ppn_config_${storeId}`)
+    if (saved) {
+      try {
+        const cfg = JSON.parse(saved)
+        setEnabled(cfg.enabled ?? false)
+        setRate(String(cfg.rate ?? 11))
+        setMode(cfg.mode ?? 'include')
+      } catch {}
+    }
+    setLoaded(true)
+  }, [storeId])
+
+  async function handleSave() {
+    setSaving(true)
+    try {
+      const cfg = { enabled, rate: Number(rate), mode }
+      localStorage.setItem(`ppn_config_${storeId}`, JSON.stringify(cfg))
+      // Simpan ke Supabase juga agar sync antar device
+      await supabase.from('stores').update({
+        ppn_enabled: enabled,
+        ppn_rate: Number(rate),
+        ppn_mode: mode,
+      }).eq('id', storeId)
+      toast.success('Setting PPN disimpan')
+    } catch {
+      // Fallback: localStorage saja
+      toast.success('Setting PPN disimpan (lokal)')
+    } finally { setSaving(false) }
+  }
+
+  if (!loaded) return <div className="p-4 text-sm text-gray-400">Memuat...</div>
+
+  return (
+    <div className="p-4 space-y-4">
+      {/* Toggle PPN */}
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-4">
+          <div>
+            <p className="text-sm font-medium text-gray-900">Aktifkan PPN</p>
+            <p className="text-xs text-gray-400 mt-0.5">PPN akan ditampilkan di struk dan laporan</p>
+          </div>
+          <button onClick={() => setEnabled(!enabled)}
+            className={`w-11 h-6 rounded-full transition-colors relative ${enabled ? 'bg-gray-900' : 'bg-gray-200'}`}>
+            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${enabled ? 'left-[22px]' : 'left-0.5'}`} />
+          </button>
+        </div>
+      </div>
+
+      {enabled && (
+        <>
+          {/* Tarif PPN */}
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-50">
+              <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-1.5">Tarif PPN (%)</p>
+              <div className="flex items-center gap-3">
+                <input
+                  className="input w-24 text-lg font-semibold text-center"
+                  type="number" min="0" max="100" step="0.5"
+                  value={rate}
+                  onChange={e => setRate(e.target.value)}
+                />
+                <span className="text-sm text-gray-500">persen</span>
+              </div>
+              <p className="text-xs text-gray-400 mt-1.5">Standar Indonesia: 11%</p>
+            </div>
+
+            {/* Mode PPN */}
+            <div className="px-4 py-3">
+              <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-2">Mode PPN</p>
+              <div className="space-y-2">
+                <button onClick={() => setMode('include')}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors ${
+                    mode === 'include' ? 'border-gray-900 bg-gray-50' : 'border-gray-100'
+                  }`}>
+                  <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${mode === 'include' ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`} />
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">Include (sudah termasuk)</p>
+                    <p className="text-xs text-gray-400">Harga yang tertera sudah include PPN. Struk menampilkan rincian PPN dari harga.</p>
+                  </div>
+                </button>
+                <button onClick={() => setMode('exclude')}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors ${
+                    mode === 'exclude' ? 'border-gray-900 bg-gray-50' : 'border-gray-100'
+                  }`}>
+                  <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${mode === 'exclude' ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`} />
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">Exclude (ditambahkan)</p>
+                    <p className="text-xs text-gray-400">PPN dihitung dan ditambahkan di atas harga saat checkout.</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Preview kalkulasi */}
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+            <p className="text-xs font-medium text-blue-700 mb-2">Contoh Kalkulasi</p>
+            {mode === 'include' ? (
+              <div className="space-y-1 text-xs text-blue-600">
+                <div className="flex justify-between"><span>Harga tertera</span><span>Rp 10.000</span></div>
+                <div className="flex justify-between"><span>DPP (harga sebelum PPN)</span><span>Rp {(10000 / (1 + Number(rate)/100)).toLocaleString('id-ID', {maximumFractionDigits: 0})}</span></div>
+                <div className="flex justify-between font-medium"><span>PPN {rate}%</span><span>Rp {(10000 - 10000 / (1 + Number(rate)/100)).toLocaleString('id-ID', {maximumFractionDigits: 0})}</span></div>
+                <div className="flex justify-between font-semibold border-t border-blue-200 pt-1 mt-1"><span>Dibayar customer</span><span>Rp 10.000</span></div>
+              </div>
+            ) : (
+              <div className="space-y-1 text-xs text-blue-600">
+                <div className="flex justify-between"><span>Harga produk</span><span>Rp 10.000</span></div>
+                <div className="flex justify-between font-medium"><span>PPN {rate}%</span><span>Rp {(10000 * Number(rate) / 100).toLocaleString('id-ID', {maximumFractionDigits: 0})}</span></div>
+                <div className="flex justify-between font-semibold border-t border-blue-200 pt-1 mt-1"><span>Dibayar customer</span><span>Rp {(10000 * (1 + Number(rate)/100)).toLocaleString('id-ID', {maximumFractionDigits: 0})}</span></div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      <button onClick={handleSave} disabled={saving}
+        className="w-full py-3 bg-gray-900 text-white rounded-xl text-sm font-medium disabled:opacity-50">
+        {saving ? 'Menyimpan...' : 'Simpan Setting PPN'}
+      </button>
+    </div>
   )
 }

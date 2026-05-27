@@ -5,23 +5,41 @@ import { db, generateId, now, addToSyncQueue } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { hashPassword } from '@/lib/utils'
-import { X, ChevronRight, Plus } from 'lucide-react'
+import { X, ChevronRight, Plus, Check } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { User, Role } from '@/types'
-import type { Supplier, Partner } from '@/lib/db'
+import type { Supplier, Partner, MenuRoleConfig } from '@/lib/db'
 
-type Tab = 'users' | 'supplier' | 'mitra' | 'password'
+type Tab = 'users' | 'supplier' | 'mitra' | 'menu' | 'password'
+
+// Semua menu yang tersedia di sistem
+const ALL_MENUS = [
+  { path: '/kasir',         label: 'Kasir' },
+  { path: '/produk',        label: 'Produk' },
+  { path: '/stok',          label: 'Stok' },
+  { path: '/gudang',        label: 'Gudang' },
+  { path: '/produksi',      label: 'Produksi' },
+  { path: '/laporan',       label: 'Laporan' },
+  { path: '/laporan-gudang',label: 'Lap. Gudang' },
+  { path: '/owner',         label: 'Dashboard' },
+  { path: '/pengaturan',    label: 'Setting' },
+]
+
+const ROLES = ['owner', 'manager', 'kasir', 'gudang', 'produksi']
 
 export default function SettingsPage() {
   const { user } = useAuthStore()
   const [tab, setTab] = useState<Tab>('users')
 
-  const tabs: { id: Tab; label: string }[] = [
+  const isOwner = user?.role === 'owner'
+
+  const tabs: { id: Tab; label: string; ownerOnly?: boolean }[] = [
     { id: 'users',    label: 'User' },
     { id: 'supplier', label: 'Supplier' },
     { id: 'mitra',    label: 'Mitra' },
+    { id: 'menu',     label: 'Menu', ownerOnly: true },
     { id: 'password', label: 'Password' },
-  ]
+  ].filter(t => !t.ownerOnly || isOwner)
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -29,10 +47,10 @@ export default function SettingsPage() {
         <h1 className="text-lg font-semibold text-gray-900">Pengaturan</h1>
       </div>
 
-      <div className="px-4 mt-3 flex gap-0 border-b border-gray-100">
+      <div className="px-4 mt-3 flex gap-0 border-b border-gray-100 overflow-x-auto">
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            className={`pb-2.5 mr-5 text-sm font-medium border-b-2 transition-colors ${
+            className={`pb-2.5 mr-5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
               tab === t.id ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'
             }`}>
             {t.label}
@@ -44,8 +62,92 @@ export default function SettingsPage() {
         {tab === 'users'    && <UsersTab currentUser={user!} />}
         {tab === 'supplier' && <SupplierTab />}
         {tab === 'mitra'    && <MitraTab />}
+        {tab === 'menu'     && <MenuConfigTab />}
         {tab === 'password' && <ChangePasswordTab userId={user!.id} storeId={user!.store_id} />}
       </div>
+    </div>
+  )
+}
+
+// ── MENU CONFIG TAB ───────────────────────────────────────────
+function MenuConfigTab() {
+  const [selectedRole, setSelectedRole] = useState('kasir')
+  const [saving, setSaving] = useState(false)
+
+  const configs = useLiveQuery(async () => {
+    // Pull dari Supabase dulu
+    const { data } = await supabase.from('menu_role_config').select('*')
+    if (data?.length) await db.menu_role_config.bulkPut(data)
+    return db.menu_role_config.where('role').equals(selectedRole).toArray()
+  }, [selectedRole])
+
+  const configMap = Object.fromEntries((configs || []).map(c => [c.menu_path, c]))
+
+  async function toggleMenu(path: string, label: string) {
+    const existing = configMap[path]
+    setSaving(true)
+    try {
+      if (existing) {
+        // Toggle visibility
+        const updated = { ...existing, is_visible: !existing.is_visible }
+        await db.menu_role_config.put(updated)
+        await supabase.from('menu_role_config').upsert(updated)
+      } else {
+        // Tambah baru
+        const newConfig: MenuRoleConfig = {
+          id: `mc-${selectedRole}-${path.replace('/', '')}`,
+          role: selectedRole,
+          menu_path: path,
+          menu_label: label,
+          is_visible: true,
+          sort_order: ALL_MENUS.findIndex(m => m.path === path) + 1,
+        }
+        await db.menu_role_config.put(newConfig)
+        await supabase.from('menu_role_config').upsert(newConfig)
+      }
+      toast.success('Menu diperbarui')
+    } catch { toast.error('Gagal menyimpan') }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="p-4 space-y-3">
+      <p className="text-xs text-gray-400">Pilih role lalu centang menu yang ingin ditampilkan</p>
+
+      {/* Role selector */}
+      <div className="flex flex-wrap gap-2">
+        {ROLES.map(r => (
+          <button key={r} onClick={() => setSelectedRole(r)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium border capitalize transition-colors ${
+              selectedRole === r ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 text-gray-600'
+            }`}>{r}</button>
+        ))}
+      </div>
+
+      {/* Menu list */}
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        {ALL_MENUS.map((menu, idx) => {
+          const config  = configMap[menu.path]
+          const visible = config?.is_visible ?? false
+          return (
+            <button key={menu.path} onClick={() => toggleMenu(menu.path, menu.label)}
+              disabled={saving}
+              className={`w-full flex items-center px-4 py-3 text-left transition-colors active:bg-gray-50 ${
+                idx !== 0 ? 'border-t border-gray-50' : ''
+              }`}>
+              <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center mr-3 flex-shrink-0 transition-colors ${
+                visible ? 'bg-gray-900 border-gray-900' : 'border-gray-300'
+              }`}>
+                {visible && <Check size={12} className="text-white" strokeWidth={3} />}
+              </div>
+              <p className="text-sm text-gray-800 flex-1">{menu.label}</p>
+              <p className="text-xs text-gray-400">{menu.path}</p>
+            </button>
+          )
+        })}
+      </div>
+
+      <p className="text-xs text-gray-400 text-center">Perubahan langsung aktif saat user login ulang</p>
     </div>
   )
 }
@@ -233,17 +335,6 @@ function Label({ children }: { children: React.ReactNode }) {
   return <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">{children}</label>
 }
 
-function SaveButtons({ onClose, saving }: { onClose: () => void; saving: boolean }) {
-  return (
-    <div className="flex gap-3 pt-1 border-t border-gray-100">
-      <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-      <button type="submit" disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
-        {saving ? 'Menyimpan...' : 'Simpan'}
-      </button>
-    </div>
-  )
-}
-
 // ── FORM: User ────────────────────────────────────────────────
 function UserForm({ user, onClose, storeId }: { user: User | null; onClose: () => void; storeId: string }) {
   const [name, setName]      = useState(user?.name || '')
@@ -321,7 +412,6 @@ function SupplierForm({ supplier, onClose }: { supplier: Supplier | null; onClos
     if (!name.trim()) return toast.error('Nama supplier wajib diisi')
     setSaving(true)
     try {
-      const isNew = !supplier
       const data: Supplier = {
         id: supplier?.id || generateId(), name: name.trim(),
         phone: phone || undefined, address: address || undefined,
@@ -329,7 +419,7 @@ function SupplierForm({ supplier, onClose }: { supplier: Supplier | null; onClos
       }
       await db.suppliers.put(data)
       await supabase.from('suppliers').upsert(data)
-      toast.success(isNew ? 'Supplier ditambahkan' : 'Supplier diupdate')
+      toast.success(supplier ? 'Supplier diupdate' : 'Supplier ditambahkan')
       onClose()
     } finally { setSaving(false) }
   }
@@ -369,7 +459,6 @@ function MitraForm({ partner, onClose }: { partner: Partner | null; onClose: () 
     if (!name.trim()) return toast.error('Nama mitra wajib diisi')
     setSaving(true)
     try {
-      const isNew = !partner
       const data: Partner = {
         id: partner?.id || generateId(), name: name.trim(),
         contact: contact || undefined, city: city || undefined,
@@ -378,7 +467,7 @@ function MitraForm({ partner, onClose }: { partner: Partner | null; onClose: () 
       }
       await db.partners.put(data)
       await supabase.from('partners').upsert(data)
-      toast.success(isNew ? 'Mitra ditambahkan' : 'Mitra diupdate')
+      toast.success(partner ? 'Mitra diupdate' : 'Mitra ditambahkan')
       onClose()
     } finally { setSaving(false) }
   }

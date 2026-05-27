@@ -1,6 +1,7 @@
 /**
  * Auth store — menyimpan user yang login, store aktif, dan shift.
  * Shift otomatis dibuka saat login, ditutup saat logout.
+ * forceLogout: dipanggil setelah ganti password/PIN — wajib login ulang.
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
@@ -16,43 +17,38 @@ interface AuthState {
   isLoading:   boolean
   error:       string | null
 
-  login:      (username: string, password: string) => Promise<boolean>
-  logout:     () => void
-  setShift:   (shift: Shift | null) => void
-  clearError: () => void
+  login:        (username: string, password: string) => Promise<boolean>
+  logout:       () => void
+  forceLogout:  () => void   // ← dipanggil setelah ganti password/PIN
+  setShift:     (shift: Shift | null) => void
+  clearError:   () => void
 }
 
 async function openShift(user: User): Promise<Shift> {
-  // Cek apakah sudah ada shift terbuka
   const allShifts = await db.shifts
     .where('user_id').equals(user.id)
     .toArray()
   const existing = allShifts.find(s => s.status === 'open')
   if (existing) return existing
 
-  // Buat shift baru
   const shift: Shift = {
-    id:            generateId(),
-    store_id:      user.store_id,
-    user_id:       user.id,
-    opened_at:     now(),
-    closed_at:     undefined,
-    opening_cash:  0,
-    closing_cash:  0,
-    status:        'open',
-    total_trx:     0,
-    total_sales:   0,
+    id:           generateId(),
+    store_id:     user.store_id,
+    user_id:      user.id,
+    opened_at:    now(),
+    closed_at:    undefined,
+    opening_cash: 0,
+    closing_cash: 0,
+    status:       'open',
+    total_trx:    0,
+    total_sales:  0,
   }
-
   await db.shifts.add(shift)
-
-  // Sync ke Supabase
   try {
     await supabase.from('shifts').insert(shift)
-  } catch (e) {
+  } catch {
     console.warn('[SHIFT] Gagal sync ke Supabase, akan retry nanti')
   }
-
   return shift
 }
 
@@ -60,8 +56,10 @@ async function closeShift(shift: Shift): Promise<void> {
   const updated = { ...shift, status: 'closed' as const, closed_at: now() }
   await db.shifts.put(updated)
   try {
-    await supabase.from('shifts').update({ status: 'closed', closed_at: updated.closed_at }).eq('id', shift.id)
-  } catch (e) {
+    await supabase.from('shifts')
+      .update({ status: 'closed', closed_at: updated.closed_at })
+      .eq('id', shift.id)
+  } catch {
     console.warn('[SHIFT] Gagal close shift ke Supabase')
   }
 }
@@ -79,7 +77,6 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null })
         try {
           const hashed = await hashPassword(password)
-
           const user = await db.users
             .where('username').equals(username)
             .filter(u => u.is_active)
@@ -96,7 +93,6 @@ export const useAuthStore = create<AuthState>()(
 
           const store = await db.stores.get(user.store_id) || null
 
-          // Buka shift otomatis untuk kasir dan manager
           let shift: Shift | null = null
           if (['kasir', 'manager', 'owner'].includes(user.role)) {
             shift = await openShift(user)
@@ -104,7 +100,7 @@ export const useAuthStore = create<AuthState>()(
 
           set({ user, store, activeShift: shift, isLoading: false })
           return true
-        } catch (e) {
+        } catch {
           set({ error: 'Terjadi kesalahan', isLoading: false })
           return false
         }
@@ -112,21 +108,42 @@ export const useAuthStore = create<AuthState>()(
 
       logout: async () => {
         const { activeShift } = get()
-        // Tutup shift saat logout
         if (activeShift && activeShift.status === 'open') {
           await closeShift(activeShift)
         }
         set({ user: null, store: null, activeShift: null })
       },
 
-      setShift: (shift) => set({ activeShift: shift }),
-      clearError: () => set({ error: null }),
+      /**
+       * forceLogout — dipanggil setelah user berhasil ganti password/PIN.
+       * Menutup shift aktif (sama seperti logout biasa), lalu clear session.
+       * User akan diarahkan ke /login oleh App.tsx / ProtectedRoute.
+       *
+       * Cara pakai di SettingsPage:
+       *   const { forceLogout } = useAuthStore()
+       *   // setelah simpan password baru:
+       *   toast.success('Password berhasil diubah. Silakan login ulang.')
+       *   forceLogout()
+       */
+      forceLogout: async () => {
+        const { activeShift } = get()
+        if (activeShift && activeShift.status === 'open') {
+          await closeShift(activeShift)
+        }
+        // Beri jeda singkat agar toast sempat tampil
+        setTimeout(() => {
+          set({ user: null, store: null, activeShift: null })
+        }, 1500)
+      },
+
+      setShift:   (shift) => set({ activeShift: shift }),
+      clearError: ()      => set({ error: null }),
     }),
     {
       name: 'cocopuff-auth',
       partialize: (state) => ({
-        user: state.user,
-        store: state.store,
+        user:        state.user,
+        store:       state.store,
         activeShift: state.activeShift,
       }),
     }

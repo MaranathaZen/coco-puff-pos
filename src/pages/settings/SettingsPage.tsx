@@ -73,66 +73,86 @@ export default function SettingsPage() {
 function MenuConfigTab() {
   const [selectedRole, setSelectedRole] = useState('kasir')
   const [saving, setSaving] = useState(false)
+  // State lokal untuk visibility — tidak bergantung pada DB re-fetch
+  const [visibilityMap, setVisibilityMap] = useState<Record<string, boolean>>({})
+  const [loaded, setLoaded] = useState(false)
 
-  const configs = useLiveQuery(async () => {
-    // Pull dari Supabase dulu
-    const { data } = await supabase.from('menu_role_config').select('*')
-    if (data?.length) await db.menu_role_config.bulkPut(data)
-    return db.menu_role_config.where('role').equals(selectedRole).toArray()
-  }, [selectedRole])
+  // Load config saat role berubah
+  async function loadConfigs(role: string) {
+    setLoaded(false)
+    try {
+      const { data } = await supabase.from('menu_role_config').select('*').eq('role', role)
+      if (data?.length) await db.menu_role_config.bulkPut(data)
+      const configs = await db.menu_role_config.where('role').equals(role).toArray()
+      const map: Record<string, boolean> = {}
+      for (const c of configs) map[c.menu_path] = c.is_visible
+      setVisibilityMap(map)
+    } finally { setLoaded(true) }
+  }
 
-  const configMap = Object.fromEntries((configs || []).map(c => [c.menu_path, c]))
+  // Load saat pertama kali dan saat role berubah
+  useState(() => { loadConfigs(selectedRole) })
+
+  function handleRoleChange(role: string) {
+    setSelectedRole(role)
+    loadConfigs(role)
+  }
 
   async function toggleMenu(path: string, label: string) {
-    const existing = configMap[path]
+    const currentVisible = visibilityMap[path] ?? false
+    const newVisible = !currentVisible
+
+    // Update state lokal dulu (optimistic)
+    setVisibilityMap(prev => ({ ...prev, [path]: newVisible }))
+
     setSaving(true)
     try {
+      const existing = await db.menu_role_config
+        .where('[role+menu_path]').equals([selectedRole, path]).first()
+
       if (existing) {
-        // Toggle visibility
-        const updated = { ...existing, is_visible: !existing.is_visible }
+        const updated = { ...existing, is_visible: newVisible }
         await db.menu_role_config.put(updated)
         await supabase.from('menu_role_config').upsert(updated)
       } else {
-        // Tambah baru
         const newConfig: MenuRoleConfig = {
-          id: `mc-${selectedRole}-${path.replace('/', '')}`,
-          role: selectedRole,
-          menu_path: path,
-          menu_label: label,
-          is_visible: true,
+          id: `mc-${selectedRole}-${path.replace(/\//g, '')}`,
+          role: selectedRole, menu_path: path, menu_label: label,
+          is_visible: newVisible,
           sort_order: ALL_MENUS.findIndex(m => m.path === path) + 1,
         }
         await db.menu_role_config.put(newConfig)
         await supabase.from('menu_role_config').upsert(newConfig)
       }
-      toast.success('Menu diperbarui')
-    } catch { toast.error('Gagal menyimpan') }
-    finally { setSaving(false) }
+    } catch {
+      // Rollback jika gagal
+      setVisibilityMap(prev => ({ ...prev, [path]: currentVisible }))
+      toast.error('Gagal menyimpan')
+    } finally { setSaving(false) }
   }
 
   return (
     <div className="p-4 space-y-3">
       <p className="text-xs text-gray-400">Pilih role lalu centang menu yang ingin ditampilkan</p>
 
-      {/* Role selector */}
       <div className="flex flex-wrap gap-2">
         {ROLES.map(r => (
-          <button key={r} onClick={() => setSelectedRole(r)}
+          <button key={r} onClick={() => handleRoleChange(r)}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium border capitalize transition-colors ${
               selectedRole === r ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 text-gray-600'
             }`}>{r}</button>
         ))}
       </div>
 
-      {/* Menu list */}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        {ALL_MENUS.map((menu, idx) => {
-          const config  = configMap[menu.path]
-          const visible = config?.is_visible ?? false
+        {!loaded ? (
+          <div className="py-8 text-center text-sm text-gray-400">Memuat...</div>
+        ) : ALL_MENUS.map((menu, idx) => {
+          const visible = visibilityMap[menu.path] ?? false
           return (
             <button key={menu.path} onClick={() => toggleMenu(menu.path, menu.label)}
               disabled={saving}
-              className={`w-full flex items-center px-4 py-3 text-left transition-colors active:bg-gray-50 ${
+              className={`w-full flex items-center px-4 py-3 text-left active:bg-gray-50 ${
                 idx !== 0 ? 'border-t border-gray-50' : ''
               }`}>
               <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center mr-3 flex-shrink-0 transition-colors ${
@@ -147,7 +167,7 @@ function MenuConfigTab() {
         })}
       </div>
 
-      <p className="text-xs text-gray-400 text-center">Perubahan langsung aktif saat user login ulang</p>
+      <p className="text-xs text-gray-400 text-center">Perubahan aktif saat user login ulang</p>
     </div>
   )
 }

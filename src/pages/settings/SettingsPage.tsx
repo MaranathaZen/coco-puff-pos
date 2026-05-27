@@ -299,11 +299,12 @@ function UserForm({ user, onClose, storeId }: { user: User | null; onClose: () =
           <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} />
         </button>
       </div>
-      <SaveButtons onClose={onClose} saving={saving} />
-      {/* hidden submit trigger */}
-      <button className="hidden" onClick={handleSave} />
-      <div className="hidden"><button onClick={handleSave} /></div>
-      {/* actual save via SaveButtons needs onClick */}
+      <div className="flex gap-3 pt-1 border-t border-gray-100">
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+          {saving ? 'Menyimpan...' : 'Simpan'}
+        </button>
+      </div>
     </Modal>
   )
 }

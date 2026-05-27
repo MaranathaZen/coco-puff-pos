@@ -51,6 +51,7 @@ export default function Layout() {
     if (confirm('Yakin ingin keluar?')) { logout(); navigate('/login') }
   }
 
+  const storeName = user?.role === 'owner' ? APP_NAME : (store?.name || APP_NAME)
   const roleLabel = user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : ''
 
   return (

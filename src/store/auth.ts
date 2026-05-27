@@ -1,16 +1,17 @@
 /**
  * Auth store — menyimpan user yang login, store aktif, dan shift.
- * STORE_ID diambil dari data user, bukan env variable.
+ * Shift otomatis dibuka saat login, ditutup saat logout.
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { User, Shift, Store } from '@/types'
-import { db } from '@/lib/db'
+import { db, generateId, now } from '@/lib/db'
+import { supabase } from '@/lib/supabase'
 import { hashPassword } from '@/lib/utils'
 
 interface AuthState {
   user:        User | null
-  store:       Store | null   // ← toko aktif user yang login
+  store:       Store | null
   activeShift: Shift | null
   isLoading:   boolean
   error:       string | null
@@ -21,9 +22,55 @@ interface AuthState {
   clearError: () => void
 }
 
+async function openShift(user: User): Promise<Shift> {
+  // Cek apakah sudah ada shift terbuka hari ini
+  const today = new Date().toISOString().slice(0, 10)
+  const existing = await db.shifts
+    .where('user_id').equals(user.id)
+    .filter(s => s.status === 'open' && s.opened_at.startsWith(today))
+    .last()
+
+  if (existing) return existing
+
+  // Buat shift baru
+  const shift: Shift = {
+    id:            generateId(),
+    store_id:      user.store_id,
+    user_id:       user.id,
+    opened_at:     now(),
+    closed_at:     undefined,
+    opening_cash:  0,
+    closing_cash:  0,
+    status:        'open',
+    total_trx:     0,
+    total_sales:   0,
+  }
+
+  await db.shifts.add(shift)
+
+  // Sync ke Supabase
+  try {
+    await supabase.from('shifts').insert(shift)
+  } catch (e) {
+    console.warn('[SHIFT] Gagal sync ke Supabase, akan retry nanti')
+  }
+
+  return shift
+}
+
+async function closeShift(shift: Shift): Promise<void> {
+  const updated = { ...shift, status: 'closed' as const, closed_at: now() }
+  await db.shifts.put(updated)
+  try {
+    await supabase.from('shifts').update({ status: 'closed', closed_at: updated.closed_at }).eq('id', shift.id)
+  } catch (e) {
+    console.warn('[SHIFT] Gagal close shift ke Supabase')
+  }
+}
+
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       user:        null,
       store:       null,
       activeShift: null,
@@ -35,7 +82,6 @@ export const useAuthStore = create<AuthState>()(
         try {
           const hashed = await hashPassword(password)
 
-          // Cari user (bisa by username atau by id untuk kasir PIN)
           const user = await db.users
             .where('username').equals(username)
             .filter(u => u.is_active)
@@ -50,16 +96,15 @@ export const useAuthStore = create<AuthState>()(
             return false
           }
 
-          // Ambil data toko dari store_id user
           const store = await db.stores.get(user.store_id) || null
 
-          // Cek shift aktif
-          const shift = await db.shifts
-            .where('user_id').equals(user.id)
-            .filter(s => s.status === 'open')
-            .last()
+          // Buka shift otomatis untuk kasir dan manager
+          let shift: Shift | null = null
+          if (['kasir', 'manager', 'owner'].includes(user.role)) {
+            shift = await openShift(user)
+          }
 
-          set({ user, store, activeShift: shift || null, isLoading: false })
+          set({ user, store, activeShift: shift, isLoading: false })
           return true
         } catch (e) {
           set({ error: 'Terjadi kesalahan', isLoading: false })
@@ -67,10 +112,16 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      logout: () => set({ user: null, store: null, activeShift: null }),
+      logout: async () => {
+        const { activeShift } = get()
+        // Tutup shift saat logout
+        if (activeShift && activeShift.status === 'open') {
+          await closeShift(activeShift)
+        }
+        set({ user: null, store: null, activeShift: null })
+      },
 
       setShift: (shift) => set({ activeShift: shift }),
-
       clearError: () => set({ error: null }),
     }),
     {
@@ -84,7 +135,6 @@ export const useAuthStore = create<AuthState>()(
   )
 )
 
-// ── Helper: ambil STORE_ID dari user yang login ───────────────
 export function getStoreId(user: User | null): string {
   return user?.store_id || 'unknown'
 }

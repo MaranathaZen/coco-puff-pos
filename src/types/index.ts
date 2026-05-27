@@ -1,5 +1,5 @@
 // ── Auth & Users ──────────────────────────────────────────────
-export type Role = 'owner' | 'manager' | 'kasir' | 'gudang'
+export type Role = 'owner' | 'manager' | 'kasir' | 'gudang' | 'produksi'
 
 export interface User {
   id: string

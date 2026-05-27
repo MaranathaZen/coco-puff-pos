@@ -16,7 +16,7 @@ import type { Material, WarehouseStock, Purchase, WarehouseMutation, WarehouseMu
 type Tab = 'stok' | 'pembelian' | 'mutasi' | 'pakai' | 'biaya'
 
 // ── Satuan & Kategori dari data nyata Coco Puff ───────────────
-const SATUAN = ['Gram', 'Ml', 'Pcs', 'Kg', 'Liter', 'Pack', 'Lembar', 'Roll', 'Loyang', 'Batch']
+const SATUAN = ['Gram', 'Ml', 'Pcs', 'Kg', 'Liter', 'Pack', 'Lembar', 'Roll']
 
 const KATEGORI_GUDANG = [
   { value: 'bahan_baku',          label: 'Bahan Baku',        icon: '🌾', desc: 'Tepung, gula, telur, susu, dll' },
@@ -952,6 +952,8 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
   const [invoiceNo, setInv]       = useState('')
   const [notes, setNotes]         = useState('')
   const [payMethod, setPay]       = useState('tunai')
+  const [transferTo, setTransferTo] = useState('')
+  const [dueDate, setDueDate]     = useState('')
   const [items, setItems]         = useState([{ material_id: '', qty: '', unit_cost: '', pack_mode: false, pack_price: '', pack_qty: '' }])
   const [saving, setSaving]       = useState(false)
 
@@ -1002,6 +1004,8 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
         invoice_no: invoiceNo || undefined,
         total_amount: total,
         payment_method: payMethod,
+        transfer_to: transferTo || undefined,
+        due_date: dueDate || undefined,
         status: 'received', notes: notes || undefined,
         created_by: userId, created_at: now(),
       }
@@ -1070,6 +1074,17 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
           ))}
         </div>
       </div>
+
+      {payMethod === 'transfer' && (
+        <div><Label>Transfer ke Rekening</Label>
+          <input className="input" value={transferTo} onChange={e => setTransferTo(e.target.value)} placeholder="BCA 1234567890 a.n. Toko" />
+        </div>
+      )}
+      {payMethod === 'kredit' && (
+        <div><Label>Jatuh Tempo</Label>
+          <input className="input" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+        </div>
+      )}
 
       <div>
         <Label required>Item Pembelian</Label>
@@ -1214,9 +1229,9 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
         <Label required>Tujuan</Label>
         <div className="grid grid-cols-2 gap-2">
           {([
-            { v: 'to_production', l: 'ke Produksi' },
-            { v: 'to_store',      l: 'ke Toko' },
-            { v: 'to_partner',    l: 'ke Franchise' },
+            { v: 'to_production', l: 'Produksi' },
+            { v: 'to_store',      l: 'Outlet / Toko' },
+            { v: 'to_partner',    l: 'Franchise' },
             { v: 'adjustment',    l: 'Koreksi Stok' },
           ] as const).map(t => (
             <button key={t.v} onClick={() => setType(t.v)}
@@ -1304,7 +1319,7 @@ function PakaiForm({ userId, onClose }: { userId: string; onClose: () => void })
     setSaving(true)
     try {
       const mutId = generateId()
-      const mut = { id: mutId, mutation_type: 'internal_use', destination_name: 'Pemakaian Internal', notes: notes || 'Pemakaian gudang', status: 'confirmed', created_by: userId, created_at: `${date}T${new Date().toTimeString().slice(0,8)}.000Z`, confirmed_at: now(), confirmed_by: userId }
+      const mut = { id: mutId, mutation_type: 'internal_use', destination_name: 'Pemakaian Internal', notes: notes || 'Pemakaian gudang', status: 'confirmed', created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId }
       await db.warehouse_mutations.add(mut as any)
       await supabase.from('warehouse_mutations').insert(mut)
       for (const item of valid) {
@@ -1330,10 +1345,19 @@ function PakaiForm({ userId, onClose }: { userId: string; onClose: () => void })
       <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
         <p className="text-xs text-amber-700">Pemakaian ATK/operasional gudang — kertas, tinta, sabun, dll. Stok otomatis berkurang.</p>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div><Label>Tanggal</Label><input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
-        <div><Label>Keterangan</Label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Cetak label, dll" /></div>
-      </div>
+
+      {payMethod === 'transfer' && (
+        <div><Label>Transfer ke Rekening</Label>
+          <input className="input" value={transferTo} onChange={e => setTransferTo(e.target.value)} placeholder="BCA 1234567890 a.n. Toko" />
+        </div>
+      )}
+      {payMethod === 'kredit' && (
+        <div><Label>Jatuh Tempo</Label>
+          <input className="input" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+        </div>
+      )}
+
+      <div><Label>Catatan</Label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Cetak label, bersih-bersih, dll" autoFocus /></div>
       <div>
         <div className="flex items-center justify-between mb-1.5">
           <Label>Item</Label>
@@ -1345,7 +1369,7 @@ function PakaiForm({ userId, onClose }: { userId: string; onClose: () => void })
             return (
               <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
                 <select className="input text-sm" value={item.material_id} onChange={e => updateItem(i, 'material_id', e.target.value)}>
-                  <option value="">Pilih bahan</option>
+                  <option value="" disabled>-- Pilih bahan *</option>
                   {matList?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
                 </select>
                 <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit || ''})`}
@@ -1372,6 +1396,8 @@ function BiayaForm({ userId, onClose }: { userId: string; onClose: () => void })
   const [category, setCat]    = useState('beban_lainnya')
   const [date, setDate]       = useState(new Date().toISOString().slice(0, 10))
   const [payMethod, setPay]   = useState('tunai')
+  const [transferTo, setTransferTo] = useState('')
+  const [dueDate, setDueDate]   = useState('')
   const [notes, setNotes]     = useState('')
   const [saving, setSaving]   = useState(false)
 
@@ -1384,6 +1410,8 @@ function BiayaForm({ userId, onClose }: { userId: string; onClose: () => void })
         id: generateId(), name: name.trim(), amount: Number(amount),
         expense_date: date, category,
         payment_method: payMethod,
+        transfer_to: transferTo || undefined,
+        due_date: dueDate || undefined,
         notes: notes || undefined, created_by: userId, created_at: now(),
       }
       await db.warehouse_expenses.add(data)
@@ -1435,6 +1463,18 @@ function BiayaForm({ userId, onClose }: { userId: string; onClose: () => void })
           ))}
         </div>
       </div>
+
+      {payMethod === 'transfer' && (
+        <div><Label>Transfer ke Rekening</Label>
+          <input className="input" value={transferTo} onChange={e => setTransferTo(e.target.value)} placeholder="BCA 1234567890 a.n. Toko" />
+        </div>
+      )}
+      {payMethod === 'kredit' && (
+        <div><Label>Jatuh Tempo</Label>
+          <input className="input" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+        </div>
+      )}
+
       <div><Label>Catatan</Label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opsional" /></div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>

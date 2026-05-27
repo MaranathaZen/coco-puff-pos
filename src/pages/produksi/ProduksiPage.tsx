@@ -1,13 +1,64 @@
 // src/pages/produksi/ProduksiPage.tsx
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, createContext, useContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah, formatDate } from '@/lib/utils'
-import { Plus, RefreshCw, X, FlaskConical, Package, ArrowRightLeft, ChevronRight } from 'lucide-react'
+import { Plus, RefreshCw, X, FlaskConical, Package, ArrowRightLeft, ChevronRight, ChevronDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { ProductionRecipe, ProductionRecipeItem, ProductionLog, ProductionMutation, ProductionMutationItem } from '@/lib/db'
+
+
+// ── Helpers ───────────────────────────────────────────────────
+function groupBy<T>(arr: T[], keyFn: (item: T) => string): { key: string; items: T[] }[] {
+  const map = new Map<string, T[]>()
+  for (const item of arr) {
+    const k = keyFn(item)
+    if (!map.has(k)) map.set(k, [])
+    map.get(k)!.push(item)
+  }
+  return Array.from(map.entries()).map(([key, items]) => ({ key, items }))
+}
+
+function groupLabel(dateStr: string, mode: 'hari'|'bulan'|'tahun'): string {
+  const d = new Date(dateStr)
+  if (mode === 'hari')   return d.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  if (mode === 'bulan')  return d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
+  return String(d.getFullYear())
+}
+
+function groupKey(dateStr: string, mode: 'hari'|'bulan'|'tahun'): string {
+  if (mode === 'hari')  return dateStr.slice(0, 10)
+  if (mode === 'bulan') return dateStr.slice(0, 7)
+  return dateStr.slice(0, 4)
+}
+
+function GroupHeader({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="flex items-center justify-between px-1 py-1.5">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</p>
+      <span className="text-xs text-gray-400">{count} item</span>
+    </div>
+  )
+}
+
+function GroupSelect({ value, onChange }: { value: 'hari'|'bulan'|'tahun'; onChange: (v: 'hari'|'bulan'|'tahun') => void }) {
+  return (
+    <div className="relative">
+      <select value={value} onChange={e => onChange(e.target.value as any)}
+        className="appearance-none text-xs font-medium text-gray-600 border border-gray-200 bg-white pl-2.5 pr-6 py-1.5 rounded-lg focus:outline-none">
+        <option value="hari">Per Hari</option>
+        <option value="bulan">Per Bulan</option>
+        <option value="tahun">Per Tahun</option>
+      </select>
+      <ChevronDown size={11} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+    </div>
+  )
+}
+
+// Context untuk toolbar
+const ToolbarCtx = createContext<(node: React.ReactNode) => void>(() => {})
 
 type Tab = 'stok' | 'produksi' | 'kirim'
 
@@ -19,6 +70,7 @@ export default function ProduksiPage() {
   const { user } = useAuthStore()
   const [tab, setTab] = useState<Tab>('stok')
   const [isSyncing, setIsSyncing] = useState(false)
+  const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
 
   async function syncData() {
     setIsSyncing(true)
@@ -58,9 +110,12 @@ export default function ProduksiPage() {
     <div className="flex flex-col h-full bg-white">
       <div className="px-4 pt-4 pb-0 flex items-center justify-between flex-shrink-0">
         <h1 className="text-lg font-semibold text-gray-900">Produksi</h1>
-        <button onClick={syncData} disabled={isSyncing} className="p-2 rounded-full text-gray-400 hover:text-gray-600">
-          <RefreshCw size={16} className={isSyncing ? 'animate-spin text-blue-500' : ''} />
-        </button>
+        <div className="flex items-center gap-2">
+          {toolbarActions}
+          <button onClick={syncData} disabled={isSyncing} className="p-2 rounded-full text-gray-400 hover:text-gray-600">
+            <RefreshCw size={16} className={isSyncing ? 'animate-spin text-blue-500' : ''} />
+          </button>
+        </div>
       </div>
 
       <div className="bg-white border-b border-gray-100 flex mt-2 flex-shrink-0">
@@ -78,11 +133,13 @@ export default function ProduksiPage() {
         })}
       </div>
 
-      <div className="flex-1 overflow-auto bg-gray-50">
-        {tab === 'stok'     && <StokProduksiTab />}
-        {tab === 'produksi' && <CatatProduksiTab userId={user!.id} />}
-        {tab === 'kirim'    && <KirimTab userId={user!.id} />}
-      </div>
+      <ToolbarCtx.Provider value={setToolbarActions}>
+        <div className="flex-1 overflow-auto bg-gray-50">
+          {tab === 'stok'     && <StokProduksiTab />}
+          {tab === 'produksi' && <CatatProduksiTab userId={user!.id} />}
+          {tab === 'kirim'    && <KirimTab userId={user!.id} />}
+        </div>
+      </ToolbarCtx.Provider>
     </div>
   )
 }
@@ -137,9 +194,9 @@ function StokProduksiTab() {
           <p className="text-xs text-gray-400 mt-0.5">{stocks?.length || 0} jenis bahan</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-3">
-          <p className="text-xs text-gray-400 mb-0.5">Produk Setengah Jadi</p>
+          <p className="text-xs text-gray-400 mb-0.5">Produk Siap Kirim</p>
           <p className="text-base font-semibold text-brand-600">{totalQtyProdukJadi} pcs</p>
-          <p className="text-xs text-gray-400 mt-0.5">{fgStocks?.length || 0} jenis produk</p>
+          <p className="text-xs text-gray-400 mt-0.5">{fgStocks?.length || 0} jenis · siap dikirim</p>
         </div>
       </div>
 
@@ -195,9 +252,28 @@ function StokProduksiTab() {
 
 // ── CATAT PRODUKSI ────────────────────────────────────────────
 function CatatProduksiTab({ userId }: { userId: string }) {
+  const setToolbar = useContext(ToolbarCtx)
   const [showForm, setShowForm]     = useState(false)
   const [showResep, setShowResep]   = useState(false)
   const [editResep, setEditResep]   = useState<any | null>(null)
+  const [groupMode, setGroupMode]   = useState<'hari'|'bulan'|'tahun'>('hari')
+
+  useEffect(() => {
+    setToolbar(
+      <div className="flex items-center gap-2">
+        <GroupSelect value={groupMode} onChange={setGroupMode} />
+        <button onClick={() => { setEditResep(null); setShowResep(true) }}
+          className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg active:bg-gray-50">
+          Resep
+        </button>
+        <button onClick={() => setShowForm(true)}
+          className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg active:bg-gray-50">
+          <Plus size={13} /> Catat
+        </button>
+      </div>
+    )
+    return () => setToolbar(null)
+  }, [groupMode])
 
   const logs = useLiveQuery(async () => {
     const l       = await db.production_logs.orderBy('created_at').reverse().limit(30).toArray()
@@ -238,57 +314,42 @@ function CatatProduksiTab({ userId }: { userId: string }) {
         </button>
       </div>
 
-      {/* Daftar resep aktif */}
-      {recipes && recipes.length > 0 && (
-        <div>
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Resep Aktif</p>
-          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            {recipes.filter(r => r.is_active).map((recipe, idx) => (
-              <button key={recipe.id} onClick={() => { setEditResep(recipe); setShowResep(true) }}
-                className={`w-full flex items-center px-4 py-3 text-left active:bg-gray-50 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800">{recipe.name}</p>
-                  <p className="text-xs text-gray-400">{recipe.batch_yield} {recipe.yield_unit}/batch · {recipe.items.length} bahan</p>
-                </div>
-                <ChevronRight size={14} className="text-gray-300" />
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Log produksi */}
-      <div>
-        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Riwayat Produksi</p>
-        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-          {logs?.map((log, idx) => (
-            <div key={log.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-800">{log.recipe?.name || '-'}</p>
-                  <p className="text-xs text-gray-400">{formatDate(log.created_at)} · {log.batch_count} batch</p>
-                  {log.notes && <p className="text-xs text-gray-400">{log.notes}</p>}
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-bold text-brand-600">{log.total_yield}</p>
-                  <p className="text-xs text-gray-400">{log.recipe?.yield_unit || 'pcs'}</p>
-                </div>
-              </div>
-              {log.materials.length > 0 && (
-                <div className="mt-1.5 space-y-0.5 border-t border-gray-50 pt-1.5">
-                  {log.materials.map(m => (
-                    <div key={m.id} className="flex justify-between text-xs text-gray-400">
-                      <span>{m.material?.name}</span>
-                      <span>{m.qty_used} {m.material?.unit}</span>
+      {/* Log produksi — grouped */}
+      {(() => {
+        const grouped = groupBy(logs || [], l => groupKey(l.created_at, groupMode))
+        if (!grouped.length) return <div className="bg-white rounded-xl border border-gray-100 py-10 text-center text-sm text-gray-400">Belum ada catatan produksi</div>
+        return grouped.map(({ key, items: grpItems }) => (
+          <div key={key}>
+            <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} count={grpItems.length} />
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              {grpItems.map((log, idx) => (
+                <div key={log.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800">{log.recipe?.name || '-'}</p>
+                      <p className="text-xs text-gray-400">{formatDate(log.created_at)} · {log.batch_count} batch{log.notes ? ` · ${log.notes}` : ''}</p>
                     </div>
-                  ))}
+                    <div className="text-right flex-shrink-0 ml-2">
+                      <p className="text-sm font-bold text-brand-600">{log.total_yield}</p>
+                      <p className="text-xs text-gray-400">{log.recipe?.yield_unit || 'pcs'}</p>
+                    </div>
+                  </div>
+                  {log.materials.length > 0 && (
+                    <div className="mt-1.5 space-y-0.5 border-t border-gray-50 pt-1.5">
+                      {log.materials.map(m => (
+                        <div key={m.id} className="flex justify-between text-xs text-gray-400">
+                          <span>{m.material?.name}</span>
+                          <span>{m.qty_used} {m.material?.unit}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
+              ))}
             </div>
-          ))}
-          {!logs?.length && <div className="py-10 text-center text-sm text-gray-400">Belum ada catatan produksi</div>}
-        </div>
-      </div>
+          </div>
+        ))
+      })()}
 
       {showForm  && <ProduksiForm userId={userId} onClose={() => setShowForm(false)} />}
       {showResep && <ResepForm recipe={editResep} onClose={() => { setShowResep(false); setEditResep(null) }} />}
@@ -298,7 +359,22 @@ function CatatProduksiTab({ userId }: { userId: string }) {
 
 // ── KIRIM (MUTASI PRODUKSI) ───────────────────────────────────
 function KirimTab({ userId }: { userId: string }) {
-  const [showForm, setShowForm] = useState(false)
+  const setToolbar = useContext(ToolbarCtx)
+  const [showForm, setShowForm]   = useState(false)
+  const [groupMode, setGroupMode] = useState<'hari'|'bulan'|'tahun'>('hari')
+
+  useEffect(() => {
+    setToolbar(
+      <div className="flex items-center gap-2">
+        <GroupSelect value={groupMode} onChange={setGroupMode} />
+        <button onClick={() => setShowForm(true)}
+          className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg active:bg-gray-50">
+          <Plus size={13} /> Kirim
+        </button>
+      </div>
+    )
+    return () => setToolbar(null)
+  }, [groupMode])
 
   const mutations = useLiveQuery(async () => {
     const m    = await db.production_mutations.orderBy('created_at').reverse().limit(50).toArray()
@@ -323,44 +399,46 @@ function KirimTab({ userId }: { userId: string }) {
 
   return (
     <div className="p-4 space-y-3">
-      <button onClick={() => setShowForm(true)}
-        className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium">
-        <Plus size={15} /> Kirim Produk
-      </button>
-
-      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        {mutations?.map((m, idx) => {
-          const tc = typeConfig[m.mutation_type] || { label: m.mutation_type, color: 'text-gray-600 bg-gray-100' }
-          const totalQty = m.items.reduce((s, i) => s + i.qty, 0)
-          return (
-            <div key={m.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2">
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tc.color}`}>{tc.label}</span>
-                  {m.destination_name && <span className="text-xs text-gray-600 font-medium">{m.destination_name}</span>}
-                </div>
-                <p className="text-xs text-gray-400">{formatDate(m.created_at)}</p>
-              </div>
-              {m.items.length > 0 && (
-                <div className="mt-1.5 space-y-0.5 border-t border-gray-50 pt-1.5">
-                  {m.items.map(i => (
-                    <div key={i.id} className="flex justify-between text-xs text-gray-400">
-                      <span>{i.product_name}</span>
-                      <span>{i.qty} pcs</span>
+      {(() => {
+        const grouped = groupBy(mutations || [], m => groupKey(m.created_at, groupMode))
+        if (!grouped.length) return <div className="bg-white rounded-xl border border-gray-100 py-10 text-center text-sm text-gray-400">Belum ada pengiriman</div>
+        return grouped.map(({ key, items: grpItems }) => (
+          <div key={key}>
+            <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} count={grpItems.length} />
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              {grpItems.map((m, idx) => {
+                const tc = typeConfig[m.mutation_type] || { label: m.mutation_type, color: 'text-gray-600 bg-gray-100' }
+                const totalQty = m.items.reduce((s, i) => s + i.qty, 0)
+                return (
+                  <div key={m.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tc.color}`}>{tc.label}</span>
+                        {m.destination_name && <span className="text-xs text-gray-600 font-medium">{m.destination_name}</span>}
+                      </div>
+                      <p className="text-xs text-gray-400">{formatDate(m.created_at)}</p>
                     </div>
-                  ))}
-                  <div className="flex justify-between text-xs font-medium text-gray-600 pt-1 border-t border-gray-50 mt-1">
-                    <span>Total</span>
-                    <span>{totalQty} pcs</span>
+                    {m.items.length > 0 && (
+                      <div className="mt-1.5 space-y-0.5 border-t border-gray-50 pt-1.5">
+                        {m.items.map(i => (
+                          <div key={i.id} className="flex justify-between text-xs text-gray-400">
+                            <span>{i.product_name}</span>
+                            <span>{i.qty} pcs</span>
+                          </div>
+                        ))}
+                        <div className="flex justify-between text-xs font-medium text-gray-600 pt-1 border-t border-gray-50 mt-1">
+                          <span>Total</span><span>{totalQty} pcs</span>
+                        </div>
+                      </div>
+                    )}
+                    {m.notes && <p className="text-xs text-gray-400 mt-1">{m.notes}</p>}
                   </div>
-                </div>
-              )}
-              {m.notes && <p className="text-xs text-gray-400 mt-1">{m.notes}</p>}
+                )
+              })}
             </div>
-          )
-        })}
-        {!mutations?.length && <div className="py-10 text-center text-sm text-gray-400">Belum ada pengiriman</div>}
-      </div>
+          </div>
+        ))
+      })()}
 
       {showForm && <KirimForm userId={userId} onClose={() => setShowForm(false)} />}
     </div>

@@ -589,9 +589,17 @@ function PakaiTab({ userId }: { userId: string }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
-    setToolbar(<GroupSelect value={groupMode} onChange={setGroupMode} />)
+    setToolbar(
+      <div className="flex items-center gap-2">
+        <GroupSelect value={groupMode} onChange={setGroupMode} />
+        <button onClick={() => setShowForm(true)}
+          className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg active:bg-gray-50 whitespace-nowrap">
+          <Plus size={13} /> Catat
+        </button>
+      </div>
+    )
     return () => setToolbar(null)
-  }, [groupMode])
+  }, [groupMode, showForm])
 
   const usages = useLiveQuery(async () => {
     const m    = await db.warehouse_mutations.filter(x => x.mutation_type === 'internal_use').reverse().sortBy('created_at')
@@ -634,11 +642,6 @@ function PakaiTab({ userId }: { userId: string }) {
       </div>
 
       <SearchBar value={search} onChange={setSearch} placeholder="Cari nama bahan, keterangan..." />
-
-      <button onClick={() => setShowForm(true)}
-        className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-gray-300 rounded-xl text-sm font-medium text-gray-600 active:bg-gray-50">
-        <Plus size={15} /> Catat Pemakaian
-      </button>
 
       {grouped.map(({ key, items: grpItems }) => {
         const total = grpItems.reduce((s, u) => s + u.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0)
@@ -712,10 +715,16 @@ function BiayaTab({ userId }: { userId: string }) {
 
   useEffect(() => {
     setToolbar(
-      <GroupSelect value={groupMode} onChange={setGroupMode} />
+      <div className="flex items-center gap-2">
+        <GroupSelect value={groupMode} onChange={setGroupMode} />
+        <button onClick={() => setShowForm(true)}
+          className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg active:bg-gray-50 whitespace-nowrap">
+          <Plus size={13} /> Catat
+        </button>
+      </div>
     )
     return () => setToolbar(null)
-  }, [groupMode])
+  }, [groupMode, showForm])
 
   const expenses = useLiveQuery(() =>
     db.warehouse_expenses.orderBy('expense_date').reverse().limit(200).toArray(), [])
@@ -814,21 +823,16 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
 
 // ── FORM: Bahan ───────────────────────────────────────────────
 function MaterialForm({ material, onClose }: { material: Material | null; onClose: () => void }) {
+  const { user } = useAuthStore()
+  const isOwner = user?.role === 'owner'
   const [name, setName]       = useState(material?.name || '')
   const [category, setCat]    = useState(material?.category || 'bahan_baku')
   const [unit, setUnit]       = useState(material?.unit || '')
   const [unitCost, setCost]   = useState(String(material?.unit_cost || ''))
   const [minStock, setMin]    = useState(String(material?.min_stock || '0'))
   const [isActive, setActive] = useState(material?.is_active ?? true)
-  const [customUnit, setCustom] = useState(false)
+  const [customUnit, setCustom] = useState(material ? !SATUAN.map(s => s.toLowerCase()).includes((material.unit || '').toLowerCase()) : false)
   const [saving, setSaving]   = useState(false)
-
-  // Cek apakah unit dari SATUAN atau custom
-  useEffect(() => {
-    if (material?.unit && !SATUAN.map(s => s.toLowerCase()).includes(material.unit.toLowerCase())) {
-      setCustom(true)
-    }
-  }, [])
 
   async function handleDelete() {
     if (!material || !confirm(`Hapus "${material.name}"? Data tidak bisa dikembalikan.`)) return

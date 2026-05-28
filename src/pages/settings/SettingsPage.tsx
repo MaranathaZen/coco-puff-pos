@@ -10,7 +10,7 @@ import toast from 'react-hot-toast'
 import type { User, Role } from '@/types'
 import type { Supplier, Partner, MenuRoleConfig } from '@/lib/db'
 
-type Tab = 'users' | 'supplier' | 'mitra' | 'menu' | 'toko' | 'password' | 'ppn'
+type Tab = 'users' | 'supplier' | 'mitra' | 'menu' | 'toko' | 'password' | 'ppn' | 'reset'
 
 const ALL_MENUS = [
   { path: '/kasir',         label: 'Kasir' },
@@ -41,6 +41,7 @@ export default function SettingsPage() {
     { id: 'toko',     label: 'Toko', ownerOnly: true },
     { id: 'password', label: 'Password' },
     { id: 'ppn',      label: 'PPN', ownerOnly: true },
+    { id: 'reset',    label: 'Reset Data', ownerOnly: true },
   ].filter(t => !t.ownerOnly || isOwner)
 
   return (
@@ -68,6 +69,7 @@ export default function SettingsPage() {
         {tab === 'toko'     && <TokoTab />}
         {tab === 'password' && <ChangePasswordTab userId={user!.id} storeId={user!.store_id} />}
         {tab === 'ppn'      && <PPNTab storeId={user!.store_id} />}
+        {tab === 'reset'    && <ResetDataTab />}
       </div>
     </div>
   )
@@ -734,6 +736,144 @@ function PPNTab({ storeId }: { storeId: string }) {
         className="w-full py-3 bg-gray-900 text-white rounded-xl text-sm font-medium disabled:opacity-50">
         {saving ? 'Menyimpan...' : 'Simpan Setting PPN'}
       </button>
+    </div>
+  )
+}
+
+// ── RESET DATA TAB ────────────────────────────────────────────
+function ResetDataTab() {
+  const [resetting, setResetting] = useState(false)
+  const [done, setDone] = useState<string[]>([])
+
+  async function resetTransaksiGudang() {
+    setResetting(true)
+    setDone([])
+    try {
+      // Hapus data transaksi gudang (bukan master bahan/supplier)
+      await db.purchases.clear()
+      await db.purchase_items.clear()
+      await db.purchase_returns.clear()
+      await db.warehouse_mutations.clear()
+      await db.warehouse_mutation_items.clear()
+      await db.warehouse_expenses.clear()
+      await db.warehouse_stock.clear()
+      setDone(prev => [...prev, 'Data gudang (pembelian, mutasi, pemakaian, biaya, stok) dihapus'])
+
+      // Sync hapus ke Supabase
+      const tables = ['purchases','purchase_items','purchase_returns','warehouse_mutations',
+        'warehouse_mutation_items','warehouse_expenses','warehouse_stock']
+      for (const t of tables) {
+        await supabase.from(t).delete().neq('id', 'x') // delete all
+      }
+      setDone(prev => [...prev, 'Sync Supabase selesai'])
+      toast.success('Data gudang berhasil direset')
+    } catch (e) { toast.error('Gagal reset: ' + String(e)) }
+    finally { setResetting(false) }
+  }
+
+  async function resetTransaksiProduksi() {
+    setResetting(true)
+    setDone([])
+    try {
+      await db.production_logs.clear()
+      await db.production_log_materials.clear()
+      await db.production_mutations.clear()
+      await db.production_mutation_items.clear()
+      await db.production_stock.clear()
+      await db.finished_goods_stock.clear()
+      setDone(prev => [...prev, 'Data produksi (log, mutasi, stok) dihapus'])
+
+      const tables = ['production_logs','production_log_materials','production_mutations',
+        'production_mutation_items','production_stock','finished_goods_stock']
+      for (const t of tables) {
+        await supabase.from(t).delete().neq('id', 'x')
+      }
+      setDone(prev => [...prev, 'Sync Supabase selesai'])
+      toast.success('Data produksi berhasil direset')
+    } catch (e) { toast.error('Gagal reset: ' + String(e)) }
+    finally { setResetting(false) }
+  }
+
+  async function resetSemuaTransaksi() {
+    if (!confirm('Reset SEMUA data transaksi gudang dan produksi? Master bahan, resep, supplier tetap ada.')) return
+    setResetting(true)
+    setDone([])
+    try {
+      await resetTransaksiGudang()
+      await resetTransaksiProduksi()
+      toast.success('Semua data transaksi berhasil direset')
+    } finally { setResetting(false) }
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="bg-red-50 border border-red-100 rounded-xl p-3">
+        <p className="text-sm font-medium text-red-700 mb-1">Hati-hati — Data tidak bisa dikembalikan</p>
+        <p className="text-xs text-red-500">
+          Reset hanya menghapus data transaksi (pembelian, mutasi, log produksi, stok).
+          Master data (bahan, supplier, resep) tetap aman.
+        </p>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-50">
+          <p className="text-sm font-medium text-gray-900">Reset Data Gudang</p>
+          <p className="text-xs text-gray-400 mt-0.5">Hapus: pembelian, mutasi, pemakaian, biaya, stok gudang</p>
+        </div>
+        <div className="px-4 py-3">
+          <button onClick={resetTransaksiGudang} disabled={resetting}
+            className="w-full py-2.5 rounded-xl border border-red-200 text-sm font-medium text-red-600 active:bg-red-50 disabled:opacity-50">
+            {resetting ? 'Mereset...' : 'Reset Data Gudang'}
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-50">
+          <p className="text-sm font-medium text-gray-900">Reset Data Produksi</p>
+          <p className="text-xs text-gray-400 mt-0.5">Hapus: log produksi, mutasi kirim, stok produksi & produk jadi</p>
+        </div>
+        <div className="px-4 py-3">
+          <button onClick={resetTransaksiProduksi} disabled={resetting}
+            className="w-full py-2.5 rounded-xl border border-red-200 text-sm font-medium text-red-600 active:bg-red-50 disabled:opacity-50">
+            {resetting ? 'Mereset...' : 'Reset Data Produksi'}
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-50">
+          <p className="text-sm font-medium text-gray-900">Reset Semua Transaksi</p>
+          <p className="text-xs text-gray-400 mt-0.5">Reset gudang + produksi sekaligus</p>
+        </div>
+        <div className="px-4 py-3">
+          <button onClick={resetSemuaTransaksi} disabled={resetting}
+            className="w-full py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium disabled:opacity-50">
+            {resetting ? 'Mereset...' : 'Reset Semua Transaksi'}
+          </button>
+        </div>
+      </div>
+
+      {done.length > 0 && (
+        <div className="bg-green-50 border border-green-100 rounded-xl p-3 space-y-1">
+          {done.map((d, i) => (
+            <p key={i} className="text-xs text-green-700">✓ {d}</p>
+          ))}
+        </div>
+      )}
+
+      <div className="bg-gray-50 rounded-xl p-3">
+        <p className="text-xs font-medium text-gray-600 mb-1">Atau reset via SQL di Supabase:</p>
+        <pre className="text-xs text-gray-500 overflow-x-auto">
+{`TRUNCATE purchases, purchase_items, purchase_returns,
+  warehouse_mutations, warehouse_mutation_items,
+  warehouse_expenses, warehouse_stock,
+  production_logs, production_log_materials,
+  production_mutations, production_mutation_items,
+  production_stock, finished_goods_stock
+RESTART IDENTITY CASCADE;`}
+        </pre>
+      </div>
     </div>
   )
 }

@@ -312,7 +312,7 @@ function CatatProduksiTab({ userId }: { userId: string }) {
           <div key={key}>
             <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} count={grpItems.length}
               expanded={expanded} onToggle={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))} />
-            {expanded && <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{display: expanded ? undefined : "none"}}>
               {grpItems.map((log, idx) => (
                 <div key={log.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex items-center justify-between">
@@ -337,7 +337,7 @@ function CatatProduksiTab({ userId }: { userId: string }) {
                   )}
                 </div>
               ))}
-            </div>}
+            </div>
           </div>
           )
         })
@@ -401,7 +401,7 @@ function KirimTab({ userId }: { userId: string }) {
           <div key={key}>
             <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} count={grpItems.length}
               expanded={expanded} onToggle={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))} />
-            {expanded && <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{display: expanded ? undefined : "none"}}>
               {grpItems.map((m, idx) => {
                 const tc = typeConfig[m.mutation_type] || { label: m.mutation_type, color: 'text-gray-600 bg-gray-100' }
                 const totalQty = m.items.reduce((s, i) => s + i.qty, 0)
@@ -431,7 +431,7 @@ function KirimTab({ userId }: { userId: string }) {
                   </div>
                 )
               })}
-            </div>}
+            </div>
           </div>
           )
         })

@@ -410,7 +410,7 @@ function PembelianTab({ userId }: { userId: string }) {
           <div key={key}>
             <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} total={total} count={grpItems.length}
               expanded={expanded} onToggle={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))} />
-            {expanded && <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{display: expanded ? undefined : "none"}}>
               {grpItems.map((p, idx) => (
                 <div key={p.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex items-start justify-between mb-1">
@@ -436,7 +436,7 @@ function PembelianTab({ userId }: { userId: string }) {
                   )}
                 </div>
               ))}
-            </div>}
+            </div>
           </div>
         )
       })}
@@ -527,7 +527,7 @@ function MutasiTab({ userId }: { userId: string }) {
         <div key={key}>
           <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} count={grpItems.length}
             expanded={expanded} onToggle={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))} />
-          {expanded && <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{display: expanded ? undefined : "none"}}>
             {grpItems.map((m, idx) => {
               const tc = typeConfig[m.mutation_type] || { label: m.mutation_type, color: 'text-gray-600 bg-gray-100' }
               const totalNilai = m.items.reduce((s, i) => s + i.qty * i.unit_cost, 0)
@@ -641,7 +641,7 @@ function PakaiTab({ userId }: { userId: string }) {
           <div key={key}>
             <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} total={total} count={grpItems.length}
               expanded={expanded} onToggle={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))} />
-            {expanded && <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{display: expanded ? undefined : "none"}}>
               {grpItems.map((u, idx) => (
                 <div key={u.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex items-start justify-between mb-1">
@@ -665,7 +665,7 @@ function PakaiTab({ userId }: { userId: string }) {
                   )}
                 </div>
               ))}
-            </div>}
+            </div>
           </div>
         )
       })}
@@ -740,7 +740,7 @@ function BiayaTab({ userId }: { userId: string }) {
           <div key={key}>
             <GroupHeader label={groupLabel(grpItems[0].expense_date || grpItems[0].created_at, groupMode)} total={total} count={grpItems.length}
               expanded={expanded} onToggle={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))} />
-            {expanded && <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{display: expanded ? undefined : "none"}}>
               {grpItems.map((e, idx) => (
                 <div key={e.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex items-center justify-between">
@@ -756,7 +756,7 @@ function BiayaTab({ userId }: { userId: string }) {
                   </div>
                 </div>
               ))}
-            </div>}
+            </div>
           </div>
         )
       })}
@@ -1353,29 +1353,37 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
   )
 }
 
-// ── FORM: Pemakaian ───────────────────────────────────────────
+// ── FORM: Pemakaian ──────────────────────────────────────────
 function PakaiForm({ userId, onClose }: { userId: string; onClose: () => void }) {
-  const allMats  = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
-  const atkMats  = useMemo(() => allMats?.filter(m => ['non_produksi','operasional','packaging'].includes(m.category)), [allMats])
-
-  const [notes, setNotes]     = useState('')
-  const [items, setItems]     = useState([{ material_id: '', qty: '' }])
-  const [saving, setSaving]   = useState(false)
+  const allMats = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
+  const atkMats = useMemo(() => allMats?.filter(m => ['non_produksi','operasional','packaging'].includes(m.category)), [allMats])
+  const [notes, setNotes]   = useState('')
+  const [items, setItems]   = useState([{ material_id: '', qty: '' }])
+  const [saving, setSaving] = useState(false)
   const [showAll, setShowAll] = useState(false)
-
   const matList = showAll ? allMats : atkMats
 
   function addItem() { setItems(p => [...p, { material_id: '', qty: '' }]) }
-  function updateItem(i: number, f: string, v: string) { setItems(p => p.map((item, idx) => idx === i ? { ...item, [f]: v } : item)) }
+  function updateItem(i: number, f: string, v: string) {
+    setItems(p => p.map((item, idx) => idx === i ? { ...item, [f]: v } : item))
+  }
 
   async function handleSave() {
     const valid = items.filter(i => i.material_id && Number(i.qty) > 0)
     if (!valid.length) return toast.error('Tambahkan minimal 1 item')
     setSaving(true)
     try {
+      const mutNumber = await generateUsageNumber()
       const mutId = generateId()
-      const mut = { id: mutId, mutation_type: 'internal_use', destination_name: 'Pemakaian Internal', notes: notes || 'Pemakaian gudang', status: 'confirmed', created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId }
-      await db.warehouse_mutations.add(mut as any)
+      const mut: any = {
+        id: mutId, mutation_number: mutNumber,
+        mutation_type: 'internal_use',
+        destination_name: 'Pemakaian Internal',
+        notes: notes || 'Pemakaian gudang',
+        status: 'confirmed', created_by: userId,
+        created_at: now(), confirmed_at: now(), confirmed_by: userId,
+      }
+      await db.warehouse_mutations.add(mut)
       await supabase.from('warehouse_mutations').insert(mut)
       for (const item of valid) {
         const mat = allMats?.find(m => m.id === item.material_id)
@@ -1391,45 +1399,46 @@ function PakaiForm({ userId, onClose }: { userId: string; onClose: () => void })
       }
       toast.success('Pemakaian dicatat')
       onClose()
-    } catch { toast.error('Gagal menyimpan') }
+    } catch (e) { toast.error('Gagal menyimpan'); console.error(e) }
     finally { setSaving(false) }
   }
 
   return (
     <Modal title="Catat Pemakaian" onClose={onClose}>
       <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
-        <p className="text-xs text-amber-700">Pemakaian ATK/operasional gudang — kertas, tinta, sabun, dll. Stok otomatis berkurang.</p>
+        <p className="text-xs text-amber-700 font-medium">Pemakaian ATK / Operasional Gudang</p>
+        <p className="text-xs text-amber-600 mt-0.5">Kertas, tinta, sabun, dll. Stok otomatis berkurang.</p>
       </div>
-
-      {payMethod === 'transfer' && (
-        <div><Label>Transfer ke Rekening</Label>
-          <input className="input" value={transferTo} onChange={e => setTransferTo(e.target.value)} placeholder="BCA 1234567890 a.n. Toko" />
-        </div>
-      )}
-      {payMethod === 'kredit' && (
-        <div><Label>Jatuh Tempo</Label>
-          <input className="input" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
-        </div>
-      )}
-
-      <div><Label>Catatan</Label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Cetak label, bersih-bersih, dll" autoFocus /></div>
+      <div>
+        <Label>Catatan</Label>
+        <input className="input" value={notes} onChange={e => setNotes(e.target.value)}
+          placeholder="Cetak label, bersih-bersih, dll" autoFocus />
+      </div>
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <Label>Item</Label>
-          <button onClick={() => setShowAll(!showAll)} className="text-xs text-blue-500 underline">{showAll ? 'Filter ATK/Ops saja' : 'Tampilkan semua'}</button>
+          <Label required>Item Pemakaian</Label>
+          <button onClick={() => setShowAll(!showAll)} className="text-xs text-blue-500 underline">
+            {showAll ? 'Filter ATK/Ops saja' : 'Semua bahan'}
+          </button>
         </div>
         <div className="space-y-2">
           {items.map((item, i) => {
             const mat = allMats?.find(m => m.id === item.material_id)
             return (
               <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
-                <select className="input text-sm" value={item.material_id} onChange={e => updateItem(i, 'material_id', e.target.value)}>
+                <select className="input text-sm" value={item.material_id}
+                  onChange={e => updateItem(i, 'material_id', e.target.value)}>
                   <option value="" disabled>-- Pilih bahan *</option>
                   {matList?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
                 </select>
-                <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit || ''})`}
+                <input className="input text-sm" type="number" placeholder={"Qty (" + (mat?.unit || '') + ")"}
                   value={item.qty} onChange={e => updateItem(i, 'qty', e.target.value)} />
-                {items.length > 1 && <button onClick={() => setItems(p => p.filter((_, idx) => idx !== i))} className="text-xs text-red-400">Hapus</button>}
+                {mat && item.qty && Number(item.qty) > 0 && (
+                  <p className="text-xs text-gray-400">Nilai: {formatRupiah(Number(item.qty) * (mat.unit_cost || 0))}</p>
+                )}
+                {items.length > 1 && (
+                  <button onClick={() => setItems(p => p.filter((_, idx) => idx !== i))} className="text-xs text-red-400">Hapus</button>
+                )}
               </div>
             )
           })}
@@ -1438,11 +1447,14 @@ function PakaiForm({ userId, onClose }: { userId: string; onClose: () => void })
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+          {saving ? 'Menyimpan...' : 'Simpan'}
+        </button>
       </div>
     </Modal>
   )
 }
+
 
 // ── FORM: Biaya ───────────────────────────────────────────────
 function BiayaForm({ userId, onClose }: { userId: string; onClose: () => void }) {

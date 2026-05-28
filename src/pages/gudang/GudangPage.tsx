@@ -442,7 +442,7 @@ function PembelianTab({ userId }: { userId: string }) {
                       {(p as any).po_number && <p className="text-xs font-mono font-medium text-blue-600 mb-0.5">{(p as any).po_number}</p>}
                       <p className="text-sm font-medium text-gray-900">{p.supplier?.name || 'Tanpa Supplier'}</p>
                       <p className="text-xs text-gray-400">
-                        {new Date(p.created_at).toLocaleString('id-ID', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}
+                        {new Date(p.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' }) + ', ' + new Date(p.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
                         {p.invoice_no ? ` · ${p.invoice_no}` : ''}
                         {(p as any).payment_method ? ` · ${(p as any).payment_method}` : ''}
                       </p>
@@ -573,7 +573,7 @@ function MutasiTab({ userId }: { userId: string }) {
                         {m.destination_name && <span className="text-xs text-gray-700 font-medium">{m.destination_name}</span>}
                       </div>
                       <p className="text-xs text-gray-400 mt-0.5">
-                        {new Date(m.created_at).toLocaleString('id-ID', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}
+                        {new Date(m.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' }) + ', ' + new Date(m.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
                         {m.notes ? ` · ${m.notes}` : ''}
                       </p>
                     </div>
@@ -700,7 +700,7 @@ function PakaiTab({ userId }: { userId: string }) {
                       )}
                       <p className="text-sm font-medium text-gray-900">{u.notes || 'Pemakaian internal'}</p>
                       <p className="text-xs text-gray-400">
-                        {new Date(u.created_at).toLocaleString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        {new Date(u.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' }) + ', ' + new Date(u.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
                       </p>
                     </div>
                     <p className="text-xs font-medium text-gray-600 flex-shrink-0 ml-2">
@@ -811,7 +811,7 @@ function BiayaTab({ userId }: { userId: string }) {
                       <p className="text-sm font-medium text-gray-900 truncate">{e.name}</p>
                       <p className="text-xs text-gray-400">
                         {KATEGORI_BIAYA.find(k => k.value === e.category)?.label || e.category}
-                        {' · '}{new Date(e.created_at).toLocaleString('id-ID', { day:'numeric', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' })}
+                        {' · '}{new Date(e.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'long', year:'numeric' }) + ', ' + new Date(e.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
                         {(e as any).payment_method ? ` · ${(e as any).payment_method}` : ''}
                       </p>
                     </div>

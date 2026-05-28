@@ -321,7 +321,7 @@ function CatatProduksiTab({ userId }: { userId: string }) {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900">{log.recipe?.name || '-'}</p>
                       <p className="text-xs text-gray-400 mt-0.5">
-                        {new Date(log.created_at).toLocaleString('id-ID', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}
+                        {new Date(log.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' }) + ', ' + new Date(log.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
                         {' · '}{log.batch_count} batch
                         {log.notes ? ` · ${log.notes}` : ''}
                       </p>
@@ -437,7 +437,7 @@ function KirimTab({ userId }: { userId: string }) {
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tc.color}`}>{tc.label}</span>
                         {m.destination_name && <span className="text-xs text-gray-600 font-medium">{m.destination_name}</span>}
                       </div>
-                      <p className="text-xs text-gray-400">{new Date(m.created_at).toLocaleString('id-ID', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })}</p>
+                      <p className="text-xs text-gray-400">{new Date(m.created_at).toLocaleDateString('id-ID', {day:'numeric', month:'short', year:'numeric'}) + ', ' + new Date(m.created_at).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit', hour12: false})}</p>
                     </div>
                     {m.items.length > 0 && (
                       <div className="mt-1.5 space-y-0.5 border-t border-gray-50 pt-1.5">

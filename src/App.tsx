@@ -9,6 +9,7 @@ import Layout            from '@/components/layout/Layout'
 import CashierPage       from '@/pages/cashier/CashierPage'
 import ProductsPage      from '@/pages/products/ProductsPage'
 import StoreRecipePage   from '@/pages/products/StoreRecipePage'
+import ResepPage         from '@/pages/resep/ResepPage'
 import StockPage         from '@/pages/stock/StockPage'
 import ReportsPage       from '@/pages/reports/ReportsPage'
 import SettingsPage      from '@/pages/settings/SettingsPage'
@@ -141,6 +142,7 @@ export default function App() {
         <Route path="kasir"         element={<CashierPage />} />
         <Route path="produk"        element={<RequireRole roles={['owner','manager']}><ProductsPage /></RequireRole>} />
         <Route path="resep-toko"    element={<RequireRole roles={['owner','manager']}><StoreRecipePage /></RequireRole>} />
+        <Route path="resep"         element={<RequireRole roles={['owner','manager']}><ResepPage /></RequireRole>} />
         <Route path="stok"          element={<RequireRole roles={['owner','manager','gudang']}><StockPage /></RequireRole>} />
         <Route path="laporan"       element={<RequireRole roles={['owner','manager']}><ReportsPage /></RequireRole>} />
         <Route path="laporan-gudang" element={<RequireRole roles={['owner','manager','gudang']}><LaporanGudangPage /></RequireRole>} />

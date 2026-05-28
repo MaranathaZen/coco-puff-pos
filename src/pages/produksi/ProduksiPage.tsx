@@ -323,15 +323,22 @@ function CatatProduksiTab({ userId }: { userId: string }) {
             <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{display: expanded ? undefined : "none"}}>
               {grpItems.map((log, idx) => (
                 <div key={log.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800">{log.recipe?.name || '-'}</p>
-                      <p className="text-xs text-gray-400">{new Date(log.created_at).toLocaleString('id-ID', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })} · {log.batch_count} batch{log.notes ? ` · ${log.notes}` : ''}</p>
+                      <p className="text-sm font-medium text-gray-900">{log.recipe?.name || '-'}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {new Date(log.created_at).toLocaleString('id-ID', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}
+                        {' · '}{log.batch_count} batch
+                        {log.notes ? ` · ${log.notes}` : ''}
+                      </p>
                     </div>
-                    <div className="text-right flex-shrink-0 ml-2">
+                    <div className="text-right flex-shrink-0 ml-3">
                       <p className="text-sm font-bold text-brand-600">{log.total_yield} {log.recipe?.yield_unit || 'pcs'}</p>
                       {(log as any).hpp_per_unit > 0 && (
                         <p className="text-xs text-gray-500">HPP {formatRupiah((log as any).hpp_per_unit)}/pcs</p>
+                      )}
+                      {(log as any).total_cost > 0 && (
+                        <p className="text-xs font-medium text-gray-700">{formatRupiah((log as any).total_cost)}</p>
                       )}
                     </div>
                   </div>

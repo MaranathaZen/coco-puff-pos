@@ -563,15 +563,21 @@ function MutasiTab({ userId }: { userId: string }) {
               const totalNilai = m.items.reduce((s, i) => s + i.qty * i.unit_cost, 0)
               return (
                 <div key={m.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex flex-col gap-0.5">
-                      <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-start justify-between mb-1">
+                    <div className="flex-1 min-w-0">
+                      {(m as any).mutation_number && (
+                        <p className="text-xs font-mono text-blue-600 mb-0.5">{(m as any).mutation_number}</p>
+                      )}
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tc.color}`}>{tc.label}</span>
-                        {m.destination_name && <span className="text-xs text-gray-600 font-medium">{m.destination_name}</span>}
+                        {m.destination_name && <span className="text-xs text-gray-700 font-medium">{m.destination_name}</span>}
                       </div>
-                      {(m as any).mutation_number && <p className="text-xs font-mono text-gray-400">{(m as any).mutation_number}</p>}
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {new Date(m.created_at).toLocaleString('id-ID', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}
+                        {m.notes ? ` · ${m.notes}` : ''}
+                      </p>
                     </div>
-                    <p className="text-xs text-gray-400 flex-shrink-0">{new Date(m.created_at).toLocaleString('id-ID', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })}</p>
+                    <p className="text-sm font-semibold text-gray-900 flex-shrink-0 ml-2">{formatRupiah(totalNilai)}</p>
                   </div>
                   {m.items.length > 0 && (
                     <div className="mt-1.5 space-y-0.5 border-t border-gray-50 pt-1.5">
@@ -864,23 +870,19 @@ function MaterialForm({ material, onClose }: { material: Material | null; onClos
   const [saving, setSaving]   = useState(false)
 
   async function handleDelete() {
-    if (!material || !confirm(`Hapus "${material.name}"? Data tidak bisa dikembalikan.`)) return
+    if (!material || !confirm(`Nonaktifkan "${material.name}"? Bahan tidak akan muncul di daftar.`)) return
     try {
-      // Hapus dari Supabase DULU, baru IndexedDB
-      const { error } = await supabase.from('materials').delete().eq('id', material.id)
+      // Soft delete: set is_active=false (tidak hapus data, aman untuk foreign key)
+      const { error } = await supabase.from('materials')
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq('id', material.id)
       if (error) throw error
-      await db.materials.delete(material.id)
-      // Hapus stok terkait
-      const ws = await db.warehouse_stock.where('material_id').equals(material.id).first()
-      if (ws) {
-        await db.warehouse_stock.delete(ws.id)
-        await supabase.from('warehouse_stock').delete().eq('material_id', material.id)
-      }
-      toast.success('Bahan dihapus')
+      await db.materials.update(material.id, { is_active: false, updated_at: new Date().toISOString() })
+      toast.success('Bahan dinonaktifkan')
       onClose()
     } catch (e) {
       console.error('[DELETE]', e)
-      toast.error('Gagal menghapus dari server')
+      toast.error('Gagal: ' + String((e as any)?.message || e))
     }
   }
 

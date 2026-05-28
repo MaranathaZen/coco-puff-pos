@@ -26,6 +26,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   '/pengaturan':     Settings,
   '/tutup-toko':     DoorClosed,
   '/resep-toko':     FlaskConical,
+  '/resep':           FlaskConical,
 }
 
 // Default menu per role — fallback kalau menu_role_config belum di-set di DB
@@ -39,7 +40,7 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
     { path: '/laporan',        label: 'Laporan' },
     { path: '/laporan-gudang', label: 'Lap. Gudang' },
     { path: '/pengaturan',     label: 'Setting' },
-    { path: '/resep-toko',     label: 'Resep Toko' },
+    { path: '/resep',          label: 'Resep' },
     { path: '/tutup-toko',     label: 'Tutup Toko' },
   ],
   // Manager: Kasir · Gudang · Produksi · Laporan · [Lainnya: Setting, Tutup Toko]
@@ -48,7 +49,7 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
     { path: '/gudang',         label: 'Gudang' },
     { path: '/produksi',       label: 'Produksi' },
     { path: '/laporan',        label: 'Laporan' },
-    { path: '/resep-toko',     label: 'Resep Toko' },
+    { path: '/resep',          label: 'Resep' },
     { path: '/pengaturan',     label: 'Setting' },
     { path: '/tutup-toko',     label: 'Tutup Toko' },
   ],

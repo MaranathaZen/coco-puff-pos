@@ -388,6 +388,25 @@ function KirimTab({ userId }: { userId: string }) {
   const mutations = useLiveQuery(async () => {
     const m    = await db.production_mutations.orderBy('created_at').reverse().limit(50).toArray()
     const its  = await db.production_mutation_items.toArray()
+    // Hitung HPP per produk dari log produksi terakhir
+    const logs = await db.production_logs.toArray()
+    const logMats = await db.production_log_materials.toArray()
+    const matDefs = await db.materials.toArray()
+    const mMap = Object.fromEntries(matDefs.map(m => [m.id, m]))
+    // Build hpp map: product_name -> hpp_per_unit (dari log terakhir)
+    const hppMap: Record<string, number> = {}
+    const fgs = await db.finished_goods_stock.toArray()
+    for (const log of logs) {
+      const logMatItems = logMats.filter(lm => lm.log_id === log.id)
+      const totalCost = logMatItems.reduce((s, lm) => s + lm.qty_used * (mMap[lm.material_id]?.unit_cost || 0), 0)
+      const hpp = log.total_yield > 0 ? totalCost / log.total_yield : 0
+      if (hpp > 0) {
+        // Map ke product_name via finished_goods_stock
+        const fgItem = fgs.find(f => f.product_id === log.recipe_id || true) // best effort
+        // Store by recipe_id as key for now
+        hppMap[log.recipe_id] = hpp
+      }
+    }
     return m.map(x => ({
       ...x,
       items: its.filter(i => i.mutation_id === x.id)
@@ -433,7 +452,7 @@ function KirimTab({ userId }: { userId: string }) {
                             <span>{i.qty} pcs</span>
                           </div>
                         ))}
-                        <div className="flex justify-between text-xs font-medium text-gray-600 pt-1 border-t border-gray-50 mt-1">
+                        <div className="flex justify-between text-xs font-medium text-gray-700 pt-1 border-t border-gray-50 mt-1">
                           <span>Total Dikirim</span>
                           <span className="font-semibold">{totalQty} pcs</span>
                         </div>

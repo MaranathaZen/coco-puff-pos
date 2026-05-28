@@ -633,12 +633,12 @@ function PakaiTab({ userId }: { userId: string }) {
         <p className="text-xs text-gray-400 mt-0.5">ATK, kebersihan, operasional gudang</p>
       </div>
 
+      <SearchBar value={search} onChange={setSearch} placeholder="Cari nama bahan, keterangan..." />
+
       <button onClick={() => setShowForm(true)}
-        className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium">
+        className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-gray-300 rounded-xl text-sm font-medium text-gray-600 active:bg-gray-50">
         <Plus size={15} /> Catat Pemakaian
       </button>
-
-      <SearchBar value={search} onChange={setSearch} placeholder="Cari nama bahan, keterangan..." />
 
       {grouped.map(({ key, items: grpItems }) => {
         const total = grpItems.reduce((s, u) => s + u.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0)
@@ -743,10 +743,6 @@ function BiayaTab({ userId }: { userId: string }) {
         <p className="text-xs text-gray-400 mb-1">Total Biaya Bulan Ini</p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalBulanIni)}</p>
       </div>
-      <button onClick={() => setShowForm(true)}
-        className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium">
-        <Plus size={15} /> Catat Biaya
-      </button>
       <SearchBar value={search} onChange={setSearch} placeholder="Cari keterangan biaya..." />
       <div className="flex gap-2 overflow-x-auto pb-1">
         {[{ v: 'semua', l: 'Semua' }, ...KATEGORI_BIAYA.map(k => ({ v: k.value, l: k.label }))].map(f => (
@@ -886,6 +882,9 @@ function MaterialForm({ material, onClose }: { material: Material | null; onClos
       </div>
       <div>
         <Label required>Satuan</Label>
+        <p className="text-xs text-gray-400 mb-2">
+          Pilih satuan terkecil. Contoh: beli per kg → pilih Gram, gunakan "Input per pack" saat pembelian.
+        </p>
         <div className="flex flex-wrap gap-1.5 mb-2">
           {SATUAN.map(s => (
             <button key={s} onClick={() => { setUnit(s); setCustom(false) }}
@@ -1012,6 +1011,11 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
           })}
         </div>
         <button onClick={addItem} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
+      </div>
+      <div>
+        <Label>Catatan</Label>
+        <input className="input" value={notes} onChange={e => setNotes(e.target.value)}
+          placeholder="Cetak label, bersih-bersih, dll" />
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
@@ -1436,11 +1440,6 @@ function PakaiForm({ userId, onClose }: { userId: string; onClose: () => void })
         <p className="text-xs text-amber-600 mt-0.5">Kertas, tinta, sabun, dll. Stok otomatis berkurang.</p>
       </div>
       <div>
-        <Label>Catatan</Label>
-        <input className="input" value={notes} onChange={e => setNotes(e.target.value)}
-          placeholder="Cetak label, bersih-bersih, dll" autoFocus />
-      </div>
-      <div>
         <div className="flex items-center justify-between mb-1.5">
           <Label required>Item Pemakaian</Label>
           <button onClick={() => setShowAll(!showAll)} className="text-xs text-blue-500 underline">
@@ -1470,6 +1469,11 @@ function PakaiForm({ userId, onClose }: { userId: string; onClose: () => void })
           })}
         </div>
         <button onClick={addItem} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
+      </div>
+      <div>
+        <Label>Catatan</Label>
+        <input className="input" value={notes} onChange={e => setNotes(e.target.value)}
+          placeholder="Cetak label, bersih-bersih, dll" />
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>

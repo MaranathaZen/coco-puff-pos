@@ -388,28 +388,14 @@ function KirimTab({ userId }: { userId: string }) {
   const mutations = useLiveQuery(async () => {
     const m    = await db.production_mutations.orderBy('created_at').reverse().limit(50).toArray()
     const its  = await db.production_mutation_items.toArray()
-    // Hitung HPP per produk dari log produksi terakhir
-    const logs = await db.production_logs.toArray()
-    const logMats = await db.production_log_materials.toArray()
-    const matDefs = await db.materials.toArray()
-    const mMap = Object.fromEntries(matDefs.map(m => [m.id, m]))
-    // Build hpp map: product_name -> hpp_per_unit (dari log terakhir)
-    const hppMap: Record<string, number> = {}
-    const fgs = await db.finished_goods_stock.toArray()
-    for (const log of logs) {
-      const logMatItems = logMats.filter(lm => lm.log_id === log.id)
-      const totalCost = logMatItems.reduce((s, lm) => s + lm.qty_used * (mMap[lm.material_id]?.unit_cost || 0), 0)
-      const hpp = log.total_yield > 0 ? totalCost / log.total_yield : 0
-      if (hpp > 0) {
-        // Map ke product_name via finished_goods_stock
-        const fgItem = fgs.find(f => f.product_id === log.recipe_id || true) // best effort
-        // Store by recipe_id as key for now
-        hppMap[log.recipe_id] = hpp
-      }
-    }
+    const fgs  = await db.finished_goods_stock.toArray()
+    const fgMap = Object.fromEntries(fgs.map(f => [f.product_id, f]))
     return m.map(x => ({
       ...x,
-      items: its.filter(i => i.mutation_id === x.id)
+      items: its.filter(i => i.mutation_id === x.id).map(i => ({
+        ...i,
+        hpp_per_unit: (fgMap[i.product_id] as any)?.hpp_per_unit || 0,
+      }))
     }))
   }, [])
 
@@ -446,15 +432,28 @@ function KirimTab({ userId }: { userId: string }) {
                     </div>
                     {m.items.length > 0 && (
                       <div className="mt-1.5 space-y-0.5 border-t border-gray-50 pt-1.5">
-                        {m.items.map(i => (
-                          <div key={i.id} className="flex justify-between text-xs text-gray-400">
-                            <span>{i.product_name}</span>
-                            <span>{i.qty} pcs</span>
-                          </div>
-                        ))}
+                        {m.items.map(i => {
+                          const nilaiItem = i.qty * ((i as any).hpp_per_unit || 0)
+                          return (
+                            <div key={i.id} className="flex justify-between text-xs text-gray-400">
+                              <span>{i.product_name}</span>
+                              <span>
+                                {i.qty} pcs
+                                {(i as any).hpp_per_unit > 0 && ` · ${formatRupiah(nilaiItem)}`}
+                              </span>
+                            </div>
+                          )
+                        })}
                         <div className="flex justify-between text-xs font-medium text-gray-700 pt-1 border-t border-gray-50 mt-1">
                           <span>Total Dikirim</span>
-                          <span className="font-semibold">{totalQty} pcs</span>
+                          <div className="text-right">
+                            <span className="font-semibold">{totalQty} pcs</span>
+                            {m.items.some(i => (i as any).hpp_per_unit > 0) && (
+                              <p className="text-gray-500">
+                                {formatRupiah(m.items.reduce((s, i) => s + i.qty * ((i as any).hpp_per_unit || 0), 0))}
+                              </p>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )}
@@ -562,14 +561,23 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
         }
       }
 
-      // Tambah stok produk setengah jadi
-      // Cari berdasarkan nama, bukan product_id — karena ini bukan produk menu kasir
+      // Hitung HPP produksi ini
+      const recipeItemsForHPP = await db.production_recipe_items.where('recipe_id').equals(recipeId).toArray()
+      const matDefs = await db.materials.toArray()
+      const mMapHPP = Object.fromEntries(matDefs.map(m => [m.id, m]))
+      const totalCostHPP = recipeItemsForHPP.reduce((s, ri) => {
+        return s + ri.qty_per_batch * Number(batchCount) * (mMapHPP[ri.material_id]?.unit_cost || 0)
+      }, 0)
+      const hppPerUnit = totalYield > 0 ? totalCostHPP / totalYield : 0
+
+      // Tambah stok produk setengah jadi + simpan HPP
       const existing = await db.finished_goods_stock.filter(f => f.product_name === productName.trim()).first()
       const fgsData: any = {
         id:           existing?.id || generateId(),
         product_id:   existing?.product_id || `prod-${generateId().slice(0,8)}`,
         product_name: productName.trim(),
         qty_on_hand:  (existing?.qty_on_hand || 0) + totalYield,
+        hpp_per_unit: hppPerUnit, // HPP dari produksi ini
         last_updated: now(),
       }
       await db.finished_goods_stock.put(fgsData)
@@ -780,6 +788,8 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
 
 // ── FORM: Resep ───────────────────────────────────────────────
 function ResepForm({ recipe, onClose }: { recipe: any | null; onClose: () => void }) {
+  const { user } = useAuthStore()
+  const isOwner = user?.role === 'owner'
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
 
   const [name, setName]           = useState(recipe?.name || '')
@@ -916,6 +926,19 @@ function ResepForm({ recipe, onClose }: { recipe: any | null; onClose: () => voi
       </div>
 
       <div className="flex gap-3 pt-1 border-t border-gray-100">
+        {recipe && isOwner && (
+          <button onClick={async () => {
+            if (!confirm(`Hapus resep "${recipe.name}"?`)) return
+            await db.production_recipe_items.where('recipe_id').equals(recipe.id).delete()
+            await db.production_recipes.delete(recipe.id)
+            await supabase.from('production_recipe_items').delete().eq('recipe_id', recipe.id)
+            await supabase.from('production_recipes').delete().eq('id', recipe.id)
+            toast.success('Resep dihapus')
+            onClose()
+          }} className="px-4 py-3 rounded-xl border border-red-200 text-sm font-medium text-red-500">
+            Hapus
+          </button>
+        )}
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
           {saving ? 'Menyimpan...' : 'Simpan'}

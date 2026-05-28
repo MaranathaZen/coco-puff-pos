@@ -830,6 +830,16 @@ function MaterialForm({ material, onClose }: { material: Material | null; onClos
     }
   }, [])
 
+  async function handleDelete() {
+    if (!material || !confirm(`Hapus "${material.name}"? Data tidak bisa dikembalikan.`)) return
+    try {
+      await db.materials.delete(material.id)
+      await supabase.from('materials').delete().eq('id', material.id)
+      toast.success('Bahan dihapus')
+      onClose()
+    } catch { toast.error('Gagal menghapus') }
+  }
+
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama bahan wajib diisi')
     if (!unit)        return toast.error('Satuan wajib diisi')
@@ -920,6 +930,12 @@ function MaterialForm({ material, onClose }: { material: Material | null; onClos
         </button>
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
+        {material && isOwner && (
+          <button onClick={handleDelete}
+            className="px-4 py-3 rounded-xl border border-red-200 text-sm font-medium text-red-500 active:bg-red-50">
+            Hapus
+          </button>
+        )}
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
           {saving ? 'Menyimpan...' : 'Simpan'}
@@ -1027,6 +1043,8 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
 
 // ── FORM: Pembelian ───────────────────────────────────────────
 function PembelianForm({ userId, onClose }: { userId: string; onClose: () => void }) {
+  const { user } = useAuthStore()
+  const isOwner = user?.role === 'owner'
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const suppliers = useLiveQuery(() => db.suppliers.filter(s => s.is_active).toArray(), [])
 
@@ -1250,6 +1268,8 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
 
 // ── FORM: Mutasi ──────────────────────────────────────────────
 function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }) {
+  const { user } = useAuthStore()
+  const isOwner = user?.role === 'owner'
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const partners  = useLiveQuery(() => db.partners.filter(p => p.is_active).toArray(), [])
   const stores    = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])

@@ -44,7 +44,7 @@ export interface ProductionStock {
 
 export interface FinishedGoodsStock {
   id: string; product_id: string; product_name: string
-  qty_on_hand: number; last_updated: string
+  qty_on_hand: number; hpp_per_unit?: number; last_updated: string
 }
 
 export interface Purchase {

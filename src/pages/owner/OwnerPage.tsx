@@ -1,255 +1,200 @@
 // src/pages/owner/OwnerPage.tsx
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { supabase } from '@/lib/supabase'
+// Owner Dashboard — monitoring semua toko
+import { useState, useMemo } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/lib/db'
-import { formatRupiah } from '@/lib/utils'
-import { RefreshCw, AlertCircle, ChevronRight, ChevronDown } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/auth'
+import { formatRupiah, formatDate } from '@/lib/utils'
+import { TrendingUp, Store, Package, AlertCircle, RefreshCw, ShoppingBag } from 'lucide-react'
 
-interface StoreSummary { store_id: string; store_name: string; total_trx: number; total_omzet: number }
-interface LowStockItem { name: string; qty: number; unit: string; min_stock: number }
-interface ProductionSummary { total_yield: number; batch_count: number; recipe_name: string }
-
-function SectionHeader({ title, expanded, onToggle }: { title: string; expanded: boolean; onToggle: () => void }) {
-  return (
-    <button onClick={onToggle} className="w-full flex items-center justify-between py-2">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{title}</p>
-      <ChevronDown size={14} className={`text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-    </button>
-  )
-}
+type Period = 'hari' | 'minggu' | 'bulan'
 
 export default function OwnerPage() {
-  const navigate = useNavigate()
-  const [summaries, setSummaries]     = useState<StoreSummary[]>([])
-  const [lowStock, setLowStock]       = useState<LowStockItem[]>([])
-  const [produksi, setProduksi]       = useState<ProductionSummary[]>([])
-  const [biayaBulanIni, setBiaya]     = useState(0)
-  const [totalPembelian, setPembelian]= useState(0)
-  const [loading, setLoading]         = useState(true)
+  const { user } = useAuthStore()
+  const [period, setPeriod]   = useState<Period>('hari')
+  const [syncing, setSyncing] = useState(false)
 
-  // Section expanded state
-  const [secDashboard, setSecDash]  = useState(true)
-  const [secGudang, setSecGudang]   = useState(true)
-  const [secProduksi, setSecProd]   = useState(true)
-  const [secToko, setSecToko]       = useState(true)
-  const [secSetting, setSecSetting] = useState(false)
-
-  const [showLowStock, setShowLow]  = useState(false)
-
-  const today    = new Date().toISOString().slice(0, 10)
-  const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
-
-  async function fetchAll() {
-    setLoading(true)
+  async function syncAll() {
+    setSyncing(true)
     try {
-      await Promise.all([fetchSales(), fetchLowStock(), fetchProduksi(), fetchBiaya(), fetchPembelian()])
-    } finally { setLoading(false) }
+      const [txRes, storesRes, matsRes, stockRes, expRes] = await Promise.all([
+        supabase.from('transactions').select('*, transaction_items(*)').eq('status', 'completed'),
+        supabase.from('stores').select('*').eq('is_active', true),
+        supabase.from('materials').select('*'),
+        supabase.from('warehouse_stock').select('*'),
+        supabase.from('warehouse_expenses').select('*'),
+      ])
+      if (txRes.data?.length) {
+        const txs = txRes.data.map(({ transaction_items: _, ...t }) => t)
+        const items = txRes.data.flatMap(t => (t.transaction_items || []).map((i: any) => ({ ...i, transaction_id: t.id })))
+        await db.transactions.bulkPut(txs)
+        if (items.length) await db.transaction_items.bulkPut(items)
+      }
+      if (storesRes.data?.length) await db.stores.bulkPut(storesRes.data)
+      if (matsRes.data?.length)   await db.materials.bulkPut(matsRes.data)
+      if (stockRes.data?.length)  await db.warehouse_stock.bulkPut(stockRes.data)
+      if (expRes.data?.length)    await db.warehouse_expenses.bulkPut(expRes.data)
+    } finally { setSyncing(false) }
   }
 
-  async function fetchSales() {
-    const { data: stores } = await supabase.from('stores').select('id, name').eq('is_active', true)
-    if (!stores) return
-    const results: StoreSummary[] = []
-    for (const store of stores) {
-      const { data: txs } = await supabase.from('transactions')
-        .select('total').eq('store_id', store.id).eq('status', 'completed')
-        .gte('created_at', today + 'T00:00:00')
-      results.push({ store_id: store.id, store_name: store.name, total_trx: txs?.length || 0, total_omzet: txs?.reduce((s, t) => s + t.total, 0) || 0 })
-    }
-    setSummaries(results)
-  }
+  const dateRange = useMemo(() => {
+    const now = new Date()
+    const end = new Date(now); end.setHours(23,59,59,999)
+    const start = new Date(now)
+    if (period === 'hari')   start.setHours(0,0,0,0)
+    if (period === 'minggu') { start.setDate(now.getDate()-6); start.setHours(0,0,0,0) }
+    if (period === 'bulan')  { start.setDate(1); start.setHours(0,0,0,0) }
+    return { start: start.toISOString(), end: end.toISOString() }
+  }, [period])
 
-  async function fetchLowStock() {
-    const mats = await db.materials.filter(m => m.is_active).toArray()
+  const stores = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
+
+  const transactions = useLiveQuery(async () => {
+    return db.transactions
+      .filter(t => t.status === 'completed' &&
+        t.created_at >= dateRange.start &&
+        t.created_at <= dateRange.end)
+      .toArray()
+  }, [dateRange])
+
+  const stockAlerts = useLiveQuery(async () => {
+    const mats   = await db.materials.toArray()
     const stocks = await db.warehouse_stock.toArray()
-    const stockMap = Object.fromEntries(stocks.map(s => [s.material_id, s]))
-    setLowStock(mats.map(m => ({ name: m.name, qty: stockMap[m.id]?.qty_on_hand ?? 0, unit: m.unit, min_stock: m.min_stock })).filter(m => m.qty <= m.min_stock).sort((a, b) => a.qty - b.qty))
-  }
+    const sMap   = Object.fromEntries(stocks.map(s => [s.material_id, s.qty_on_hand]))
+    return mats.filter(m => m.is_active && (sMap[m.id] ?? 0) <= m.min_stock)
+  }, [])
 
-  async function fetchProduksi() {
-    const { data: logs } = await supabase.from('production_logs').select('*, production_recipes(name)').gte('created_at', today + 'T00:00:00')
-    if (!logs) return
-    setProduksi(logs.map((l: any) => ({ total_yield: l.total_yield, batch_count: l.batch_count, recipe_name: l.production_recipes?.name || '-' })))
-  }
+  const warehouseValue = useLiveQuery(async () => {
+    const mats   = await db.materials.toArray()
+    const stocks = await db.warehouse_stock.toArray()
+    const sMap   = Object.fromEntries(stocks.map(s => [s.material_id, s.qty_on_hand]))
+    return mats.reduce((s, m) => s + (sMap[m.id] ?? 0) * (m.unit_cost || 0), 0)
+  }, [])
 
-  async function fetchBiaya() {
-    const { data } = await supabase.from('warehouse_expenses').select('amount').gte('expense_date', firstDay).lte('expense_date', today)
-    setBiaya(data?.reduce((s, e) => s + e.amount, 0) || 0)
-  }
+  // Stats per toko
+  const storeStats = useMemo(() => {
+    if (!transactions || !stores) return []
+    return stores.map(store => {
+      const storeTxs = transactions.filter(t => t.store_id === store.id)
+      const omzet    = storeTxs.reduce((s, t) => s + t.total, 0)
+      const count    = storeTxs.length
+      const avgTrx   = count > 0 ? omzet / count : 0
+      return { store, omzet, count, avgTrx }
+    }).sort((a, b) => b.omzet - a.omzet)
+  }, [transactions, stores])
 
-  async function fetchPembelian() {
-    const { data } = await supabase.from('purchases').select('total_amount').gte('created_at', firstDay + 'T00:00:00')
-    setPembelian(data?.reduce((s, p) => s + p.total_amount, 0) || 0)
-  }
+  const totalOmzet = storeStats.reduce((s, x) => s + x.omzet, 0)
+  const totalTrx   = storeStats.reduce((s, x) => s + x.count, 0)
 
-  useEffect(() => { fetchAll() }, [])
-
-  const grandOmzet    = summaries.reduce((s, r) => s + r.total_omzet, 0)
-  const grandTrx      = summaries.reduce((s, r) => s + r.total_trx, 0)
-  const totalProduksi = produksi.reduce((s, p) => s + p.total_yield, 0)
-
-  const settingLinks = [
-    { label: 'Kelola User',     path: '/pengaturan' },
-    { label: 'Supplier',        path: '/pengaturan' },
-    { label: 'Franchise',       path: '/pengaturan' },
-    { label: 'Konfigurasi Menu',path: '/pengaturan' },
-  ]
+  const periodLabel = { hari: 'Hari Ini', minggu: '7 Hari', bulan: 'Bulan Ini' }
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="flex flex-col h-full bg-gray-50">
       {/* Header */}
-      <div className="px-4 pt-4 pb-0 flex items-center justify-between flex-shrink-0">
-        <div>
+      <div className="bg-white px-4 pt-4 pb-3 flex-shrink-0">
+        <div className="flex items-center justify-between mb-3">
           <h1 className="text-lg font-semibold text-gray-900">Dashboard</h1>
-          <p className="text-xs text-gray-400 mt-0.5">
-            {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-          </p>
+          <button onClick={syncAll} disabled={syncing}
+            className="p-2 rounded-full text-gray-400 hover:text-gray-600">
+            <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
+          </button>
         </div>
-        <button onClick={fetchAll} className="p-2 rounded-full text-gray-400">
-          <RefreshCw size={16} className={loading ? 'animate-spin text-blue-500' : ''} />
-        </button>
+        <div className="flex gap-2">
+          {(['hari','minggu','bulan'] as Period[]).map(p => (
+            <button key={p} onClick={() => setPeriod(p)}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                period === p ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'
+              }`}>{periodLabel[p]}</button>
+          ))}
+        </div>
       </div>
 
-      <div className="flex-1 overflow-auto bg-gray-50 mt-3">
-        <div className="px-4 pb-6 space-y-1">
+      <div className="flex-1 overflow-auto p-4 space-y-4">
 
-          {/* ── SECTION: DASHBOARD ── */}
-          <SectionHeader title="Dashboard" expanded={secDashboard} onToggle={() => setSecDash(!secDashboard)} />
-          {secDashboard && (
-            <div className="space-y-2 pb-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="bg-white rounded-xl border border-gray-100 p-3">
-                  <p className="text-xs text-gray-400">Omzet Hari Ini</p>
-                  <p className="text-lg font-semibold text-gray-900 mt-0.5">{formatRupiah(grandOmzet)}</p>
-                  <p className="text-xs text-gray-400">{grandTrx} transaksi</p>
-                </div>
-                <div className="bg-white rounded-xl border border-gray-100 p-3">
-                  <p className="text-xs text-gray-400">Rata-rata/Trx</p>
-                  <p className="text-lg font-semibold text-gray-900 mt-0.5">{formatRupiah(grandTrx > 0 ? grandOmzet / grandTrx : 0)}</p>
-                  <p className="text-xs text-gray-400">hari ini</p>
-                </div>
-              </div>
+        {/* Total summary */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <TrendingUp size={14} className="text-green-500" />
+              <p className="text-xs text-gray-400">Total Omzet</p>
             </div>
-          )}
-
-          {/* ── SECTION: GUDANG ── */}
-          <SectionHeader title="Gudang" expanded={secGudang} onToggle={() => setSecGudang(!secGudang)} />
-          {secGudang && (
-            <div className="space-y-2 pb-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="bg-white rounded-xl border border-gray-100 p-3">
-                  <p className="text-xs text-gray-400">Pembelian Bulan Ini</p>
-                  <p className="text-base font-semibold text-gray-900 mt-0.5">{formatRupiah(totalPembelian)}</p>
-                </div>
-                <div className="bg-white rounded-xl border border-gray-100 p-3">
-                  <p className="text-xs text-gray-400">Biaya Operasional</p>
-                  <p className="text-base font-semibold text-gray-900 mt-0.5">{formatRupiah(biayaBulanIni)}</p>
-                  <p className="text-xs text-gray-400">bulan ini</p>
-                </div>
-              </div>
-
-              {lowStock.length > 0 && (
-                <button onClick={() => setShowLow(!showLowStock)}
-                  className="w-full bg-white rounded-xl border border-red-100 overflow-hidden text-left">
-                  <div className="px-4 py-3 flex items-center gap-2">
-                    <AlertCircle size={14} className="text-red-500 flex-shrink-0" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-red-700">{lowStock.length} item stok rendah</p>
-                      <p className="text-xs text-red-400 truncate">{lowStock.map(s => s.name).join(', ')}</p>
-                    </div>
-                    <ChevronRight size={14} className={`text-gray-300 transition-transform ${showLowStock ? 'rotate-90' : ''}`} />
-                  </div>
-                  {showLowStock && (
-                    <div className="border-t border-red-50">
-                      {lowStock.map((s, i) => (
-                        <div key={i} className={`px-4 py-2 flex justify-between ${i !== 0 ? 'border-t border-gray-50' : ''}`}>
-                          <p className="text-sm text-gray-800">{s.name}</p>
-                          <p className="text-sm font-medium text-red-500">{s.qty}/{s.min_stock} {s.unit}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </button>
-              )}
-
-              <button onClick={() => navigate('/gudang')}
-                className="w-full bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center justify-between">
-                <p className="text-sm text-gray-700">Buka Gudang</p>
-                <ChevronRight size={14} className="text-gray-300" />
-              </button>
+            <p className="text-xl font-bold text-gray-900">{formatRupiah(totalOmzet)}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{totalTrx} transaksi</p>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Package size={14} className="text-blue-500" />
+              <p className="text-xs text-gray-400">Nilai Stok Gudang</p>
             </div>
-          )}
-
-          {/* ── SECTION: PRODUKSI ── */}
-          <SectionHeader title="Produksi" expanded={secProduksi} onToggle={() => setSecProd(!secProduksi)} />
-          {secProduksi && (
-            <div className="space-y-2 pb-2">
-              <div className="bg-white rounded-xl border border-gray-100 p-3">
-                <p className="text-xs text-gray-400">Produksi Hari Ini</p>
-                <p className="text-lg font-semibold text-gray-900 mt-0.5">{totalProduksi} pcs</p>
-                <p className="text-xs text-gray-400">{produksi.length} batch</p>
-              </div>
-
-              {produksi.length > 0 && (
-                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                  {produksi.map((p, idx) => (
-                    <div key={idx} className={`px-4 py-2.5 flex justify-between ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                      <p className="text-sm text-gray-800">{p.recipe_name}</p>
-                      <p className="text-sm font-medium text-gray-900">{p.total_yield} pcs</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <button onClick={() => navigate('/produksi')}
-                className="w-full bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center justify-between">
-                <p className="text-sm text-gray-700">Buka Produksi</p>
-                <ChevronRight size={14} className="text-gray-300" />
-              </button>
-            </div>
-          )}
-
-          {/* ── SECTION: TOKO / OUTLET ── */}
-          <SectionHeader title="Toko / Outlet" expanded={secToko} onToggle={() => setSecToko(!secToko)} />
-          {secToko && (
-            <div className="pb-2">
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                {loading ? (
-                  <div className="py-8 text-center text-sm text-gray-400">Memuat...</div>
-                ) : summaries.map((s, idx) => (
-                  <div key={s.store_id} className={`px-4 py-3 flex items-center justify-between ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{s.store_name}</p>
-                      <p className="text-xs text-gray-400">{s.total_trx} transaksi</p>
-                    </div>
-                    <p className="text-sm font-semibold text-gray-900">{formatRupiah(s.total_omzet)}</p>
-                  </div>
-                ))}
-                {!loading && summaries.every(s => s.total_omzet === 0) && (
-                  <div className="px-4 py-4 text-center text-sm text-gray-400">Belum ada transaksi hari ini</div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* ── SECTION: SETTING ── */}
-          <SectionHeader title="Setting" expanded={secSetting} onToggle={() => setSecSetting(!secSetting)} />
-          {secSetting && (
-            <div className="pb-2">
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                {settingLinks.map((s, idx) => (
-                  <button key={idx} onClick={() => navigate(s.path)}
-                    className={`w-full px-4 py-3 flex items-center justify-between text-left active:bg-gray-50 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                    <p className="text-sm text-gray-700">{s.label}</p>
-                    <ChevronRight size={14} className="text-gray-300" />
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
+            <p className="text-xl font-bold text-gray-900">{formatRupiah(warehouseValue || 0)}</p>
+            {stockAlerts && stockAlerts.length > 0 && (
+              <p className="text-xs text-red-500 mt-0.5">{stockAlerts.length} item stok rendah</p>
+            )}
+          </div>
         </div>
+
+        {/* Stok rendah alert */}
+        {stockAlerts && stockAlerts.length > 0 && (
+          <div className="bg-red-50 border border-red-100 rounded-xl p-3">
+            <div className="flex items-center gap-2 mb-1.5">
+              <AlertCircle size={14} className="text-red-500" />
+              <p className="text-sm font-medium text-red-700">{stockAlerts.length} Item Stok Rendah</p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {stockAlerts.map(m => (
+                <span key={m.id} className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">
+                  {m.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Per toko */}
+        {storeStats.length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Omzet per Toko</p>
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              {storeStats.map((s, idx) => {
+                const pct = totalOmzet > 0 ? (s.omzet / totalOmzet) * 100 : 0
+                return (
+                  <div key={s.store.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                          <Store size={13} className="text-gray-500" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{s.store.name}</p>
+                          <p className="text-xs text-gray-400">{s.store.city} · {s.count} transaksi</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-gray-900">{formatRupiah(s.omzet)}</p>
+                        <p className="text-xs text-gray-400">avg {formatRupiah(s.avgTrx)}</p>
+                      </div>
+                    </div>
+                    {totalOmzet > 0 && (
+                      <div className="w-full bg-gray-100 rounded-full h-1">
+                        <div className="bg-gray-900 h-1 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {storeStats.length === 0 && (
+          <div className="bg-white rounded-xl border border-gray-100 py-12 text-center">
+            <ShoppingBag size={32} className="text-gray-200 mx-auto mb-2" />
+            <p className="text-sm text-gray-400">Belum ada data toko</p>
+            <button onClick={syncAll} className="mt-3 text-xs text-blue-500 underline">Sync data</button>
+          </div>
+        )}
+
       </div>
     </div>
   )

@@ -1,315 +1,284 @@
 // src/pages/laporan/LaporanGudangPage.tsx
-import { useState } from 'react'
+// Laporan gudang — simple & fokus
+import { useState, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/lib/db'
-import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
-import { RefreshCw, TrendingDown, TrendingUp, Package, FlaskConical } from 'lucide-react'
-import toast from 'react-hot-toast'
+import { Package, ShoppingCart, ArrowRightLeft, Receipt, TrendingDown } from 'lucide-react'
+
+type Period = 'hari' | 'minggu' | 'bulan'
 
 export default function LaporanGudangPage() {
-  const today = new Date().toISOString().slice(0, 10)
-  const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
+  const { user } = useAuthStore()
+  const [period, setPeriod] = useState<Period>('bulan')
 
-  const [dateFrom, setFrom] = useState(firstDay)
-  const [dateTo, setTo]     = useState(today)
-  const [syncing, setSyncing] = useState(false)
+  const dateRange = useMemo(() => {
+    const now = new Date()
+    const end = new Date(now); end.setHours(23,59,59,999)
+    const start = new Date(now)
+    if (period === 'hari')   start.setHours(0,0,0,0)
+    if (period === 'minggu') { start.setDate(now.getDate()-6); start.setHours(0,0,0,0) }
+    if (period === 'bulan')  { start.setDate(1); start.setHours(0,0,0,0) }
+    return { start: start.toISOString(), end: end.toISOString() }
+  }, [period])
 
-  async function syncData() {
-    setSyncing(true)
-    try {
-      const [p, pi, pl, plm, wm, wmi, mats, sups, wexp] = await Promise.all([
-        supabase.from('purchases').select('*'),
-        supabase.from('purchase_items').select('*'),
-        supabase.from('production_logs').select('*'),
-        supabase.from('production_log_materials').select('*'),
-        supabase.from('warehouse_mutations').select('*'),
-        supabase.from('warehouse_mutation_items').select('*'),
-        supabase.from('materials').select('*'),
-        supabase.from('suppliers').select('*'),
-        supabase.from('warehouse_expenses').select('*'),
-      ])
-      if (p.data?.length)   await db.purchases.bulkPut(p.data)
-      if (pi.data?.length)  await db.purchase_items.bulkPut(pi.data)
-      if (pl.data?.length)  await db.production_logs.bulkPut(pl.data)
-      if (plm.data?.length) await db.production_log_materials.bulkPut(plm.data)
-      if (wm.data?.length)  await db.warehouse_mutations.bulkPut(wm.data)
-      if (wmi.data?.length) await db.warehouse_mutation_items.bulkPut(wmi.data)
-      if (mats.data?.length) await db.materials.bulkPut(mats.data)
-      if (sups.data?.length) await db.suppliers.bulkPut(sups.data)
-      if (wexp.data?.length) await db.warehouse_expenses.bulkPut(wexp.data)
-      toast.success('Data diperbarui')
-    } catch { toast.error('Gagal sync') }
-    finally { setSyncing(false) }
-  }
+  // Stok saat ini
+  const stokData = useLiveQuery(async () => {
+    const mats   = await db.materials.filter(m => m.is_active).toArray()
+    const stocks = await db.warehouse_stock.toArray()
+    const sMap   = Object.fromEntries(stocks.map(s => [s.material_id, s.qty_on_hand]))
+    const items  = mats.map(m => ({
+      ...m, qty: sMap[m.id] ?? 0,
+      nilai: (sMap[m.id] ?? 0) * (m.unit_cost || 0)
+    }))
+    const totalNilai = items.reduce((s, i) => s + i.nilai, 0)
+    const lowStock   = items.filter(i => i.qty <= i.min_stock)
+    return { items, totalNilai, lowStock }
+  }, [])
 
-  const from = dateFrom + 'T00:00:00.000Z'
-  const to   = dateTo   + 'T23:59:59.999Z'
-
-  // ── Data Pembelian ──────────────────────────────────────────
-  const pembelian = useLiveQuery(async () => {
+  // Pembelian dalam periode
+  const pembelianData = useLiveQuery(async () => {
     const purchases = await db.purchases
-      .filter(p => p.created_at >= from && p.created_at <= to)
+      .filter(p => p.created_at >= dateRange.start && p.created_at <= dateRange.end)
       .toArray()
-    const items    = await db.purchase_items.toArray()
-    const mats     = await db.materials.toArray()
-    const sups     = await db.suppliers.toArray()
-    const matMap   = Object.fromEntries(mats.map(m => [m.id, m]))
-    const supMap   = Object.fromEntries(sups.map(s => [s.id, s]))
+    const items = await db.purchase_items.toArray()
+    const mats  = await db.materials.toArray()
+    const sups  = await db.suppliers.toArray()
+    const mMap  = Object.fromEntries(mats.map(m => [m.id, m]))
+    const supMap = Object.fromEntries(sups.map(s => [s.id, s]))
 
-    const totalBeli = purchases.reduce((s, p) => s + p.total_amount, 0)
-
-    // Per supplier
-    const perSupplier: Record<string, { name: string; total: number; count: number }> = {}
-    for (const p of purchases) {
-      const key  = p.supplier_id || 'tanpa-supplier'
-      const name = p.supplier_id ? (supMap[p.supplier_id]?.name || '-') : 'Tanpa Supplier'
-      if (!perSupplier[key]) perSupplier[key] = { name, total: 0, count: 0 }
-      perSupplier[key].total += p.total_amount
-      perSupplier[key].count += 1
-    }
+    const total = purchases.reduce((s, p) => s + p.total_amount, 0)
 
     // Per bahan
-    const purchaseIds = new Set(purchases.map(p => p.id))
-    const filteredItems = items.filter(i => purchaseIds.has(i.purchase_id))
-    const perBahan: Record<string, { name: string; unit: string; qty: number; total: number }> = {}
-    for (const i of filteredItems) {
-      const mat = matMap[i.material_id]
-      if (!mat) continue
-      if (!perBahan[i.material_id]) perBahan[i.material_id] = { name: mat.name, unit: mat.unit, qty: 0, total: 0 }
-      perBahan[i.material_id].qty   += i.qty
-      perBahan[i.material_id].total += i.subtotal
+    const bahanMap: Record<string, { name: string; qty: number; nilai: number; unit: string }> = {}
+    for (const p of purchases) {
+      const pItems = items.filter(i => i.purchase_id === p.id)
+      for (const i of pItems) {
+        const mat = mMap[i.material_id]
+        if (!bahanMap[i.material_id]) bahanMap[i.material_id] = { name: mat?.name || '-', qty: 0, nilai: 0, unit: mat?.unit || '' }
+        bahanMap[i.material_id].qty   += i.qty
+        bahanMap[i.material_id].nilai += i.subtotal
+      }
     }
+    const topBahan = Object.values(bahanMap).sort((a, b) => b.nilai - a.nilai).slice(0, 10)
+    return { total, count: purchases.length, topBahan }
+  }, [dateRange])
 
-    return { totalBeli, count: purchases.length, perSupplier: Object.values(perSupplier), perBahan: Object.values(perBahan).sort((a,b) => b.total - a.total) }
-  }, [dateFrom, dateTo])
-
-  // ── Data Produksi ───────────────────────────────────────────
-  const produksi = useLiveQuery(async () => {
-    const logs  = await db.production_logs
-      .filter(l => l.created_at >= from && l.created_at <= to)
-      .toArray()
-    const logMats  = await db.production_log_materials.toArray()
-    const mats     = await db.materials.toArray()
-    const recipes  = await db.production_recipes.toArray()
-    const matMap   = Object.fromEntries(mats.map(m => [m.id, m]))
-    const recipeMap = Object.fromEntries(recipes.map(r => [r.id, r]))
-
-    const totalProduksi = logs.reduce((s, l) => s + l.total_yield, 0)
-    const totalBatch    = logs.reduce((s, l) => s + l.batch_count, 0)
-
-    // Pemakaian bahan
-    const logIds = new Set(logs.map(l => l.id))
-    const filteredMats = logMats.filter(m => logIds.has(m.log_id))
-    const pemakaian: Record<string, { name: string; unit: string; qty: number; cost: number }> = {}
-    for (const m of filteredMats) {
-      const mat = matMap[m.material_id]
-      if (!mat) continue
-      if (!pemakaian[m.material_id]) pemakaian[m.material_id] = { name: mat.name, unit: mat.unit, qty: 0, cost: 0 }
-      pemakaian[m.material_id].qty  += m.qty_used
-      pemakaian[m.material_id].cost += m.qty_used * mat.unit_cost
-    }
-
-    // HPP per pcs
-    const totalBiayaBahan = Object.values(pemakaian).reduce((s, p) => s + p.cost, 0)
-    const hppPerPcs = totalProduksi > 0 ? totalBiayaBahan / totalProduksi : 0
-
-    return {
-      totalProduksi, totalBatch,
-      totalBiayaBahan, hppPerPcs,
-      pemakaian: Object.values(pemakaian).sort((a, b) => b.cost - a.cost),
-      logs: logs.map(l => ({ ...l, recipe: recipeMap[l.recipe_id] })).slice(0, 10),
-    }
-  }, [dateFrom, dateTo])
-
-  // ── Data Mutasi ─────────────────────────────────────────────
-  const mutasi = useLiveQuery(async () => {
-    const muts  = await db.warehouse_mutations
-      .filter(m => m.created_at >= from && m.created_at <= to)
+  // Mutasi dalam periode
+  const mutasiData = useLiveQuery(async () => {
+    const muts = await db.warehouse_mutations
+      .filter(m => m.created_at >= dateRange.start && m.created_at <= dateRange.end && m.mutation_type !== 'internal_use')
       .toArray()
     const items = await db.warehouse_mutation_items.toArray()
-    const mats  = await db.materials.toArray()
-    const matMap = Object.fromEntries(mats.map(m => [m.id, m]))
 
-    const toProd    = muts.filter(m => m.mutation_type === 'to_production')
-    const toStore   = muts.filter(m => m.mutation_type === 'to_store')
-    const toPartner = muts.filter(m => m.mutation_type === 'to_partner')
+    // Group by type
+    const byType: Record<string, number> = {}
+    let totalNilai = 0
+    for (const m of muts) {
+      const mItems = items.filter(i => i.mutation_id === m.id)
+      const nilai = mItems.reduce((s, i) => s + i.qty * i.unit_cost, 0)
+      byType[m.mutation_type] = (byType[m.mutation_type] || 0) + nilai
+      totalNilai += nilai
+    }
+    return { totalNilai, count: muts.length, byType }
+  }, [dateRange])
 
-    const mutIds = new Set(muts.map(m => m.id))
-    const filteredItems = items.filter(i => mutIds.has(i.mutation_id))
-    const nilaiMutasi = filteredItems.reduce((s, i) => s + i.qty * i.unit_cost, 0)
+  // Pemakaian dalam periode
+  const pemakaianData = useLiveQuery(async () => {
+    const muts = await db.warehouse_mutations
+      .filter(m => m.created_at >= dateRange.start && m.created_at <= dateRange.end && m.mutation_type === 'internal_use')
+      .toArray()
+    const items = await db.warehouse_mutation_items.toArray()
+    const total = muts.reduce((s, m) => {
+      return s + items.filter(i => i.mutation_id === m.id).reduce((ss, i) => ss + i.qty * i.unit_cost, 0)
+    }, 0)
+    return { total, count: muts.length }
+  }, [dateRange])
 
-    return { toProd: toProd.length, toStore: toStore.length, toPartner: toPartner.length, nilaiMutasi, count: muts.length }
-  }, [dateFrom, dateTo])
-
-  // ── Data Biaya ──────────────────────────────────────────────
-  const biaya = useLiveQuery(async () => {
+  // Biaya dalam periode
+  const biayaData = useLiveQuery(async () => {
     const expenses = await db.warehouse_expenses
-      .filter(e => e.expense_date >= dateFrom && e.expense_date <= dateTo)
+      .filter(e => e.created_at >= dateRange.start && e.created_at <= dateRange.end)
       .toArray()
     const total = expenses.reduce((s, e) => s + e.amount, 0)
-    const perKat: Record<string, number> = {}
+    const byKat: Record<string, number> = {}
     for (const e of expenses) {
-      perKat[e.category] = (perKat[e.category] || 0) + e.amount
+      byKat[e.category] = (byKat[e.category] || 0) + e.amount
     }
-    return { total, count: expenses.length, perKat }
-  }, [dateFrom, dateTo])
+    return { total, count: expenses.length, byKat }
+  }, [dateRange])
 
-  const catLabel: Record<string, string> = {
-    listrik: 'Listrik', sewa: 'Sewa', gaji: 'Gaji',
-    transport: 'Transport', lainnya: 'Lainnya',
+  const periodLabel = { hari: 'Hari Ini', minggu: '7 Hari', bulan: 'Bulan Ini' }
+
+  const katLabel: Record<string, string> = {
+    beban_bahan_baku: 'Bahan Baku', beban_tenaga_kerja: 'Tenaga Kerja',
+    beban_sewa: 'Sewa', beban_utilitas: 'Utilitas',
+    beban_packaging: 'Packaging', beban_transport: 'Transport',
+    beban_pemasaran: 'Pemasaran', beban_lainnya: 'Lainnya',
+  }
+
+  const mutLabel: Record<string, string> = {
+    to_production: 'ke Produksi', to_store: 'ke Toko',
+    to_partner: 'ke Franchise', adjustment: 'Retur', opening_stock: 'Stok Awal',
   }
 
   return (
-    <div className="flex flex-col h-full bg-white">
-      {/* Header */}
-      <div className="px-4 pt-4 pb-0 flex items-center justify-between flex-shrink-0">
-        <h1 className="text-lg font-semibold text-gray-900">Laporan Gudang & Produksi</h1>
-        <button onClick={syncData} disabled={syncing} className="p-2 rounded-full text-gray-400">
-          <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
-        </button>
-      </div>
-
-      {/* Filter tanggal */}
-      <div className="px-4 mt-3 flex gap-2 flex-shrink-0">
-        <div className="flex-1">
-          <p className="text-xs text-gray-400 mb-1">Dari</p>
-          <input className="input text-sm" type="date" value={dateFrom} onChange={e => setFrom(e.target.value)} />
-        </div>
-        <div className="flex-1">
-          <p className="text-xs text-gray-400 mb-1">Sampai</p>
-          <input className="input text-sm" type="date" value={dateTo} onChange={e => setTo(e.target.value)} />
+    <div className="flex flex-col h-full bg-gray-50">
+      <div className="bg-white px-4 pt-4 pb-3 flex-shrink-0">
+        <h1 className="text-lg font-semibold text-gray-900 mb-3">Laporan Gudang</h1>
+        <div className="flex gap-2">
+          {(['hari','minggu','bulan'] as Period[]).map(p => (
+            <button key={p} onClick={() => setPeriod(p)}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                period === p ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'
+              }`}>{periodLabel[p]}</button>
+          ))}
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto bg-gray-50 mt-3">
-        <div className="p-4 space-y-4">
+      <div className="flex-1 overflow-auto p-4 space-y-4">
 
-          {/* ── Ringkasan ── */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-white rounded-xl border border-gray-100 p-4">
-              <p className="text-xs text-gray-400 mb-1">Total Pembelian</p>
-              <p className="text-lg font-semibold text-gray-900">{formatRupiah(pembelian?.totalBeli || 0)}</p>
-              <p className="text-xs text-gray-400 mt-0.5">{pembelian?.count || 0} transaksi</p>
+        {/* Summary cards */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-white rounded-xl border border-gray-100 p-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Package size={13} className="text-blue-500" />
+              <p className="text-xs text-gray-400">Nilai Stok</p>
             </div>
-            <div className="bg-white rounded-xl border border-gray-100 p-4">
-              <p className="text-xs text-gray-400 mb-1">Total Produksi</p>
-              <p className="text-lg font-semibold text-gray-900">{produksi?.totalProduksi || 0} pcs</p>
-              <p className="text-xs text-gray-400 mt-0.5">{produksi?.totalBatch || 0} batch</p>
+            <p className="text-base font-semibold text-gray-900">{formatRupiah(stokData?.totalNilai || 0)}</p>
+            {stokData?.lowStock && stokData.lowStock.length > 0 && (
+              <p className="text-xs text-red-500 mt-0.5">{stokData.lowStock.length} item rendah</p>
+            )}
+          </div>
+          <div className="bg-white rounded-xl border border-gray-100 p-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              <ShoppingCart size={13} className="text-green-500" />
+              <p className="text-xs text-gray-400">Pembelian</p>
             </div>
-            <div className="bg-white rounded-xl border border-gray-100 p-4">
-              <p className="text-xs text-gray-400 mb-1">HPP per Pcs</p>
-              <p className="text-lg font-semibold text-gray-900">{formatRupiah(produksi?.hppPerPcs || 0)}</p>
-              <p className="text-xs text-gray-400 mt-0.5">dari bahan baku</p>
+            <p className="text-base font-semibold text-gray-900">{formatRupiah(pembelianData?.total || 0)}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{pembelianData?.count || 0} transaksi</p>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-100 p-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              <ArrowRightLeft size={13} className="text-purple-500" />
+              <p className="text-xs text-gray-400">Mutasi</p>
             </div>
-            <div className="bg-white rounded-xl border border-gray-100 p-4">
-              <p className="text-xs text-gray-400 mb-1">Biaya Operasional</p>
-              <p className="text-lg font-semibold text-gray-900">{formatRupiah(biaya?.total || 0)}</p>
-              <p className="text-xs text-gray-400 mt-0.5">{biaya?.count || 0} pos biaya</p>
+            <p className="text-base font-semibold text-gray-900">{formatRupiah(mutasiData?.totalNilai || 0)}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{mutasiData?.count || 0} mutasi</p>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-100 p-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Receipt size={13} className="text-orange-500" />
+              <p className="text-xs text-gray-400">Biaya</p>
+            </div>
+            <p className="text-base font-semibold text-gray-900">{formatRupiah(biayaData?.total || 0)}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{biayaData?.count || 0} pos biaya</p>
+          </div>
+        </div>
+
+        {/* Stok per item — top 10 by nilai */}
+        {stokData && stokData.items.length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-50">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Stok Gudang (Nilai Tertinggi)</p>
+            </div>
+            {stokData.items
+              .filter(i => i.qty > 0)
+              .sort((a, b) => b.nilai - a.nilai)
+              .slice(0, 10)
+              .map((item, idx) => (
+                <div key={item.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-800 truncate">{item.name}</p>
+                    <p className="text-xs text-gray-400">Avg {formatRupiah(item.unit_cost || 0)}/{item.unit}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-medium text-gray-900">{formatRupiah(item.nilai)}</p>
+                    <p className="text-xs text-gray-400">{item.qty} {item.unit}</p>
+                  </div>
+                </div>
+              ))}
+          </div>
+        )}
+
+        {/* Pembelian per bahan */}
+        {pembelianData && pembelianData.topBahan.length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-50">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Pembelian per Bahan</p>
+            </div>
+            {pembelianData.topBahan.map((b, idx) => (
+              <div key={b.name} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-gray-800 truncate">{b.name}</p>
+                  <p className="text-xs text-gray-400">{b.qty} {b.unit}</p>
+                </div>
+                <p className="text-sm font-medium text-gray-900">{formatRupiah(b.nilai)}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Mutasi breakdown */}
+        {mutasiData && Object.keys(mutasiData.byType).length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-50">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Mutasi per Tujuan</p>
+            </div>
+            {Object.entries(mutasiData.byType).map(([type, nilai], idx) => (
+              <div key={type} className={`flex items-center justify-between px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                <p className="text-sm text-gray-700">{mutLabel[type] || type}</p>
+                <p className="text-sm font-medium text-gray-900">{formatRupiah(nilai)}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Biaya breakdown */}
+        {biayaData && Object.keys(biayaData.byKat).length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-50">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Biaya per Kategori</p>
+            </div>
+            {Object.entries(biayaData.byKat)
+              .sort(([,a],[,b]) => b - a)
+              .map(([kat, nilai], idx) => {
+                const pct = biayaData.total > 0 ? (nilai / biayaData.total) * 100 : 0
+                return (
+                  <div key={kat} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className="text-gray-700">{katLabel[kat] || kat}</span>
+                      <span className="font-medium text-gray-900">{formatRupiah(nilai)}</span>
+                    </div>
+                    <div className="w-full bg-gray-100 rounded-full h-1">
+                      <div className="bg-gray-900 h-1 rounded-full" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                )
+              })}
+            <div className="flex justify-between px-4 py-3 border-t border-gray-100 bg-gray-50">
+              <span className="text-sm font-medium text-gray-700">Total Biaya</span>
+              <span className="text-sm font-semibold text-gray-900">{formatRupiah(biayaData.total)}</span>
             </div>
           </div>
+        )}
 
-          {/* ── Pembelian per Supplier ── */}
-          {(pembelian?.perSupplier?.length || 0) > 0 && (
-            <Section title="Pembelian per Supplier" icon={<TrendingDown size={14} />}>
-              {pembelian!.perSupplier.map((s, i) => (
-                <Row key={i} label={s.name} sub={`${s.count} faktur`} value={formatRupiah(s.total)} />
-              ))}
-            </Section>
-          )}
-
-          {/* ── Pembelian per Bahan ── */}
-          {(pembelian?.perBahan?.length || 0) > 0 && (
-            <Section title="Pembelian per Bahan" icon={<Package size={14} />}>
-              {pembelian!.perBahan.map((b, i) => (
-                <Row key={i} label={b.name} sub={`${b.qty} ${b.unit}`} value={formatRupiah(b.total)} />
-              ))}
-            </Section>
-          )}
-
-          {/* ── Pemakaian Bahan Produksi ── */}
-          {(produksi?.pemakaian?.length || 0) > 0 && (
-            <Section title="Pemakaian Bahan Produksi" icon={<FlaskConical size={14} />}>
-              <div className="px-4 py-2 flex justify-between border-b border-gray-50">
-                <span className="text-xs text-gray-400">Total Biaya Bahan</span>
-                <span className="text-xs font-semibold text-gray-900">{formatRupiah(produksi!.totalBiayaBahan)}</span>
+        {/* Pemakaian */}
+        {pemakaianData && pemakaianData.count > 0 && (
+          <div className="bg-white rounded-xl border border-gray-100 p-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <TrendingDown size={16} className="text-amber-500" />
+              <div>
+                <p className="text-sm font-medium text-gray-900">Pemakaian Internal</p>
+                <p className="text-xs text-gray-400">{pemakaianData.count} catatan</p>
               </div>
-              {produksi!.pemakaian.map((p, i) => (
-                <Row key={i} label={p.name} sub={`${p.qty.toFixed(2)} ${p.unit}`} value={formatRupiah(p.cost)} />
-              ))}
-            </Section>
-          )}
-
-          {/* ── Mutasi Gudang ── */}
-          <Section title="Ringkasan Mutasi" icon={<TrendingUp size={14} />}>
-            <Row label="ke Produksi"  sub={`${mutasi?.toProd || 0} mutasi`}    value="" />
-            <Row label="ke Toko"      sub={`${mutasi?.toStore || 0} mutasi`}   value="" />
-            <Row label="ke Mitra"     sub={`${mutasi?.toPartner || 0} mutasi`} value="" />
-            <div className="px-4 py-2 flex justify-between border-t border-gray-50">
-              <span className="text-xs text-gray-500 font-medium">Nilai Mutasi</span>
-              <span className="text-xs font-semibold text-gray-900">{formatRupiah(mutasi?.nilaiMutasi || 0)}</span>
             </div>
-          </Section>
+            <p className="text-sm font-semibold text-gray-900">{formatRupiah(pemakaianData.total)}</p>
+          </div>
+        )}
 
-          {/* ── Biaya Operasional ── */}
-          {(biaya?.count || 0) > 0 && (
-            <Section title="Biaya Operasional">
-              {Object.entries(biaya!.perKat).map(([kat, total], i) => (
-                <Row key={i} label={catLabel[kat] || kat} sub="" value={formatRupiah(total)} />
-              ))}
-              <div className="px-4 py-2 flex justify-between border-t border-gray-50">
-                <span className="text-xs text-gray-500 font-medium">Total</span>
-                <span className="text-xs font-semibold text-gray-900">{formatRupiah(biaya!.total)}</span>
-              </div>
-            </Section>
-          )}
-
-          {/* ── Log Produksi Terbaru ── */}
-          {(produksi?.logs?.length || 0) > 0 && (
-            <Section title="Log Produksi (10 terakhir)">
-              {produksi!.logs.map((l, i) => (
-                <Row key={i}
-                  label={l.recipe?.name || '-'}
-                  sub={new Date(l.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}
-                  value={`${l.total_yield} pcs`} />
-              ))}
-            </Section>
-          )}
-
-          {/* Empty state */}
-          {!pembelian?.count && !produksi?.totalProduksi && !biaya?.count && (
-            <div className="text-center py-16 text-gray-400 text-sm">
-              Tidak ada data di periode ini
-            </div>
-          )}
-
-        </div>
       </div>
-    </div>
-  )
-}
-
-// ── Helper Components ─────────────────────────────────────────
-function Section({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-50 flex items-center gap-2">
-        {icon && <span className="text-gray-400">{icon}</span>}
-        <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">{title}</p>
-      </div>
-      {children}
-    </div>
-  )
-}
-
-function Row({ label, sub, value }: { label: string; sub: string; value: string }) {
-  return (
-    <div className="px-4 py-2.5 flex items-center justify-between">
-      <div>
-        <p className="text-sm text-gray-800">{label}</p>
-        {sub && <p className="text-xs text-gray-400">{sub}</p>}
-      </div>
-      {value && <p className="text-sm font-medium text-gray-900">{value}</p>}
     </div>
   )
 }

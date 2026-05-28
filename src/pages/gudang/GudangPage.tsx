@@ -856,8 +856,154 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
   )
 }
 
+
 // ── FORM: Bahan ───────────────────────────────────────────────
-function MaterialForm({ material, onClose }
+function MaterialForm({ material, onClose }: { material: Material | null; onClose: () => void }) {
+  const { user } = useAuthStore()
+  const isOwner = user?.role === 'owner'
+  const [name, setName]       = useState(material?.name || '')
+  const [category, setCat]    = useState(material?.category || 'bahan_baku')
+  const [unit, setUnit]       = useState(material?.unit || '')
+  const [unitCost, setCost]   = useState(String(material?.unit_cost || '0'))
+  const [minStock, setMin]    = useState(String(material?.min_stock || '0'))
+  const [customUnit, setCustom] = useState(material ? !SATUAN.map(s => s.toLowerCase()).includes((material.unit || '').toLowerCase()) : false)
+  const [isActive, setIsActive] = useState(material?.is_active ?? true)
+  const [saving, setSaving]   = useState(false)
+
+  async function handleDelete() {
+    if (!material || !confirm(`Hapus "${material.name}" permanen dari database?\nData pembelian & mutasi terkait juga akan dihapus.`)) return
+    try {
+      await supabase.from('warehouse_mutation_items').delete().eq('material_id', material.id)
+      await supabase.from('purchase_items').delete().eq('material_id', material.id)
+      await supabase.from('warehouse_stock').delete().eq('material_id', material.id)
+      await supabase.from('production_stock').delete().eq('material_id', material.id)
+      await supabase.from('store_recipe_items').delete().eq('material_id', material.id)
+      await supabase.from('production_recipe_items').delete().eq('material_id', material.id)
+      const { error } = await supabase.from('materials').delete().eq('id', material.id)
+      if (error) throw error
+      await db.warehouse_mutation_items.where('material_id').equals(material.id).delete()
+      await db.purchase_items.where('material_id').equals(material.id).delete()
+      await db.warehouse_stock.where('material_id').equals(material.id).delete()
+      await db.production_stock.where('material_id').equals(material.id).delete()
+      await db.materials.delete(material.id)
+      toast.success(`"${material.name}" dihapus dari database`)
+      onClose()
+    } catch (e) {
+      console.error('[DELETE]', e)
+      toast.error('Gagal hapus: ' + String((e as any)?.message || e))
+    }
+  }
+
+  async function handleSave() {
+    if (!name.trim()) return toast.error('Nama bahan wajib diisi')
+    if (!unit)        return toast.error('Satuan wajib diisi')
+    if (!category)    return toast.error('Kategori wajib diisi')
+
+    // Anti duplikat
+    if (!material) {
+      const existing = await db.materials.filter(m => m.name.toLowerCase() === name.trim().toLowerCase() && m.is_active).first()
+      if (existing) return toast.error(`Bahan "${name}" sudah ada`)
+    }
+
+    setSaving(true)
+    try {
+      const matId = material?.id || generateId()
+      const data: Material = {
+        id: matId, name: name.trim(), category,
+        unit, unit_cost: Number(unitCost),
+        min_stock: Number(minStock),
+        is_active: isActive,
+        created_at: material?.created_at || now(),
+        updated_at: now(),
+      }
+      await db.materials.put(data)
+      const { error } = await supabase.from('materials').upsert(data)
+      if (error) throw error
+      toast.success(material ? `"${name.trim()}" diperbarui` : `"${name.trim()}" ditambahkan`)
+      onClose()
+    } catch (e) {
+      console.error(e)
+      toast.error('Gagal menyimpan: ' + String((e as any)?.message || e))
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title={material ? 'Edit Bahan' : 'Tambah Bahan Baru'} onClose={onClose}>
+      <div>
+        <Label required>Nama Bahan</Label>
+        <input className="input" value={name} onChange={e => setName(e.target.value)}
+          placeholder="Tepung Terigu, Gula Pasir, dll" autoFocus />
+      </div>
+      <div>
+        <Label required>Kategori</Label>
+        <div className="grid grid-cols-2 gap-2">
+          {KATEGORI_GUDANG.map(k => (
+            <button key={k.value} onClick={() => setCat(k.value)}
+              className={`px-3 py-2 rounded-xl text-left border transition-colors ${
+                category === k.value ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'
+              }`}>
+              <p className="text-xs font-medium">{k.label}</p>
+              <p className={`text-[10px] leading-tight mt-0.5 ${category === k.value ? 'text-gray-300' : 'text-gray-400'}`}>{k.desc}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <Label required>Satuan</Label>
+        <p className="text-xs text-gray-400 mb-2">Pilih satuan terkecil. Contoh: beli per kg → pilih Gram, gunakan "Input per pack" saat pembelian.</p>
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {SATUAN.map(s => (
+            <button key={s} onClick={() => { setUnit(s); setCustom(false) }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                unit === s && !customUnit ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600 bg-white'
+              }`}>{s}</button>
+          ))}
+          <button onClick={() => setCustom(true)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              customUnit ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-500 bg-white'
+            }`}>Lainnya</button>
+        </div>
+        {customUnit && <input className="input" value={unit} onChange={e => setUnit(e.target.value)} placeholder="Ketik satuan..." />}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label>Harga Default / Satuan</Label>
+          <input className="input" type="number" value={unitCost} onChange={e => setCost(e.target.value)} placeholder="0" />
+        </div>
+        <div>
+          <Label>Min. Stok (alert)</Label>
+          <input className="input" type="number" value={minStock} onChange={e => setMin(e.target.value)} placeholder="0" />
+        </div>
+      </div>
+
+      {material && (
+        <div className="flex items-center justify-between py-2 border-t border-gray-100">
+          <div>
+            <p className="text-sm font-medium text-gray-800">Aktif</p>
+            <p className="text-xs text-gray-400">Nonaktif = tidak muncul di daftar stok</p>
+          </div>
+          <button onClick={() => setIsActive(!isActive)}
+            className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
+            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} />
+          </button>
+        </div>
+      )}
+
+      <div className="flex gap-3 pt-1 border-t border-gray-100">
+        {material && isOwner && (
+          <button onClick={handleDelete}
+            className="px-4 py-3 rounded-xl border border-red-200 text-sm font-medium text-red-500 active:bg-red-50">
+            Hapus
+          </button>
+        )}
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+          {saving ? 'Menyimpan...' : 'Simpan'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
 
 // ── FORM: Opening Stock ───────────────────────────────────────
 function OpeningStockForm({ onClose }: { onClose: () => void }) {

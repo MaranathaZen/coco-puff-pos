@@ -42,6 +42,36 @@ const METODE_BAYAR = [
   { value: 'kredit',   label: 'Kredit / Tempo' },
 ]
 
+async function generateMutationNumber(): Promise<string> {
+  const today = new Date()
+  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '')
+  const prefix = `MUT-${dateStr}-`
+  const existing = await db.warehouse_mutations
+    .filter(m => (m as any).mutation_number?.startsWith(prefix))
+    .toArray()
+  return `${prefix}${String(existing.length + 1).padStart(3, '0')}`
+}
+
+async function generateUsageNumber(): Promise<string> {
+  const today = new Date()
+  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '')
+  const prefix = `PAK-${dateStr}-`
+  const existing = await db.warehouse_mutations
+    .filter(m => (m as any).mutation_number?.startsWith(prefix))
+    .toArray()
+  return `${prefix}${String(existing.length + 1).padStart(3, '0')}`
+}
+
+async function generateExpenseNumber(): Promise<string> {
+  const today = new Date()
+  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '')
+  const prefix = `BIA-${dateStr}-`
+  const existing = await db.warehouse_expenses
+    .filter(e => (e as any).expense_number?.startsWith(prefix))
+    .toArray()
+  return `${prefix}${String(existing.length + 1).padStart(3, '0')}`
+}
+
 async function generatePONumber(): Promise<string> {
   const today = new Date()
   const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '')
@@ -196,15 +226,23 @@ function SearchBar({ value, onChange, placeholder }: { value: string; onChange: 
   )
 }
 
-function GroupHeader({ label, total, count }: { label: string; total?: number; count: number }) {
+function GroupHeader({ label, total, count, expanded, onToggle }: {
+  label: string; total?: number; count: number; expanded: boolean; onToggle: () => void
+}) {
   return (
-    <div className="flex items-center justify-between px-1 py-1.5">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</p>
+    <button onClick={onToggle} className="w-full flex items-center justify-between px-1 py-2 active:opacity-70">
+      <div className="flex items-center gap-2">
+        <svg className={`w-3 h-3 text-gray-400 transition-transform ${expanded ? 'rotate-90' : ''}`}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+        </svg>
+        <p className="text-xs font-semibold text-gray-600">{label}</p>
+      </div>
       <div className="flex items-center gap-2">
         <span className="text-xs text-gray-400">{count} item</span>
         {total !== undefined && <span className="text-xs font-medium text-gray-700">{formatRupiah(total)}</span>}
       </div>
-    </div>
+    </button>
   )
 }
 
@@ -321,6 +359,7 @@ function PembelianTab({ userId }: { userId: string }) {
   const [showForm, setShowForm]     = useState(false)
   const [search, setSearch]         = useState('')
   const [groupMode, setGroupMode]   = useState<'hari'|'bulan'|'tahun'>('hari')
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     setToolbar(
@@ -364,12 +403,14 @@ function PembelianTab({ userId }: { userId: string }) {
   return (
     <div className="p-4 space-y-3">
       <SearchBar value={search} onChange={setSearch} placeholder="Cari supplier, PO, bahan..." />
-      {grouped.map(({ key, items: grpItems }) => {
+      {grouped.map(({ key, items: grpItems }, gIdx) => {
         const total = grpItems.reduce((s, p) => s + p.total_amount, 0)
+        const expanded = expandedGroups[key] !== false // default expanded
         return (
           <div key={key}>
-            <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} total={total} count={grpItems.length} />
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} total={total} count={grpItems.length}
+              expanded={expanded} onToggle={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))} />
+            {expanded && <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
               {grpItems.map((p, idx) => (
                 <div key={p.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex items-start justify-between mb-1">
@@ -395,7 +436,7 @@ function PembelianTab({ userId }: { userId: string }) {
                   )}
                 </div>
               ))}
-            </div>
+            </div>}
           </div>
         )
       })}
@@ -416,6 +457,7 @@ function MutasiTab({ userId }: { userId: string }) {
   const [search, setSearch]         = useState('')
   const [groupMode, setGroupMode]   = useState<'hari'|'bulan'|'tahun'>('hari')
   const [filterType, setFilterType] = useState('semua')
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     setToolbar(
@@ -431,7 +473,7 @@ function MutasiTab({ userId }: { userId: string }) {
     to_production: { label: 'ke Produksi',  color: 'text-blue-600 bg-blue-50' },
     to_store:      { label: 'ke Toko',      color: 'text-green-600 bg-green-50' },
     to_partner:    { label: 'ke Franchise', color: 'text-purple-600 bg-purple-50' },
-    adjustment:    { label: 'Koreksi',      color: 'text-gray-600 bg-gray-100' },
+    adjustment:    { label: 'Retur',        color: 'text-gray-600 bg-gray-100' },
     opening_stock: { label: 'Stok Awal',    color: 'text-orange-600 bg-orange-50' },
     internal_use:  { label: 'Pemakaian',    color: 'text-amber-600 bg-amber-50' },
   }
@@ -471,7 +513,7 @@ function MutasiTab({ userId }: { userId: string }) {
           { v: 'to_production', l: 'Produksi' },
           { v: 'to_store', l: 'Toko' },
           { v: 'to_partner', l: 'Franchise' },
-          { v: 'adjustment', l: 'Koreksi' },
+          { v: 'adjustment', l: 'Retur' },
         ].map(f => (
           <button key={f.v} onClick={() => setFilterType(f.v)}
             className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors ${
@@ -479,19 +521,25 @@ function MutasiTab({ userId }: { userId: string }) {
             }`}>{f.l}</button>
         ))}
       </div>
-      {grouped.map(({ key, items: grpItems }) => (
+      {grouped.map(({ key, items: grpItems }) => {
+        const expanded = expandedGroups[key] !== false
+        return (
         <div key={key}>
-          <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} count={grpItems.length} />
-          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} count={grpItems.length}
+            expanded={expanded} onToggle={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))} />
+          {expanded && <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             {grpItems.map((m, idx) => {
               const tc = typeConfig[m.mutation_type] || { label: m.mutation_type, color: 'text-gray-600 bg-gray-100' }
               const totalNilai = m.items.reduce((s, i) => s + i.qty * i.unit_cost, 0)
               return (
                 <div key={m.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tc.color}`}>{tc.label}</span>
-                      {m.destination_name && <span className="text-xs text-gray-600 font-medium">{m.destination_name}</span>}
+                    <div className="flex flex-col gap-0.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tc.color}`}>{tc.label}</span>
+                        {m.destination_name && <span className="text-xs text-gray-600 font-medium">{m.destination_name}</span>}
+                      </div>
+                      {(m as any).mutation_number && <p className="text-xs font-mono text-gray-400">{(m as any).mutation_number}</p>}
                     </div>
                     <p className="text-xs text-gray-400 flex-shrink-0">{formatDate(m.created_at)}</p>
                   </div>
@@ -514,9 +562,10 @@ function MutasiTab({ userId }: { userId: string }) {
                 </div>
               )
             })}
-          </div>
+          </div>}
         </div>
-      ))}
+        )
+      })}
       {filtered.length === 0 && (
         <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">
           {search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada mutasi'}
@@ -533,6 +582,7 @@ function PakaiTab({ userId }: { userId: string }) {
   const [showForm, setShowForm]     = useState(false)
   const [search, setSearch]         = useState('')
   const [groupMode, setGroupMode]   = useState<'hari'|'bulan'|'tahun'>('hari')
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     setToolbar(
@@ -586,10 +636,12 @@ function PakaiTab({ userId }: { userId: string }) {
       <SearchBar value={search} onChange={setSearch} placeholder="Cari nama bahan, keterangan..." />
       {grouped.map(({ key, items: grpItems }) => {
         const total = grpItems.reduce((s, u) => s + u.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0)
+        const expanded = expandedGroups[key] !== false
         return (
           <div key={key}>
-            <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} total={total} count={grpItems.length} />
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} total={total} count={grpItems.length}
+              expanded={expanded} onToggle={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))} />
+            {expanded && <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
               {grpItems.map((u, idx) => (
                 <div key={u.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex items-start justify-between mb-1">
@@ -613,7 +665,7 @@ function PakaiTab({ userId }: { userId: string }) {
                   )}
                 </div>
               ))}
-            </div>
+            </div>}
           </div>
         )
       })}
@@ -634,6 +686,7 @@ function BiayaTab({ userId }: { userId: string }) {
   const [search, setSearch]         = useState('')
   const [groupMode, setGroupMode]   = useState<'hari'|'bulan'|'tahun'>('bulan')
   const [filterCat, setFilterCat]   = useState('semua')
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     setToolbar(
@@ -663,7 +716,7 @@ function BiayaTab({ userId }: { userId: string }) {
   }, [expenses, filterCat, search])
 
   const grouped = useMemo(() =>
-    groupBy(filtered, e => groupKey(e.expense_date, groupMode)), [filtered, groupMode])
+    groupBy(filtered, e => groupKey(e.created_at || e.expense_date, groupMode)), [filtered, groupMode])
 
   return (
     <div className="p-4 space-y-3">
@@ -682,10 +735,12 @@ function BiayaTab({ userId }: { userId: string }) {
       </div>
       {grouped.map(({ key, items: grpItems }) => {
         const total = grpItems.reduce((s, e) => s + e.amount, 0)
+        const expanded = expandedGroups[key] !== false
         return (
           <div key={key}>
-            <GroupHeader label={groupLabel(grpItems[0].expense_date, groupMode)} total={total} count={grpItems.length} />
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <GroupHeader label={groupLabel(grpItems[0].expense_date || grpItems[0].created_at, groupMode)} total={total} count={grpItems.length}
+              expanded={expanded} onToggle={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))} />
+            {expanded && <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
               {grpItems.map((e, idx) => (
                 <div key={e.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex items-center justify-between">
@@ -701,7 +756,7 @@ function BiayaTab({ userId }: { userId: string }) {
                   </div>
                 </div>
               ))}
-            </div>
+            </div>}
           </div>
         )
       })}
@@ -1064,7 +1119,7 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
       </div>
 
       <div>
-        <Label>Metode Bayar</Label>
+        <Label required>Metode Bayar</Label>
         <div className="flex gap-2">
           {METODE_BAYAR.map(m => (
             <button key={m.value} onClick={() => setPay(m.value)}
@@ -1195,7 +1250,8 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
         type === 'to_partner' ? partners?.find(p => p.id === destId)?.name || '' : ''
 
       const mutId = generateId()
-      const mut: WarehouseMutation = { id: mutId, mutation_type: type, destination_id: destId || undefined, destination_name: destName || undefined, notes: notes || undefined, status: 'confirmed', created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId }
+      const mutNumber = await generateMutationNumber()
+      const mut: any = { id: mutId, mutation_number: mutNumber, mutation_type: type, destination_id: destId || undefined, destination_name: destName || undefined, notes: notes || undefined, status: 'confirmed', created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId }
       await db.warehouse_mutations.add(mut)
       await supabase.from('warehouse_mutations').insert(mut)
 
@@ -1232,7 +1288,7 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
             { v: 'to_production', l: 'Produksi' },
             { v: 'to_store',      l: 'Outlet / Toko' },
             { v: 'to_partner',    l: 'Franchise' },
-            { v: 'adjustment',    l: 'Koreksi Stok' },
+            { v: 'adjustment',    l: 'Retur' },
           ] as const).map(t => (
             <button key={t.v} onClick={() => setType(t.v)}
               className={`py-2.5 rounded-xl text-sm font-medium border transition-colors ${
@@ -1303,7 +1359,6 @@ function PakaiForm({ userId, onClose }: { userId: string; onClose: () => void })
   const atkMats  = useMemo(() => allMats?.filter(m => ['non_produksi','operasional','packaging'].includes(m.category)), [allMats])
 
   const [notes, setNotes]     = useState('')
-  const [date, setDate]       = useState(new Date().toISOString().slice(0, 10))
   const [items, setItems]     = useState([{ material_id: '', qty: '' }])
   const [saving, setSaving]   = useState(false)
   const [showAll, setShowAll] = useState(false)
@@ -1406,9 +1461,13 @@ function BiayaForm({ userId, onClose }: { userId: string; onClose: () => void })
     if (!amount || Number(amount) <= 0) return toast.error('Jumlah wajib diisi')
     setSaving(true)
     try {
+      const expNumber = await generateExpenseNumber()
       const data: any = {
-        id: generateId(), name: name.trim(), amount: Number(amount),
-        expense_date: date, category,
+        id: generateId(),
+        expense_number: expNumber,
+        name: name.trim(), amount: Number(amount),
+        expense_date: now().slice(0, 10), // Tanggal hari ini otomatis
+        category,
         payment_method: payMethod,
         transfer_to: transferTo || undefined,
         due_date: dueDate || undefined,
@@ -1428,15 +1487,9 @@ function BiayaForm({ userId, onClose }: { userId: string; onClose: () => void })
         <Label required>Keterangan</Label>
         <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Bayar listrik Mei 2026" autoFocus />
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label required>Jumlah (Rp)</Label>
-          <input className="input" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" />
-        </div>
-        <div>
-          <Label required>Tanggal</Label>
-          <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} />
-        </div>
+      <div>
+        <Label required>Jumlah (Rp)</Label>
+        <input className="input" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" />
       </div>
       <div>
         <Label required>Kategori</Label>
@@ -1453,7 +1506,7 @@ function BiayaForm({ userId, onClose }: { userId: string; onClose: () => void })
         </div>
       </div>
       <div>
-        <Label>Metode Bayar</Label>
+        <Label required>Metode Bayar</Label>
         <div className="flex gap-2">
           {METODE_BAYAR.map(m => (
             <button key={m.value} onClick={() => setPay(m.value)}

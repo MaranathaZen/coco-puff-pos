@@ -196,7 +196,26 @@ function StokProduksiTab() {
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400 mb-0.5">Produk Siap Kirim</p>
           <p className="text-base font-semibold text-brand-600">{totalQtyProdukJadi} pcs</p>
-          <p className="text-xs text-gray-400 mt-0.5">{fgStocks?.length || 0} jenis · siap dikirim</p>
+          <p className="text-xs text-gray-400 mt-0.5">{fgStocks?.length || 0} jenis produk</p>
+        </div>
+      </div>
+
+      {/* Produk siap kirim — di atas stok bahan */}
+      <div>
+        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Produk Siap Kirim</p>
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          {fgStocks?.map((s, idx) => (
+            <div key={s.id} className={`flex items-center justify-between px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+              <div>
+                <p className="text-sm font-medium text-gray-800">{s.product_name}</p>
+                <p className="text-xs text-gray-400">Siap kirim ke toko/franchise</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm font-bold text-brand-600">{s.qty_on_hand} pcs</p>
+              </div>
+            </div>
+          ))}
+          {!fgStocks?.length && <div className="py-6 text-center text-sm text-gray-400">Belum ada produk siap kirim</div>}
         </div>
       </div>
 
@@ -222,30 +241,7 @@ function StokProduksiTab() {
         </div>
       </div>
 
-      {/* Stok produk setengah jadi */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Produk Setengah Jadi / Siap Kirim</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-          {fgStocks?.map((s, idx) => (
-            <div key={s.id} className={`flex items-center justify-between px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-              <div>
-                <p className="text-sm font-medium text-gray-800">{s.product_name}</p>
-                <p className="text-xs text-gray-400">Siap kirim ke toko/franchise</p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm font-bold text-brand-600">{s.qty_on_hand}</p>
-                <p className="text-xs text-gray-400">pcs</p>
-              </div>
-            </div>
-          ))}
-          {!fgStocks?.length && <div className="py-8 text-center text-sm text-gray-400">Belum ada produk setengah jadi</div>}
-        </div>
-        <p className="text-xs text-gray-400 mt-2 text-center">
-          Produk di sini adalah hasil produksi (Puff kosong, Fla, dll) — bukan produk menu kasir
-        </p>
-      </div>
+
     </div>
   )
 }
@@ -253,19 +249,23 @@ function StokProduksiTab() {
 // ── CATAT PRODUKSI ────────────────────────────────────────────
 function CatatProduksiTab({ userId }: { userId: string }) {
   const setToolbar = useContext(ToolbarCtx)
+  const { user } = useAuthStore()
   const [showForm, setShowForm]     = useState(false)
   const [showResep, setShowResep]   = useState(false)
   const [editResep, setEditResep]   = useState<any | null>(null)
   const [groupMode, setGroupMode]   = useState<'hari'|'bulan'|'tahun'>('hari')
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     setToolbar(
       <div className="flex items-center gap-2">
         <GroupSelect value={groupMode} onChange={setGroupMode} />
-        <button onClick={() => { setEditResep(null); setShowResep(true) }}
-          className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg active:bg-gray-50">
-          Resep
-        </button>
+        {['owner','manager'].includes(user?.role || '') && (
+          <button onClick={() => { setEditResep(null); setShowResep(true) }}
+            className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg active:bg-gray-50">
+            Resep
+          </button>
+        )}
         <button onClick={() => setShowForm(true)}
           className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg active:bg-gray-50">
           <Plus size={13} /> Catat
@@ -306,10 +306,13 @@ function CatatProduksiTab({ userId }: { userId: string }) {
       {(() => {
         const grouped = groupBy(logs || [], l => groupKey(l.created_at, groupMode))
         if (!grouped.length) return <div className="bg-white rounded-xl border border-gray-100 py-10 text-center text-sm text-gray-400">Belum ada catatan produksi</div>
-        return grouped.map(({ key, items: grpItems }) => (
+        return grouped.map(({ key, items: grpItems }) => {
+          const expanded = expandedGroups[key] !== false
+          return (
           <div key={key}>
-            <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} count={grpItems.length} />
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} count={grpItems.length}
+              expanded={expanded} onToggle={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))} />
+            {expanded && <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
               {grpItems.map((log, idx) => (
                 <div key={log.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex items-center justify-between">
@@ -334,9 +337,10 @@ function CatatProduksiTab({ userId }: { userId: string }) {
                   )}
                 </div>
               ))}
-            </div>
+            </div>}
           </div>
-        ))
+          )
+        })
       })()}
 
       {showForm  && <ProduksiForm userId={userId} onClose={() => setShowForm(false)} />}
@@ -350,6 +354,7 @@ function KirimTab({ userId }: { userId: string }) {
   const setToolbar = useContext(ToolbarCtx)
   const [showForm, setShowForm]   = useState(false)
   const [groupMode, setGroupMode] = useState<'hari'|'bulan'|'tahun'>('hari')
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     setToolbar(
@@ -390,10 +395,13 @@ function KirimTab({ userId }: { userId: string }) {
       {(() => {
         const grouped = groupBy(mutations || [], m => groupKey(m.created_at, groupMode))
         if (!grouped.length) return <div className="bg-white rounded-xl border border-gray-100 py-10 text-center text-sm text-gray-400">Belum ada pengiriman</div>
-        return grouped.map(({ key, items: grpItems }) => (
+        return grouped.map(({ key, items: grpItems }) => {
+          const expanded = expandedGroups[key] !== false
+          return (
           <div key={key}>
-            <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} count={grpItems.length} />
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} count={grpItems.length}
+              expanded={expanded} onToggle={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))} />
+            {expanded && <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
               {grpItems.map((m, idx) => {
                 const tc = typeConfig[m.mutation_type] || { label: m.mutation_type, color: 'text-gray-600 bg-gray-100' }
                 const totalQty = m.items.reduce((s, i) => s + i.qty, 0)
@@ -415,7 +423,7 @@ function KirimTab({ userId }: { userId: string }) {
                           </div>
                         ))}
                         <div className="flex justify-between text-xs font-medium text-gray-600 pt-1 border-t border-gray-50 mt-1">
-                          <span>Total</span><span>{totalQty} pcs</span>
+                          <span>Total Dikirim</span><span>{totalQty} pcs</span>
                         </div>
                       </div>
                     )}
@@ -423,12 +431,47 @@ function KirimTab({ userId }: { userId: string }) {
                   </div>
                 )
               })}
-            </div>
+            </div>}
           </div>
-        ))
+          )
+        })
       })()}
 
       {showForm && <KirimForm userId={userId} onClose={() => setShowForm(false)} />}
+    </div>
+  )
+}
+
+
+// Dropdown nama produk — pilih existing atau ketik baru
+function ProductNameInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const fgStocks = useLiveQuery(() => db.finished_goods_stock.toArray(), [])
+  const [mode, setMode] = useState<'select'|'new'>('select')
+
+  const existingNames = fgStocks?.map(f => f.product_name) || []
+  const isNew = value && !existingNames.includes(value)
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <button onClick={() => setMode('select')}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${mode === 'select' ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
+          Pilih Existing
+        </button>
+        <button onClick={() => { setMode('new'); onChange('') }}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${mode === 'new' ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
+          + Produk Baru
+        </button>
+      </div>
+      {mode === 'select' ? (
+        <select className="input" value={value} onChange={e => onChange(e.target.value)}>
+          <option value="">-- Pilih produk</option>
+          {existingNames.map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+      ) : (
+        <input className="input" value={value} onChange={e => onChange(e.target.value)}
+          placeholder="Nama produk baru (Puff, Fla Vanilla, dll)" autoFocus />
+      )}
     </div>
   )
 }
@@ -535,10 +578,9 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
       </div>
 
       <div>
-        <Label required>Nama Produk yang Dihasilkan</Label>
-        <input className="input" value={productName} onChange={e => setProduct(e.target.value)}
-          placeholder="Misal: Puff, Fla Vanilla, Premix..." />
-        <p className="text-[10px] text-gray-400 mt-1">Ini produk setengah jadi — Puff kosong, Fla, dll. Bukan produk menu kasir.</p>
+        <Label required>Produk yang Dihasilkan</Label>
+        <ProductNameInput value={productName} onChange={setProduct} />
+        <p className="text-[10px] text-gray-400 mt-1">Produk setengah jadi — Puff kosong, Fla, dll. Pilih yang ada atau ketik nama baru.</p>
       </div>
 
       <div>

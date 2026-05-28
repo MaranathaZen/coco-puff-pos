@@ -66,6 +66,7 @@ export interface PurchaseReturn {
 
 export interface WarehouseMutation {
   id: string; mutation_type: string
+  mutation_number?: string
   destination_id?: string; destination_name?: string
   notes?: string; status: string; created_by: string
   created_at: string; confirmed_at?: string; confirmed_by?: string
@@ -107,8 +108,11 @@ export interface ProductionMutationItem {
 
 export interface WarehouseExpense {
   id: string; name: string; amount: number
+  expense_number?: string
   expense_date: string; category: string
   payment_method?: string
+  transfer_to?: string
+  due_date?: string
   notes?: string; created_by: string; created_at: string
 }
 

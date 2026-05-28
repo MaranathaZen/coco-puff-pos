@@ -749,25 +749,30 @@ function ResetDataTab() {
     setResetting(true)
     setDone([])
     try {
-      // Hapus data transaksi gudang (bukan master bahan/supplier)
-      await db.purchases.clear()
+      // WAJIB: Hapus dari Supabase DULU baru IndexedDB
+      // Kalau Supabase gagal, IndexedDB tidak dihapus (data aman)
+      setDone(prev => [...prev, 'Menghapus dari server...'])
+      const tables = ['warehouse_stock','warehouse_mutation_items','warehouse_mutations',
+        'purchase_items','purchase_returns','purchases','warehouse_expenses']
+      for (const t of tables) {
+        await supabase.from(t).delete().gte('created_at', '2000-01-01')
+      }
+      setDone(prev => [...prev, 'Server: data gudang dihapus'])
+
+      // Baru hapus IndexedDB
+      await db.warehouse_stock.clear()
+      await db.warehouse_mutation_items.clear()
+      await db.warehouse_mutations.clear()
       await db.purchase_items.clear()
       await db.purchase_returns.clear()
-      await db.warehouse_mutations.clear()
-      await db.warehouse_mutation_items.clear()
+      await db.purchases.clear()
       await db.warehouse_expenses.clear()
-      await db.warehouse_stock.clear()
-      setDone(prev => [...prev, 'Data gudang (pembelian, mutasi, pemakaian, biaya, stok) dihapus'])
-
-      // Sync hapus ke Supabase
-      const tables = ['purchases','purchase_items','purchase_returns','warehouse_mutations',
-        'warehouse_mutation_items','warehouse_expenses','warehouse_stock']
-      for (const t of tables) {
-        await supabase.from(t).delete().neq('id', 'x') // delete all
-      }
-      setDone(prev => [...prev, 'Sync Supabase selesai'])
+      setDone(prev => [...prev, 'Lokal: data gudang dihapus'])
       toast.success('Data gudang berhasil direset')
-    } catch (e) { toast.error('Gagal reset: ' + String(e)) }
+    } catch (e) {
+      console.error('[RESET]', e)
+      toast.error('Gagal reset: ' + String(e))
+    }
     finally { setResetting(false) }
   }
 
@@ -775,22 +780,27 @@ function ResetDataTab() {
     setResetting(true)
     setDone([])
     try {
-      await db.production_logs.clear()
+      setDone(prev => [...prev, 'Menghapus dari server...'])
+      const tables = ['production_log_materials','production_logs','production_mutation_items',
+        'production_mutations','production_stock','finished_goods_stock']
+      for (const t of tables) {
+        await supabase.from(t).delete().gte('created_at', '2000-01-01')
+      }
+
+      setDone(prev => [...prev, 'Server: data produksi dihapus'])
+
       await db.production_log_materials.clear()
-      await db.production_mutations.clear()
+      await db.production_logs.clear()
       await db.production_mutation_items.clear()
+      await db.production_mutations.clear()
       await db.production_stock.clear()
       await db.finished_goods_stock.clear()
-      setDone(prev => [...prev, 'Data produksi (log, mutasi, stok) dihapus'])
-
-      const tables = ['production_logs','production_log_materials','production_mutations',
-        'production_mutation_items','production_stock','finished_goods_stock']
-      for (const t of tables) {
-        await supabase.from(t).delete().neq('id', 'x')
-      }
-      setDone(prev => [...prev, 'Sync Supabase selesai'])
+      setDone(prev => [...prev, 'Lokal: data produksi dihapus'])
       toast.success('Data produksi berhasil direset')
-    } catch (e) { toast.error('Gagal reset: ' + String(e)) }
+    } catch (e) {
+      console.error('[RESET]', e)
+      toast.error('Gagal reset: ' + String(e))
+    }
     finally { setResetting(false) }
   }
 

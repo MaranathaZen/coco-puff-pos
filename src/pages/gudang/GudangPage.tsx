@@ -132,16 +132,35 @@ export default function GudangPage() {
         supabase.from('warehouse_mutations').select('*').order('created_at', { ascending: false }).limit(200),
         supabase.from('warehouse_mutation_items').select('*'),
         supabase.from('partners').select('*'),
-        supabase.from('warehouse_expenses').select('*').order('expense_date', { ascending: false }).limit(200),
+        supabase.from('warehouse_expenses').select('*').order('created_at', { ascending: false }).limit(200),
       ])
-      const tables = ['materials','suppliers','warehouse_stock','purchases','purchase_items',
-        'warehouse_mutations','warehouse_mutation_items','partners','warehouse_expenses']
-      for (let i = 0; i < tables.length; i++) {
-        const data = pulls[i].data
-        if (data?.length) await (db as any)[tables[i]].bulkPut(data)
+
+      // Master data: bulkPut (tambah/update, tidak hapus lokal)
+      if (pulls[0].data?.length) await db.materials.bulkPut(pulls[0].data)
+      if (pulls[1].data?.length) await db.suppliers.bulkPut(pulls[1].data)
+      if (pulls[7].data?.length) await db.partners.bulkPut(pulls[7].data)
+
+      // Transactional data: clear dulu lalu bulkPut agar reflect Supabase exactly
+      // Ini mencegah data lama yang sudah dihapus di Supabase muncul lagi lokal
+      const transactional: [any, any][] = [
+        [db.warehouse_stock,           pulls[2].data],
+        [db.purchases,                 pulls[3].data],
+        [db.purchase_items,            pulls[4].data],
+        [db.warehouse_mutations,       pulls[5].data],
+        [db.warehouse_mutation_items,  pulls[6].data],
+        [db.warehouse_expenses,        pulls[8].data],
+      ]
+      for (const [table, data] of transactional) {
+        if (data !== null) { // null = error, skip; [] = empty = clear
+          await table.clear()
+          if (data.length) await table.bulkPut(data)
+        }
       }
       toast.success('Data diperbarui')
-    } catch { toast.error('Gagal sync') }
+    } catch (e) {
+      console.error('[SYNC]', e)
+      toast.error('Gagal sync')
+    }
     finally { setSyncing(false) }
   }
 
@@ -773,6 +792,9 @@ function BiayaTab({ userId }: { userId: string }) {
                 <div key={e.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex items-center justify-between">
                     <div className="flex-1 min-w-0">
+                      {(e as any).expense_number && (
+                        <p className="text-xs font-mono text-blue-600 mb-0.5">{(e as any).expense_number}</p>
+                      )}
                       <p className="text-sm font-medium text-gray-900 truncate">{e.name}</p>
                       <p className="text-xs text-gray-400">
                         {KATEGORI_BIAYA.find(k => k.value === e.category)?.label || e.category}
@@ -837,11 +859,22 @@ function MaterialForm({ material, onClose }: { material: Material | null; onClos
   async function handleDelete() {
     if (!material || !confirm(`Hapus "${material.name}"? Data tidak bisa dikembalikan.`)) return
     try {
+      // Hapus dari Supabase DULU, baru IndexedDB
+      const { error } = await supabase.from('materials').delete().eq('id', material.id)
+      if (error) throw error
       await db.materials.delete(material.id)
-      await supabase.from('materials').delete().eq('id', material.id)
+      // Hapus stok terkait
+      const ws = await db.warehouse_stock.where('material_id').equals(material.id).first()
+      if (ws) {
+        await db.warehouse_stock.delete(ws.id)
+        await supabase.from('warehouse_stock').delete().eq('material_id', material.id)
+      }
       toast.success('Bahan dihapus')
       onClose()
-    } catch { toast.error('Gagal menghapus') }
+    } catch (e) {
+      console.error('[DELETE]', e)
+      toast.error('Gagal menghapus dari server')
+    }
   }
 
   async function handleSave() {

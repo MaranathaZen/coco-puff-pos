@@ -326,7 +326,7 @@ function CatatProduksiTab({ userId }: { userId: string }) {
                   <div className="flex items-center justify-between">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-800">{log.recipe?.name || '-'}</p>
-                      <p className="text-xs text-gray-400">{formatDate(log.created_at)} · {log.batch_count} batch{log.notes ? ` · ${log.notes}` : ''}</p>
+                      <p className="text-xs text-gray-400">{new Date(log.created_at).toLocaleString('id-ID', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })} · {log.batch_count} batch{log.notes ? ` · ${log.notes}` : ''}</p>
                     </div>
                     <div className="text-right flex-shrink-0 ml-2">
                       <p className="text-sm font-bold text-brand-600">{log.total_yield} {log.recipe?.yield_unit || 'pcs'}</p>
@@ -428,7 +428,7 @@ function KirimTab({ userId }: { userId: string }) {
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tc.color}`}>{tc.label}</span>
                         {m.destination_name && <span className="text-xs text-gray-600 font-medium">{m.destination_name}</span>}
                       </div>
-                      <p className="text-xs text-gray-400">{formatDate(m.created_at)}</p>
+                      <p className="text-xs text-gray-400">{new Date(m.created_at).toLocaleString('id-ID', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })}</p>
                     </div>
                     {m.items.length > 0 && (
                       <div className="mt-1.5 space-y-0.5 border-t border-gray-50 pt-1.5">
@@ -517,13 +517,13 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
   const [saving, setSaving]       = useState(false)
 
   const selectedRecipe = recipes?.find(r => r.id === recipeId)
-  // Support desimal batch (0.5, 1.5, dst)
   const totalYield = selectedRecipe ? selectedRecipe.batch_yield * Number(batchCount) : 0
 
-  // Auto-isi nama produk dari resep
+  // Auto-isi nama produk dari field product_name di resep
   useEffect(() => {
-    if (selectedRecipe && !productName) {
-      setProduct(selectedRecipe.name)
+    if (selectedRecipe) {
+      const pName = (selectedRecipe as any).product_name || selectedRecipe.name
+      setProduct(pName)
     }
   }, [recipeId])
 
@@ -616,11 +616,21 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
         )}
       </div>
 
-      <div>
-        <Label required>Produk yang Dihasilkan</Label>
-        <ProductNameInput value={productName} onChange={setProduct} />
-        <p className="text-[10px] text-gray-400 mt-1">Produk setengah jadi — Puff kosong, Fla, dll. Pilih yang ada atau ketik nama baru.</p>
-      </div>
+      {selectedRecipe && (productName ? (
+        <div className="bg-gray-50 rounded-xl p-3 flex items-center justify-between">
+          <div>
+            <p className="text-xs text-gray-400">Produk yang dihasilkan</p>
+            <p className="text-sm font-medium text-gray-900">{productName}</p>
+          </div>
+          <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Otomatis</span>
+        </div>
+      ) : (
+        <div>
+          <Label required>Nama Produk (dari resep)</Label>
+          <input className="input" value={productName} onChange={e => setProduct(e.target.value)}
+            placeholder="Set nama produk di pengaturan resep" />
+        </div>
+      ))}
 
       <div>
         <Label>Catatan</Label>
@@ -713,7 +723,7 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
             { v: 'to_store',          l: '→ Toko' },
             { v: 'to_partner',        l: '→ Franchise' },
             { v: 'return_from_store', l: '← Retur Toko' },
-            { v: 'adjustment',        l: 'Koreksi' },
+            { v: 'adjustment',        l: 'Koreksi Stok' },
           ] as const).map(t => (
             <button key={t.v} onClick={() => setType(t.v)}
               className={`py-2.5 rounded-xl text-sm font-medium border transition-colors ${
@@ -793,6 +803,7 @@ function ResepForm({ recipe, onClose }: { recipe: any | null; onClose: () => voi
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
 
   const [name, setName]           = useState(recipe?.name || '')
+  const [productName, setProductName] = useState((recipe as any)?.product_name || recipe?.name || '')
   const [batchYield, setBatch]    = useState(String(recipe?.batch_yield || '120'))
   const [yieldUnit, setYieldUnit] = useState(recipe?.yield_unit || 'pcs')
   const [isActive, setIsActive]   = useState(recipe?.is_active ?? true)
@@ -832,8 +843,10 @@ function ResepForm({ recipe, onClose }: { recipe: any | null; onClose: () => voi
     try {
       const isNew    = !recipe
       const recipeId = recipe?.id || generateId()
-      const data: ProductionRecipe = {
-        id: recipeId, name: name.trim(),
+      const data: any = {
+        id: recipeId,
+        name: name.trim(),
+        product_name: productName.trim() || name.trim(),
         batch_yield: Number(batchYield),
         yield_unit: yieldUnit,
         is_active: isActive,
@@ -874,7 +887,12 @@ function ResepForm({ recipe, onClose }: { recipe: any | null; onClose: () => voi
 
   return (
     <Modal title={recipe ? 'Edit Resep' : 'Resep Baru'} onClose={onClose}>
-      <div><Label required>Nama Resep</Label><input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Resep Puff Standard" autoFocus /></div>
+      <div><Label required>Nama Resep</Label><input className="input" value={name} onChange={e => { setName(e.target.value); if (!productName || productName === name) setProductName(e.target.value) }} placeholder="Resep Puff Standard" autoFocus /></div>
+      <div>
+        <Label required>Nama Produk yang Dihasilkan</Label>
+        <input className="input" value={productName} onChange={e => setProductName(e.target.value)} placeholder="Puff, Fla Vanilla, dll" />
+        <p className="text-xs text-gray-400 mt-1">Nama ini otomatis terisi saat catat produksi</p>
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div>

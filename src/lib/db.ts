@@ -79,6 +79,7 @@ export interface WarehouseMutationItem {
 export interface ProductionRecipe {
   id: string; name: string; batch_yield: number
   yield_unit: string; is_active: boolean; created_at: string
+  product_name?: string  // nama produk yang dihasilkan
 }
 
 export interface ProductionRecipeItem {

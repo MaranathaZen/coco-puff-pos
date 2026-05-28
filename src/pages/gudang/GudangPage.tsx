@@ -13,7 +13,7 @@ import {
 import toast from 'react-hot-toast'
 import type { Material, WarehouseStock, Purchase, WarehouseMutation, WarehouseMutationItem, WarehouseExpense } from '@/lib/db'
 
-type Tab = 'stok' | 'pembelian' | 'mutasi' | 'pakai' | 'biaya'
+type Tab = 'stok' | 'pembelian' | 'mutasi' | 'biaya'
 
 // ── Satuan & Kategori dari data nyata Coco Puff ───────────────
 const SATUAN = ['Gram', 'Ml', 'Pcs', 'Kg', 'Liter', 'Pack', 'Lembar', 'Roll']
@@ -110,7 +110,6 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'stok',      label: 'Stok',      icon: Warehouse },
   { id: 'pembelian', label: 'Pembelian', icon: ShoppingCart },
   { id: 'mutasi',    label: 'Mutasi',    icon: ArrowRightLeft },
-  { id: 'pakai',     label: 'Pemakaian', icon: Wrench },
   { id: 'biaya',     label: 'Biaya',     icon: Receipt },
 ]
 
@@ -135,8 +134,15 @@ export default function GudangPage() {
         supabase.from('warehouse_expenses').select('*').order('created_at', { ascending: false }).limit(200),
       ])
 
-      // Master data: bulkPut (tambah/update, tidak hapus lokal)
-      if (pulls[0].data?.length) await db.materials.bulkPut(pulls[0].data)
+      // Master data: sync full (bulkPut + hapus yang sudah tidak ada di server)
+      if (pulls[0].data !== null) {
+        await db.materials.bulkPut(pulls[0].data || [])
+        // Hapus lokal yang sudah dihapus di server
+        const serverIds = new Set((pulls[0].data || []).map((m: any) => m.id))
+        const localMats = await db.materials.toArray()
+        const toDelete = localMats.filter(m => !serverIds.has(m.id)).map(m => m.id)
+        if (toDelete.length) await db.materials.bulkDelete(toDelete)
+      }
       if (pulls[1].data?.length) await db.suppliers.bulkPut(pulls[1].data)
       if (pulls[7].data?.length) await db.partners.bulkPut(pulls[7].data)
 
@@ -199,7 +205,6 @@ export default function GudangPage() {
           {tab === 'stok'      && <StokTab userId={user!.id} />}
           {tab === 'pembelian' && <PembelianTab userId={user!.id} />}
           {tab === 'mutasi'    && <MutasiTab userId={user!.id} />}
-          {tab === 'pakai'     && <PakaiTab userId={user!.id} />}
           {tab === 'biaya'     && <BiayaTab userId={user!.id} />}
         </div>
       </ToolbarCtx.Provider>
@@ -437,7 +442,8 @@ function PembelianTab({ userId }: { userId: string }) {
                       {(p as any).po_number && <p className="text-xs font-mono font-medium text-blue-600 mb-0.5">{(p as any).po_number}</p>}
                       <p className="text-sm font-medium text-gray-900">{p.supplier?.name || 'Tanpa Supplier'}</p>
                       <p className="text-xs text-gray-400">
-                        {formatDate(p.created_at)}{p.invoice_no ? ` · No. Invoice: ${p.invoice_no}` : ''}
+                        {new Date(p.created_at).toLocaleString('id-ID', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}
+                        {p.invoice_no ? ` · ${p.invoice_no}` : ''}
                         {(p as any).payment_method ? ` · ${(p as any).payment_method}` : ''}
                       </p>
                     </div>
@@ -496,7 +502,7 @@ function MutasiTab({ userId }: { userId: string }) {
     to_production: { label: 'ke Produksi',  color: 'text-blue-600 bg-blue-50' },
     to_store:      { label: 'ke Toko',      color: 'text-green-600 bg-green-50' },
     to_partner:    { label: 'ke Franchise', color: 'text-purple-600 bg-purple-50' },
-    adjustment:    { label: 'Retur',        color: 'text-gray-600 bg-gray-100' },
+    adjustment:    { label: 'Retur',        color: 'text-red-600 bg-red-50' },
     opening_stock: { label: 'Stok Awal',    color: 'text-orange-600 bg-orange-50' },
     internal_use:  { label: 'Pemakaian',    color: 'text-amber-600 bg-amber-50' },
   }
@@ -507,7 +513,7 @@ function MutasiTab({ userId }: { userId: string }) {
     const mats = await db.materials.toArray()
     const mm   = Object.fromEntries(mats.map(m => [m.id, m]))
     return m
-      .filter(x => x.mutation_type !== 'internal_use') // pemakaian ada di tab sendiri
+      // Semua tipe termasuk pemakaian dan retur
       .map(x => ({
         ...x,
         items: its.filter(i => i.mutation_id === x.id).map(i => ({ ...i, material: mm[i.material_id] }))
@@ -537,6 +543,7 @@ function MutasiTab({ userId }: { userId: string }) {
           { v: 'to_store', l: 'Toko' },
           { v: 'to_partner', l: 'Franchise' },
           { v: 'adjustment', l: 'Retur' },
+          { v: 'internal_use', l: 'Pemakaian' },
         ].map(f => (
           <button key={f.v} onClick={() => setFilterType(f.v)}
             className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors ${
@@ -564,7 +571,7 @@ function MutasiTab({ userId }: { userId: string }) {
                       </div>
                       {(m as any).mutation_number && <p className="text-xs font-mono text-gray-400">{(m as any).mutation_number}</p>}
                     </div>
-                    <p className="text-xs text-gray-400 flex-shrink-0">{formatDate(m.created_at)}</p>
+                    <p className="text-xs text-gray-400 flex-shrink-0">{new Date(m.created_at).toLocaleString('id-ID', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })}</p>
                   </div>
                   {m.items.length > 0 && (
                     <div className="mt-1.5 space-y-0.5 border-t border-gray-50 pt-1.5">
@@ -728,7 +735,7 @@ function BiayaTab({ userId }: { userId: string }) {
   const setToolbar = useContext(ToolbarCtx)
   const [showForm, setShowForm]     = useState(false)
   const [search, setSearch]         = useState('')
-  const [groupMode, setGroupMode]   = useState<'hari'|'bulan'|'tahun'>('bulan')
+  const [groupMode, setGroupMode]   = useState<'hari'|'bulan'|'tahun'>('hari')
   const [filterCat, setFilterCat]   = useState('semua')
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
 
@@ -1347,12 +1354,26 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
         const mi: WarehouseMutationItem = { id: generateId(), mutation_id: mutId, material_id: item.material_id, qty: Number(item.qty), unit_cost: mat?.unit_cost || 0 }
         await db.warehouse_mutation_items.add(mi)
         await supabase.from('warehouse_mutation_items').insert(mi)
+
         const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
         if (ws) {
-          const newQty = Math.max(0, ws.qty_on_hand - Number(item.qty))
+          let newQty = ws.qty_on_hand
+          if (type === 'adjustment') {
+            // Retur: tambah stok (barang kembali)
+            newQty = ws.qty_on_hand + Number(item.qty)
+          } else {
+            // Semua tipe lain: kurangi stok
+            newQty = Math.max(0, ws.qty_on_hand - Number(item.qty))
+          }
           await db.warehouse_stock.update(ws.id, { qty_on_hand: newQty, last_updated: now() })
           await supabase.from('warehouse_stock').update({ qty_on_hand: newQty }).eq('id', ws.id)
+        } else if (type === 'adjustment') {
+          // Retur ke barang yang belum ada stok
+          const wsd: WarehouseStock = { id: generateId(), material_id: item.material_id, qty_on_hand: Number(item.qty), last_updated: now() }
+          await db.warehouse_stock.add(wsd)
+          await supabase.from('warehouse_stock').insert(wsd)
         }
+
         if (type === 'to_production') {
           const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
           const psd: any = { id: ps?.id || generateId(), material_id: item.material_id, qty_on_hand: (ps?.qty_on_hand || 0) + Number(item.qty), last_updated: now() }

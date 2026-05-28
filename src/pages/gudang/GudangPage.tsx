@@ -811,7 +811,7 @@ function BiayaTab({ userId }: { userId: string }) {
                       <p className="text-sm font-medium text-gray-900 truncate">{e.name}</p>
                       <p className="text-xs text-gray-400">
                         {KATEGORI_BIAYA.find(k => k.value === e.category)?.label || e.category}
-                        {' · '}{e.expense_date}
+                        {' · '}{new Date(e.created_at).toLocaleString('id-ID', { day:'numeric', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' })}
                         {(e as any).payment_method ? ` · ${(e as any).payment_method}` : ''}
                       </p>
                     </div>
@@ -1393,11 +1393,12 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
     <Modal title="Mutasi Gudang" onClose={onClose}>
       <div>
         <Label required>Tujuan</Label>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {([
             { v: 'to_production', l: 'Produksi' },
-            { v: 'to_store',      l: 'Outlet / Toko' },
+            { v: 'to_store',      l: 'ke Toko' },
             { v: 'to_partner',    l: 'Franchise' },
+            { v: 'internal_use',  l: 'Pemakaian' },
             { v: 'adjustment',    l: 'Retur' },
           ] as const).map(t => (
             <button key={t.v} onClick={() => setType(t.v)}

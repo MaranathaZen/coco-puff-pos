@@ -227,7 +227,7 @@ function StokProduksiTab() {
             <div key={s.id} className={`flex items-center justify-between px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-800 truncate">{s.material?.name || '-'}</p>
-                <p className="text-xs text-gray-400">{formatRupiah(s.material?.unit_cost || 0)}/{s.material?.unit}</p>
+                <p className="text-xs text-gray-400">Avg {formatRupiah(s.material?.unit_cost || 0)}/{s.material?.unit}</p>
               </div>
               <div className="text-right">
                 <p className="text-sm font-semibold text-gray-900">
@@ -260,12 +260,6 @@ function CatatProduksiTab({ userId }: { userId: string }) {
     setToolbar(
       <div className="flex items-center gap-2">
         <GroupSelect value={groupMode} onChange={setGroupMode} />
-        {['owner','manager'].includes(user?.role || '') && (
-          <button onClick={() => { setEditResep(null); setShowResep(true) }}
-            className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg active:bg-gray-50">
-            Resep
-          </button>
-        )}
         <button onClick={() => setShowForm(true)}
           className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg active:bg-gray-50">
           <Plus size={13} /> Catat
@@ -346,14 +340,22 @@ function CatatProduksiTab({ userId }: { userId: string }) {
                     <div className="mt-1.5 border-t border-gray-50 pt-1.5 space-y-0.5">
                       {log.materials.map(m => (
                         <div key={m.id} className="flex justify-between text-xs text-gray-400">
-                          <span>{m.material?.name}</span>
-                          <span>{m.qty_used} {m.material?.unit} · {formatRupiah(m.qty_used * (m.material?.unit_cost || 0))}</span>
+                          <span>{m.material?.name} × {m.qty_used} {m.material?.unit} @ {formatRupiah(m.material?.unit_cost || 0)}</span>
+                          <span>{formatRupiah(m.qty_used * (m.material?.unit_cost || 0))}</span>
                         </div>
                       ))}
                       {(log as any).total_cost > 0 && (
-                        <div className="flex justify-between text-xs font-medium text-gray-600 pt-1 border-t border-gray-50 mt-1">
-                          <span>Total Biaya Produksi</span>
-                          <span>{formatRupiah((log as any).total_cost)}</span>
+                        <div className="space-y-0.5 pt-1 border-t border-gray-50 mt-1">
+                          <div className="flex justify-between text-xs font-medium text-gray-700">
+                            <span>Total Biaya Bahan</span>
+                            <span>{formatRupiah((log as any).total_cost)}</span>
+                          </div>
+                          {(log as any).hpp_per_unit > 0 && (
+                            <div className="flex justify-between text-xs text-gray-500">
+                              <span>HPP per pcs</span>
+                              <span>{formatRupiah((log as any).hpp_per_unit)}</span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -520,11 +522,13 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
   const [recipeId, setRecipeId]   = useState('')
   const [batchCount, setBatch]    = useState('1')
   const [productName, setProduct] = useState('')
+  const [actualYield, setActualYield] = useState('')
   const [notes, setNotes]         = useState('')
   const [saving, setSaving]       = useState(false)
 
   const selectedRecipe = recipes?.find(r => r.id === recipeId)
-  const totalYield = selectedRecipe ? selectedRecipe.batch_yield * Number(batchCount) : 0
+  const estimatedYield = selectedRecipe ? selectedRecipe.batch_yield * Number(batchCount) : 0
+  const totalYield = actualYield && Number(actualYield) > 0 ? Number(actualYield) : estimatedYield
 
   // Auto-isi nama produk dari field product_name di resep
   useEffect(() => {
@@ -546,7 +550,7 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
       const log: ProductionLog = {
         id: logId, recipe_id: recipeId,
         batch_count: Number(batchCount),
-        total_yield: totalYield,
+        total_yield: finalYield,
         notes: notes || undefined,
         created_by: userId, created_at: now(),
       }
@@ -575,7 +579,8 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
       const totalCostHPP = recipeItemsForHPP.reduce((s, ri) => {
         return s + ri.qty_per_batch * Number(batchCount) * (mMapHPP[ri.material_id]?.unit_cost || 0)
       }, 0)
-      const hppPerUnit = totalYield > 0 ? totalCostHPP / totalYield : 0
+      const finalYield = actualYield && Number(actualYield) > 0 ? Number(actualYield) : estimatedYield
+      const hppPerUnit = finalYield > 0 ? totalCostHPP / finalYield : 0
 
       // Tambah stok produk setengah jadi + simpan HPP
       const existing = await db.finished_goods_stock.filter(f => f.product_name === productName.trim()).first()
@@ -583,7 +588,7 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
         id:           existing?.id || generateId(),
         product_id:   existing?.product_id || `prod-${generateId().slice(0,8)}`,
         product_name: productName.trim(),
-        qty_on_hand:  (existing?.qty_on_hand || 0) + totalYield,
+        qty_on_hand:  (existing?.qty_on_hand || 0) + finalYield,
         hpp_per_unit: hppPerUnit, // HPP dari produksi ini
         last_updated: now(),
       }
@@ -623,21 +628,23 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
         )}
       </div>
 
-      {selectedRecipe && (productName ? (
-        <div className="bg-gray-50 rounded-xl p-3 flex items-center justify-between">
-          <div>
-            <p className="text-xs text-gray-400">Produk yang dihasilkan</p>
-            <p className="text-sm font-medium text-gray-900">{productName}</p>
+      {selectedRecipe && (
+        <div className="bg-brand-50 rounded-xl p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-500">Produk yang dihasilkan</p>
+            <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">dari resep</span>
           </div>
-          <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Otomatis</span>
+          <p className="text-sm font-medium text-gray-900">{productName || selectedRecipe.name}</p>
+          <p className="text-xs text-gray-500">Estimasi: <span className="font-medium">{totalYield} {selectedRecipe.yield_unit}</span></p>
         </div>
-      ) : (
-        <div>
-          <Label required>Nama Produk (dari resep)</Label>
-          <input className="input" value={productName} onChange={e => setProduct(e.target.value)}
-            placeholder="Set nama produk di pengaturan resep" />
-        </div>
-      ))}
+      )}
+      <div>
+        <Label required>Hasil Aktual</Label>
+        <input className="input" type="number" step="1"
+          value={actualYield} onChange={e => setActualYield(e.target.value)}
+          placeholder={String(totalYield || 0)} />
+        <p className="text-xs text-gray-400 mt-1">Isi sesuai hasil nyata produksi (bisa lebih/kurang dari estimasi)</p>
+      </div>
 
       <div>
         <Label>Catatan</Label>

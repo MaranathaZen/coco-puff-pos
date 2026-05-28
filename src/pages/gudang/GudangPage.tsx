@@ -328,7 +328,7 @@ function StokTab({ userId }: { userId: string }) {
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
               <p className="text-xs text-gray-400 mt-0.5">
-                {KATEGORI_GUDANG.find(k => k.value === item.category)?.label || item.category} · {formatRupiah(item.unit_cost)}/{item.unit}
+                {KATEGORI_GUDANG.find(k => k.value === item.category)?.label || item.category} · Avg {formatRupiah((item as any).avg_cost || item.unit_cost)}/{item.unit}
               </p>
             </div>
             <div className="text-right mr-3">
@@ -428,10 +428,14 @@ function PembelianTab({ userId }: { userId: string }) {
                     <div className="mt-1.5 space-y-0.5 border-t border-gray-50 pt-1.5">
                       {p.items.map(i => (
                         <div key={i.id} className="flex justify-between text-xs text-gray-400">
-                          <span>{i.material?.name} × {i.qty} {i.material?.unit}</span>
+                          <span>{i.material?.name} × {i.qty} {i.material?.unit} @ {formatRupiah(i.unit_cost)}</span>
                           <span>{formatRupiah(i.subtotal)}</span>
                         </div>
                       ))}
+                      <div className="flex justify-between text-xs font-medium text-gray-600 pt-1 border-t border-gray-50 mt-1">
+                        <span>Total</span>
+                        <span>{formatRupiah(p.items.reduce((s, i) => s + i.subtotal, 0))}</span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -586,10 +590,7 @@ function PakaiTab({ userId }: { userId: string }) {
 
   useEffect(() => {
     setToolbar(
-      <div className="flex items-center gap-2">
-        <GroupSelect value={groupMode} onChange={setGroupMode} />
-        <AddButton label="Catat" onClick={() => setShowForm(true)} />
-      </div>
+      <GroupSelect value={groupMode} onChange={setGroupMode} />
     )
     return () => setToolbar(null)
   }, [groupMode])
@@ -633,6 +634,10 @@ function PakaiTab({ userId }: { userId: string }) {
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalBulanIni)}</p>
         <p className="text-xs text-gray-400 mt-0.5">ATK, kebersihan, operasional gudang</p>
       </div>
+      <button onClick={() => setShowForm(true)}
+        className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium">
+        <Plus size={15} /> Catat Pemakaian
+      </button>
       <SearchBar value={search} onChange={setSearch} placeholder="Cari nama bahan, keterangan..." />
       {grouped.map(({ key, items: grpItems }) => {
         const total = grpItems.reduce((s, u) => s + u.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0)
@@ -690,10 +695,7 @@ function BiayaTab({ userId }: { userId: string }) {
 
   useEffect(() => {
     setToolbar(
-      <div className="flex items-center gap-2">
-        <GroupSelect value={groupMode} onChange={setGroupMode} />
-        <AddButton label="Catat" onClick={() => setShowForm(true)} />
-      </div>
+      <GroupSelect value={groupMode} onChange={setGroupMode} />
     )
     return () => setToolbar(null)
   }, [groupMode])
@@ -724,6 +726,10 @@ function BiayaTab({ userId }: { userId: string }) {
         <p className="text-xs text-gray-400 mb-1">Total Biaya Bulan Ini</p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalBulanIni)}</p>
       </div>
+      <button onClick={() => setShowForm(true)}
+        className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium">
+        <Plus size={15} /> Catat Biaya
+      </button>
       <SearchBar value={search} onChange={setSearch} placeholder="Cari keterangan biaya..." />
       <div className="flex gap-2 overflow-x-auto pb-1">
         {[{ v: 'semua', l: 'Semua' }, ...KATEGORI_BIAYA.map(k => ({ v: k.value, l: k.label }))].map(f => (
@@ -1207,8 +1213,11 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
       <div><Label>Catatan</Label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opsional" /></div>
 
       <div className="flex items-center justify-between py-3 border-t border-gray-100">
-        <span className="text-sm font-medium text-gray-700">Total</span>
+        <span className="text-sm font-medium text-gray-700">Total Pembelian</span>
         <span className="text-base font-semibold text-gray-900">{formatRupiah(total)}</span>
+      </div>
+      <div className="bg-gray-50 rounded-xl p-3 text-xs text-gray-500">
+        Harga beli otomatis update harga rata-rata (moving average) bahan.
       </div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>

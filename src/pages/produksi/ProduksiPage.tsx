@@ -276,17 +276,25 @@ function CatatProduksiTab({ userId }: { userId: string }) {
   }, [groupMode])
 
   const logs = useLiveQuery(async () => {
-    const l       = await db.production_logs.orderBy('created_at').reverse().limit(30).toArray()
+    const l       = await db.production_logs.orderBy('created_at').reverse().limit(50).toArray()
     const recipes = await db.production_recipes.toArray()
     const rMap    = Object.fromEntries(recipes.map(r => [r.id, r]))
     const mats    = await db.production_log_materials.toArray()
     const matDefs = await db.materials.toArray()
     const mMap    = Object.fromEntries(matDefs.map(m => [m.id, m]))
-    return l.map(log => ({
-      ...log,
-      recipe: rMap[log.recipe_id],
-      materials: mats.filter(m => m.log_id === log.id).map(m => ({ ...m, material: mMap[m.material_id] }))
-    }))
+    return l.map(log => {
+      const logMats = mats.filter(m => m.log_id === log.id).map(m => ({ ...m, material: mMap[m.material_id] }))
+      // HPP = total biaya bahan / total hasil produksi
+      const totalCost = logMats.reduce((s, m) => s + m.qty_used * (m.material?.unit_cost || 0), 0)
+      const hpp = log.total_yield > 0 ? totalCost / log.total_yield : 0
+      return {
+        ...log,
+        recipe: rMap[log.recipe_id],
+        materials: logMats,
+        total_cost: totalCost,
+        hpp_per_unit: hpp,
+      }
+    })
   }, [])
 
   const recipes = useLiveQuery(async () => {
@@ -321,18 +329,26 @@ function CatatProduksiTab({ userId }: { userId: string }) {
                       <p className="text-xs text-gray-400">{formatDate(log.created_at)} · {log.batch_count} batch{log.notes ? ` · ${log.notes}` : ''}</p>
                     </div>
                     <div className="text-right flex-shrink-0 ml-2">
-                      <p className="text-sm font-bold text-brand-600">{log.total_yield}</p>
-                      <p className="text-xs text-gray-400">{log.recipe?.yield_unit || 'pcs'}</p>
+                      <p className="text-sm font-bold text-brand-600">{log.total_yield} {log.recipe?.yield_unit || 'pcs'}</p>
+                      {(log as any).hpp_per_unit > 0 && (
+                        <p className="text-xs text-gray-500">HPP {formatRupiah((log as any).hpp_per_unit)}/pcs</p>
+                      )}
                     </div>
                   </div>
                   {log.materials.length > 0 && (
-                    <div className="mt-1.5 space-y-0.5 border-t border-gray-50 pt-1.5">
+                    <div className="mt-1.5 border-t border-gray-50 pt-1.5 space-y-0.5">
                       {log.materials.map(m => (
                         <div key={m.id} className="flex justify-between text-xs text-gray-400">
                           <span>{m.material?.name}</span>
-                          <span>{m.qty_used} {m.material?.unit}</span>
+                          <span>{m.qty_used} {m.material?.unit} · {formatRupiah(m.qty_used * (m.material?.unit_cost || 0))}</span>
                         </div>
                       ))}
+                      {(log as any).total_cost > 0 && (
+                        <div className="flex justify-between text-xs font-medium text-gray-600 pt-1 border-t border-gray-50 mt-1">
+                          <span>Total Biaya Produksi</span>
+                          <span>{formatRupiah((log as any).total_cost)}</span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -372,14 +388,9 @@ function KirimTab({ userId }: { userId: string }) {
   const mutations = useLiveQuery(async () => {
     const m    = await db.production_mutations.orderBy('created_at').reverse().limit(50).toArray()
     const its  = await db.production_mutation_items.toArray()
-    const fgs  = await db.finished_goods_stock.toArray()
-    const fgMap = Object.fromEntries(fgs.map(f => [f.product_id, f]))
     return m.map(x => ({
       ...x,
-      items: its.filter(i => i.mutation_id === x.id).map(i => ({
-        ...i,
-        product_name: fgMap[i.product_id]?.product_name || i.product_name
-      }))
+      items: its.filter(i => i.mutation_id === x.id)
     }))
   }, [])
 
@@ -423,7 +434,8 @@ function KirimTab({ userId }: { userId: string }) {
                           </div>
                         ))}
                         <div className="flex justify-between text-xs font-medium text-gray-600 pt-1 border-t border-gray-50 mt-1">
-                          <span>Total Dikirim</span><span>{totalQty} pcs</span>
+                          <span>Total Dikirim</span>
+                          <span className="font-semibold">{totalQty} pcs</span>
                         </div>
                       </div>
                     )}

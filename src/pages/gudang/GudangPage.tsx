@@ -566,7 +566,7 @@ function MutasiTab({ userId }: { userId: string }) {
                 </div>
               )
             })}
-          </div>}
+          </div>
         </div>
         )
       })}
@@ -589,9 +589,7 @@ function PakaiTab({ userId }: { userId: string }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
-    setToolbar(
-      <GroupSelect value={groupMode} onChange={setGroupMode} />
-    )
+    setToolbar(<GroupSelect value={groupMode} onChange={setGroupMode} />)
     return () => setToolbar(null)
   }, [groupMode])
 
@@ -634,25 +632,41 @@ function PakaiTab({ userId }: { userId: string }) {
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalBulanIni)}</p>
         <p className="text-xs text-gray-400 mt-0.5">ATK, kebersihan, operasional gudang</p>
       </div>
+
       <button onClick={() => setShowForm(true)}
         className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium">
         <Plus size={15} /> Catat Pemakaian
       </button>
+
       <SearchBar value={search} onChange={setSearch} placeholder="Cari nama bahan, keterangan..." />
+
       {grouped.map(({ key, items: grpItems }) => {
         const total = grpItems.reduce((s, u) => s + u.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0)
         const expanded = expandedGroups[key] !== false
         return (
           <div key={key}>
-            <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} total={total} count={grpItems.length}
-              expanded={expanded} onToggle={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))} />
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{display: expanded ? undefined : "none"}}>
+            <GroupHeader
+              label={groupLabel(grpItems[0].created_at, groupMode)}
+              total={total}
+              count={grpItems.length}
+              expanded={expanded}
+              onToggle={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))}
+            />
+            <div
+              className="bg-white rounded-xl border border-gray-100 overflow-hidden"
+              style={{ display: expanded ? undefined : 'none' }}
+            >
               {grpItems.map((u, idx) => (
                 <div key={u.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex items-start justify-between mb-1">
                     <div className="flex-1 min-w-0">
+                      {(u as any).mutation_number && (
+                        <p className="text-xs font-mono text-blue-600 mb-0.5">{(u as any).mutation_number}</p>
+                      )}
                       <p className="text-sm font-medium text-gray-900">{u.notes || 'Pemakaian internal'}</p>
-                      <p className="text-xs text-gray-400">{formatDate(u.created_at)}</p>
+                      <p className="text-xs text-gray-400">
+                        {new Date(u.created_at).toLocaleString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </p>
                     </div>
                     <p className="text-xs font-medium text-gray-600 flex-shrink-0 ml-2">
                       {formatRupiah(u.items.reduce((s, i) => s + i.qty * i.unit_cost, 0))}
@@ -674,15 +688,18 @@ function PakaiTab({ userId }: { userId: string }) {
           </div>
         )
       })}
+
       {filtered.length === 0 && (
         <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">
           {search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada catatan pemakaian'}
         </div>
       )}
+
       {showForm && <PakaiForm userId={userId} onClose={() => setShowForm(false)} />}
     </div>
   )
 }
+
 
 // ── BIAYA ─────────────────────────────────────────────────────
 function BiayaTab({ userId }: { userId: string }) {

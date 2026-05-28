@@ -878,7 +878,7 @@ function MaterialForm({ material, onClose }: { material: Material | null; onClos
         .eq('id', material.id)
       if (error) throw error
       await db.materials.update(material.id, { is_active: false, updated_at: new Date().toISOString() })
-      toast.success('Bahan dinonaktifkan')
+      toast.success(`"${material.name}" disembunyikan dari daftar`)
       onClose()
     } catch (e) {
       console.error('[DELETE]', e)
@@ -907,7 +907,7 @@ function MaterialForm({ material, onClose }: { material: Material | null; onClos
       }
       await db.materials.put(data)
       await supabase.from('materials').upsert(data)
-      toast.success(material ? 'Bahan diperbarui' : 'Bahan ditambahkan')
+      toast.success(material ? `"${name.trim()}" diperbarui` : `"${name.trim()}" ditambahkan`)
       onClose()
     } catch { toast.error('Gagal menyimpan') }
     finally { setSaving(false) }
@@ -975,11 +975,24 @@ function MaterialForm({ material, onClose }: { material: Material | null; onClos
           <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-5.5' : 'left-0.5'}`} />
         </button>
       </div>
+      {material && (
+        <div className="flex items-center justify-between py-2 border-t border-gray-100">
+          <div>
+            <p className="text-sm font-medium text-gray-800">Bahan Aktif</p>
+            <p className="text-xs text-gray-400">Nonaktif = tidak muncul di daftar</p>
+          </div>
+          <button onClick={() => setIsActive(!isActive)}
+            className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
+            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} />
+          </button>
+        </div>
+      )}
+
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         {material && isOwner && (
           <button onClick={handleDelete}
             className="px-4 py-3 rounded-xl border border-red-200 text-sm font-medium text-red-500 active:bg-red-50">
-            Hapus
+            Sembunyikan
           </button>
         )}
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>

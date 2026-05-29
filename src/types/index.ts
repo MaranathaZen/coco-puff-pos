@@ -99,7 +99,7 @@ export interface Recipe {
 }
 
 // ── Transactions ─────────────────────────────────────────────
-export type PaymentMethod = 'cash' | 'qris' | 'transfer'
+export type PaymentMethod = 'cash' | 'qris' | 'transfer' | 'gopay' | 'grab' | 'shopeefood'
 
 export interface Transaction {
   id: string

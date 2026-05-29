@@ -32,16 +32,24 @@ export default function LoginPage() {
     if (!password)        return setError('Password wajib diisi')
     setLoading(true)
     setError('')
+
+    const redirectMap: Record<string, string> = {
+      owner: '/owner', manager: '/owner',
+      gudang: '/stok', produksi: '/stok', kasir: '/kasir',
+    }
+
     try {
       const hash = await sha256(password)
 
-      // Pull from Supabase first
-      const { data: users } = await supabase.from('users').select('*').eq('is_active', true)
-      if (users?.length) await db.users.bulkPut(users)
-      const { data: stores } = await supabase.from('stores').select('*')
-      if (stores?.length) await db.stores.bulkPut(stores)
+      // Sync dari Supabase
+      try {
+        const { data: users } = await supabase.from('users').select('*').eq('is_active', true)
+        if (users?.length) await db.users.bulkPut(users)
+        const { data: stores } = await supabase.from('stores').select('*')
+        if (stores?.length) await db.stores.bulkPut(stores)
+      } catch { /* offline — lanjut dengan data lokal */ }
 
-      // Find matching user
+      // Cari user yang cocok
       const allUsers = await db.users.filter(u => u.is_active).toArray()
       const user = allUsers.find(u =>
         u.username?.toLowerCase() === username.trim().toLowerCase() &&
@@ -56,41 +64,13 @@ export default function LoginPage() {
 
       const store = await db.stores.get(user.store_id)
       login(user, store || null)
+      toast.success(`Selamat datang, ${user.name}!`)
 
-      // Redirect per role
-      const redirectMap: Record<string, string> = {
-        owner:    '/owner',
-        manager:  '/owner',
-        gudang:   '/stok',
-        produksi: '/stok',
-        kasir:    '/kasir',
-      }
-      navigate(redirectMap[user.role] || '/kasir', { replace: true })
-      toast.success(`Selamat datang, ${user.name}`)
+      const dest = redirectMap[user.role] || '/kasir'
+      navigate(dest, { replace: true })
     } catch (e) {
-      console.error(e)
-      // Offline fallback
-      try {
-        const hash = await sha256(password)
-        const allUsers = await db.users.filter(u => u.is_active).toArray()
-        const user = allUsers.find(u =>
-          u.username?.toLowerCase() === username.trim().toLowerCase() &&
-          u.password_hash === hash
-        )
-        if (!user) {
-          setError('Username atau password salah. Pastikan terhubung ke internet untuk login pertama kali.')
-          return
-        }
-        const store = await db.stores.get(user.store_id)
-        login(user, store || null)
-        const redirectMap: Record<string, string> = {
-          owner: '/owner', manager: '/owner',
-          gudang: '/stok', produksi: '/stok', kasir: '/kasir',
-        }
-        navigate(redirectMap[user.role] || '/kasir', { replace: true })
-      } catch {
-        setError('Login gagal. Cek koneksi internet.')
-      }
+      console.error('[LOGIN]', e)
+      setError('Login gagal. Coba lagi.')
     } finally {
       setLoading(false)
     }

@@ -34,6 +34,25 @@ export default function AccountingPage() {
   const isOwnerManager = ['owner','manager'].includes(user?.role || '')
   const [tab, setTab] = useState<Tab>('setoran')
   const [syncing, setSyncing] = useState(false)
+  const [setoranList, setSetoranList] = useState<Setoran[]>([])
+
+  useEffect(() => {
+    async function loadSetoran() {
+      try {
+        const { data } = await supabase.from('setoran').select('*').order('submitted_at', { ascending: false })
+        if (data) {
+          setSetoranList(data)
+          localStorage.setItem('setoran_data', JSON.stringify(data))
+        }
+      } catch {
+        try {
+          const local = JSON.parse(localStorage.getItem('setoran_data') || '[]')
+          setSetoranList(local)
+        } catch {}
+      }
+    }
+    loadSetoran()
+  }, [])
 
   async function syncData() {
     setSyncing(true)
@@ -41,9 +60,8 @@ export default function AccountingPage() {
       const { data, error } = await supabase.from('setoran').select('*').order('submitted_at', { ascending: false })
       if (error) throw error
       if (data) {
+        setSetoranList(data)
         localStorage.setItem('setoran_data', JSON.stringify(data))
-        // Trigger re-render di child via reload
-        window.dispatchEvent(new CustomEvent('setoran-updated'))
       }
       toast.success('Data diperbarui')
     } catch {

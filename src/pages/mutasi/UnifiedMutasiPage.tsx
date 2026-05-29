@@ -52,7 +52,7 @@ const TYPE_CONFIG: Record<string, { label: string; color: string }> = {
   to_store:       { label: 'ke Toko',      color: 'text-green-600 bg-green-50' },
   to_partner:     { label: 'ke Franchise', color: 'text-purple-600 bg-purple-50' },
   internal_use:   { label: 'Pemakaian',    color: 'text-amber-600 bg-amber-50' },
-  adjustment:     { label: 'Retur/Rusak',   color: 'text-red-600 bg-red-50' },
+  adjustment:     { label: 'Retur',   color: 'text-red-600 bg-red-50' },
   opening_stock:  { label: 'Stok Awal',    color: 'text-orange-600 bg-orange-50' },
 }
 
@@ -134,7 +134,11 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
   const [groupMode, setGroupMode] = useState<Period>('hari')
   const [filterType, setFilterType] = useState('semua')
   const [search, setSearch] = useState('')
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
+    // Auto expand hari ini saja
+    const today = new Date().toISOString().slice(0, 10)
+    return { [today]: true }
+  })
 
   useEffect(() => {
     setToolbar(
@@ -316,6 +320,8 @@ function MutasiForm({ userId, role, onClose }: { userId: string; role: string; o
   async function handleSave() {
     const valid = items.filter(i => i.material_id && Number(i.qty) > 0)
     if (!valid.length) return toast.error('Tambahkan minimal 1 item')
+    if (type === 'to_store' && !destId) return toast.error('Pilih toko tujuan')
+    if (type === 'to_partner' && !destId) return toast.error('Pilih franchise tujuan')
     setSaving(true)
     try {
       const destName = type === 'to_production' ? 'Produksi' :
@@ -389,16 +395,16 @@ function MutasiForm({ userId, role, onClose }: { userId: string; role: string; o
       </div>
       {type === 'to_store' && (
         <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Toko Tujuan</label>
-          <select className="input" value={destId} onChange={e => setDest(e.target.value)}>
-            <option value="">Pilih toko</option>
+          <select className={`input ${type === 'to_store' && !destId ? 'border-red-300' : ''}`} value={destId} onChange={e => setDest(e.target.value)}>
+            <option value="">-- Pilih toko *</option>
             {stores?.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
       )}
       {type === 'to_partner' && (
         <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Franchise</label>
-          <select className="input" value={destId} onChange={e => setDest(e.target.value)}>
-            <option value="">Pilih franchise</option>
+          <select className={`input ${type === 'to_partner' && !destId ? 'border-red-300' : ''}`} value={destId} onChange={e => setDest(e.target.value)}>
+            <option value="">-- Pilih franchise *</option>
             {partners?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>

@@ -255,7 +255,11 @@ function CatatProduksiTab({ userId }: { userId: string }) {
   const [showResep, setShowResep]   = useState(false)
   const [editResep, setEditResep]   = useState<any | null>(null)
   const [groupMode, setGroupMode]   = useState<'hari'|'bulan'|'tahun'>('hari')
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
+    // Auto expand hari ini saja
+    const today = new Date().toISOString().slice(0, 10)
+    return { [today]: true }
+  })
 
   useEffect(() => {
     setToolbar(
@@ -413,7 +417,11 @@ function KirimTab({ userId }: { userId: string }) {
   const setToolbar = useContext(ToolbarCtx)
   const [showForm, setShowForm]   = useState(false)
   const [groupMode, setGroupMode] = useState<'hari'|'bulan'|'tahun'>('hari')
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
+    // Auto expand hari ini saja
+    const today = new Date().toISOString().slice(0, 10)
+    return { [today]: true }
+  })
 
   useEffect(() => {
     setToolbar(

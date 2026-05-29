@@ -18,6 +18,10 @@ export default function CloseOrderPage() {
   const [filterStore, setFilterStore] = useState('semua')
   const [syncing, setSyncing] = useState(false)
   const [expandedReports, setExpandedReports] = useState<Record<string, boolean>>({})
+  const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>(() => {
+    const today = new Date().toISOString().slice(0, 10)
+    return { [today]: true }
+  })
 
   async function syncData() {
     setSyncing(true)
@@ -94,6 +98,9 @@ export default function CloseOrderPage() {
   }, [stores, filteredShifts, closeReports, isOwnerManager, user?.store_id, filterStore])
 
   const grandTotal = byStore.reduce((s, b) => s + b.totalOmzet, 0)
+
+  // Group shifts by date for collapse/expand
+  const today = new Date().toISOString().slice(0, 10)
   const periodLabel = { hari: 'Hari Ini', minggu: '7 Hari', bulan: 'Bulan Ini' }
 
   function toggleExpand(id: string) {
@@ -149,7 +156,17 @@ export default function CloseOrderPage() {
           </div>
         )}
 
-        {byStore.map(({ store, shifts: storeShifts, totalOmzet, storeReport }) => (
+        {byStore.map(({ store, shifts: storeShifts, totalOmzet, storeReport }) => {
+          // Group shifts by date
+          const shiftsByDay: Record<string, typeof storeShifts> = {}
+          for (const s of storeShifts) {
+            const day = s.opened_at.slice(0, 10)
+            if (!shiftsByDay[day]) shiftsByDay[day] = []
+            shiftsByDay[day].push(s)
+          }
+          const sortedDays = Object.keys(shiftsByDay).sort((a,b) => b.localeCompare(a))
+
+          return (
           <div key={store.id}>
             {isOwnerManager && (
               <div className="flex items-center justify-between px-1 mb-1.5">
@@ -215,37 +232,59 @@ export default function CloseOrderPage() {
               </div>
             )}
 
-            {/* Shifts */}
+            {/* Shifts grouped by day */}
             {storeShifts.length === 0 ? (
               <div className="bg-white rounded-xl border border-gray-100 p-4 text-center text-sm text-gray-400">
                 Belum ada shift {periodLabel[period].toLowerCase()}
               </div>
-            ) : (
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                {storeShifts.map((shift, idx) => (
-                  <div key={shift.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900">{shift.cashier?.name || 'Kasir'}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {new Date(shift.opened_at).toLocaleDateString('id-ID', { day:'numeric', month:'short' })}, {new Date(shift.opened_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
-                          {shift.closed_at ? ` → ${new Date(shift.closed_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}` : ' · Aktif'}
-                        </p>
-                        <p className="text-xs text-gray-400">{shift.txCount} transaksi</p>
-                      </div>
-                      <div className="text-right flex-shrink-0 ml-2">
-                        <p className="text-sm font-semibold text-gray-900">{formatRupiah(shift.total)}</p>
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${shift.status === 'closed' ? 'bg-green-50 text-green-600' : 'bg-blue-50 text-blue-600'}`}>
-                          {shift.status === 'closed' ? 'Tutup' : 'Aktif'}
-                        </span>
-                      </div>
+            ) : sortedDays.map(day => {
+              const dayShifts = shiftsByDay[day]
+              const dayTotal = dayShifts.reduce((s, sh) => s + sh.total, 0)
+              const isExpanded = expandedDays[`${store.id}-${day}`] !== false && (expandedDays[`${store.id}-${day}`] === true || day === today)
+              const dayLabel = new Date(day).toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' })
+              return (
+                <div key={day} className="mb-2">
+                  <button onClick={() => setExpandedDays(prev => ({ ...prev, [`${store.id}-${day}`]: !isExpanded }))}
+                    className="w-full flex items-center justify-between px-1 py-1.5">
+                    <div className="flex items-center gap-2">
+                      {isExpanded ? <ChevronDown size={13} className="text-gray-400" /> : <ChevronRight size={13} className="text-gray-400" />}
+                      <p className="text-xs font-semibold text-gray-600">{dayLabel}</p>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400">{dayShifts.length} shift</span>
+                      <span className="text-xs font-medium text-gray-700">{formatRupiah(dayTotal)}</span>
+                    </div>
+                  </button>
+                  {isExpanded && (
+                    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                      {dayShifts.map((shift, idx) => (
+                        <div key={shift.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-900">{shift.cashier?.name || 'Kasir'}</p>
+                              <p className="text-xs text-gray-400 mt-0.5">
+                                {new Date(shift.opened_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
+                                {shift.closed_at ? ` → ${new Date(shift.closed_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}` : ' · Aktif'}
+                              </p>
+                              <p className="text-xs text-gray-400">{shift.txCount} transaksi</p>
+                            </div>
+                            <div className="text-right flex-shrink-0 ml-2">
+                              <p className="text-sm font-semibold text-gray-900">{formatRupiah(shift.total)}</p>
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${shift.status === 'closed' ? 'bg-green-50 text-green-600' : 'bg-blue-50 text-blue-600'}`}>
+                                {shift.status === 'closed' ? 'Tutup' : 'Aktif'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
-        ))}
+          )
+        })}
 
         {byStore.length === 0 && (
           <div className="bg-white rounded-xl border border-gray-100 py-16 text-center">

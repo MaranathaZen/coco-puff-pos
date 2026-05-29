@@ -323,19 +323,29 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
     const pMap     = Object.fromEntries(prods.map(p => [p.id, p]))
     const cats     = await db.categories.toArray()
     const cMap     = Object.fromEntries(cats.map(c => [c.id, c]))
-    // ingredient_id bisa berisi product_id atau material_id
     const mats     = await db.materials.toArray()
     const mMap     = Object.fromEntries(mats.map(m => [m.id, m]))
-    return stocks.map(s => {
+
+    // Gabungkan stok bahan toko + produk jadi yang dikirim dari produksi
+    const items = stocks.map(s => {
       const prod = pMap[s.ingredient_id || '']
       const mat  = mMap[s.ingredient_id || '']
+      const isProduk = !!prod
       return {
-        ...s,
-        displayName: prod?.name || mat?.name || s.ingredient_id || '-',
+        id: s.id,
+        ingredient_id: s.ingredient_id,
+        qty_on_hand: s.qty_on_hand,
+        displayName: prod?.name || mat?.name || s.ingredient_id?.slice(0,8) || '-',
         displayUnit: mat?.unit || 'pcs',
-        categoryName: prod ? cMap[prod.category_id || '']?.name || '' : mat?.category || '',
+        categoryName: isProduk
+          ? (cMap[prod!.category_id || '']?.name || 'Produk')
+          : (mat?.category || ''),
+        isProduk,
+        isValidItem: !!(prod?.name || mat?.name),
       }
-    })
+    }).filter(s => s.isValidItem)  // filter yang tidak dikenal
+
+    return items
   }, [activeStoreId])
 
   const filtered = (data || []).filter(s => {
@@ -344,7 +354,9 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
       ? true
       : filterTokoKat === 'stok_habis'
         ? s.qty_on_hand <= 0
-        : s.categoryName?.toLowerCase().includes(filterTokoKat.replace('_',' ')) || false
+        : filterTokoKat === 'produk_jadi'
+          ? s.isProduk
+          : s.categoryName?.toLowerCase().includes(filterTokoKat.replace('_',' ')) || false
     return matchSearch && matchKat
   })
 
@@ -366,7 +378,8 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {[
           { k: 'semua',             l: 'Semua' },
-          { k: 'stok_habis',        l: 'Habis' },
+          { k: 'stok_habis',        l: '⚠ Habis' },
+          { k: 'produk_jadi',       l: 'Produk Jadi' },
           { k: 'bahan_baku',        l: 'Bahan Baku' },
           { k: 'bahan_setengah_jadi', l: 'Setengah Jadi' },
           { k: 'packaging',         l: 'Packaging' },
@@ -388,9 +401,12 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
           <div key={s.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900">{s.displayName}</p>
-              {s.categoryName && <p className="text-xs text-gray-400">{s.categoryName}</p>}
+              <div className="flex items-center gap-1.5 mt-0.5">
+                {s.isProduk && <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-medium">Produk Jadi</span>}
+                {s.categoryName && !s.isProduk && <p className="text-xs text-gray-400">{s.categoryName}</p>}
+              </div>
             </div>
-            <p className="text-sm font-semibold text-gray-900">
+            <p className={`text-sm font-semibold ${s.qty_on_hand <= 0 ? 'text-red-500' : 'text-gray-900'}`}>
               {s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.displayUnit}</span>
             </p>
           </div>

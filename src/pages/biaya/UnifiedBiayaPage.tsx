@@ -119,7 +119,11 @@ function BiayaList({ userId, role }: { userId: string; role: string }) {
   const [groupMode, setGroupMode] = useState<Period>('hari')
   const [filterCat, setFilterCat] = useState('semua')
   const [search, setSearch] = useState('')
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
+    // Auto expand hari ini saja
+    const today = new Date().toISOString().slice(0, 10)
+    return { [today]: true }
+  })
 
   useEffect(() => {
     setToolbar(

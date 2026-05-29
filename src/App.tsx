@@ -16,6 +16,7 @@ import GudangPage           from '@/pages/gudang/GudangPage'
 import ProduksiPage         from '@/pages/produksi/ProduksiPage'
 import LaporanGudangPage    from '@/pages/laporan/LaporanGudangPage'
 import EndOfDayPage         from '@/pages/cashier/EndOfDayPage'
+import CloseOrderPage       from '@/pages/cashier/CloseOrderPage'
 import ResepPage            from '@/pages/resep/ResepPage'
 import UnifiedStokPage      from '@/pages/stok/UnifiedStokPage'
 import UnifiedPembelianPage from '@/pages/pembelian/UnifiedPembelianPage'
@@ -105,7 +106,7 @@ export default function App() {
           {/* Halaman utama per role */}
           <Route path="owner"         element={<RequireRole roles={['owner','manager']}><OwnerPage /></RequireRole>} />
           <Route path="kasir"         element={<CashierPage />} />
-          <Route path="tutup-toko"    element={<EndOfDayPage />} />
+          <Route path="tutup-toko"    element={<CloseOrderAllPage />} />
 
           {/* Unified pages — akses per role dikontrol di dalam komponen */}
           <Route path="stok"          element={<UnifiedStokPage />} />
@@ -130,6 +131,16 @@ export default function App() {
       </Routes>
     </>
   )
+}
+
+
+function CloseOrderAllPage() {
+  const { user } = useAuthStore()
+  const isOwnerManager = ['owner','manager','gudang','produksi'].includes(user?.role || '')
+  // Owner/manager/gudang/produksi → view semua toko
+  // Kasir → EndOfDay untuk toko sendiri
+  if (!isOwnerManager) return <EndOfDayPage />
+  return <CloseOrderPage />
 }
 
 function RoleRedirect() {

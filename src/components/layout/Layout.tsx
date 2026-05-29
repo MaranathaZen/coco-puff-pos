@@ -88,7 +88,7 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
   ],
 }
 
-const MAX_NAV = 5
+const MAX_NAV = 4  // Slot ke-5 selalu untuk 'Lainnya'
 
 export default function Layout() {
   const { user, logout } = useAuthStore()
@@ -125,7 +125,7 @@ export default function Layout() {
 
   const navMenus  = allMenus.slice(0, MAX_NAV)
   const moreMenus = allMenus.slice(MAX_NAV)
-  const hasMore   = moreMenus.length > 0
+  const hasMore   = true  // Selalu tampilkan Lainnya untuk logout
 
   const isMoreActive = moreMenus.some(m => location.pathname.startsWith(m.menu_path))
 

@@ -323,6 +323,25 @@ function MutasiForm({ userId, role, onClose }: { userId: string; role: string; o
           await db.production_stock.put(psd)
           await supabase.from('production_stock').upsert(psd)
         }
+
+        // to_store: tambah ke stock toko (tabel stock, bukan warehouse_stock)
+        if (type === 'to_store' && destId) {
+          // stock toko menggunakan ingredient_id sebagai foreign key ke bahan
+          // Cari apakah sudah ada stock record untuk bahan ini di toko tujuan
+          const storeStock = await db.stock
+            .where('[store_id+ingredient_id]')
+            .equals([destId, item.material_id])
+            .first()
+          const stockData: any = {
+            id: storeStock?.id || generateId(),
+            store_id: destId,
+            ingredient_id: item.material_id,
+            qty_on_hand: (storeStock?.qty_on_hand || 0) + Number(item.qty),
+            last_updated: now(),
+          }
+          await db.stock.put(stockData)
+          await supabase.from('stock').upsert(stockData)
+        }
       }
       toast.success('Mutasi dicatat')
       onClose()

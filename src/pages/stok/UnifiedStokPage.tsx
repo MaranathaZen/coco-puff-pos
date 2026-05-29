@@ -111,6 +111,16 @@ function StokGudangView() {
     packaging: 'Packaging', non_produksi: 'Non-Produksi',
   }
 
+  const [search, setSearch] = useState('')
+  const [filterKat, setFilterKat] = useState('semua')
+
+  const allItems = data?.items || []
+  const filteredItems = allItems.filter(item => {
+    const matchSearch = !search || item.name.toLowerCase().includes(search.toLowerCase())
+    const matchKat = filterKat === 'semua' || item.category === filterKat
+    return matchSearch && matchKat
+  })
+
   return (
     <div className="p-4 space-y-3">
       {/* Summary */}
@@ -136,28 +146,45 @@ function StokGudangView() {
         )}
       </div>
 
-      {/* Per kategori */}
-      {data && Object.entries(data.grouped).map(([kat, items]) => (
-        <div key={kat}>
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">{katLabel[kat] || kat}</p>
-          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            {items.sort((a,b) => b.nilai - a.nilai).map((item, idx) => (
-              <div key={item.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${item.qty <= item.min_stock && item.min_stock > 0 ? 'bg-red-50/30' : ''}`}>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
-                  <p className="text-xs text-gray-400">Avg {formatRupiah(item.unit_cost || 0)}/{item.unit}</p>
-                </div>
-                <div className="text-right flex-shrink-0">
-                  <p className={`text-sm font-semibold ${item.qty <= item.min_stock && item.min_stock > 0 ? 'text-red-600' : 'text-gray-900'}`}>
-                    {item.qty} <span className="text-xs font-normal text-gray-400">{item.unit}</span>
-                  </p>
-                  <p className="text-xs text-gray-400">{formatRupiah(item.nilai)}</p>
-                </div>
-              </div>
-            ))}
+      {/* Search */}
+      <input value={search} onChange={e => setSearch(e.target.value)}
+        className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
+        placeholder="Cari nama bahan..." />
+
+      {/* Filter pills */}
+      <div className="flex gap-1.5 overflow-x-auto pb-1">
+        {['semua', 'bahan_baku', 'bahan_setengah_jadi', 'packaging', 'non_produksi'].map(k => (
+          <button key={k} onClick={() => setFilterKat(k)}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+              filterKat === k ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'
+            }`}>
+            {k === 'semua' ? 'Semua' : katLabel[k] || k}
+          </button>
+        ))}
+      </div>
+
+      {/* Semua bahan dalam satu list (flat, difilter) */}
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        {filteredItems.sort((a,b) => b.nilai - a.nilai).map((item, idx) => (
+          <div key={item.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${item.qty <= item.min_stock && item.min_stock > 0 ? 'bg-red-50/30' : ''}`}>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
+              <p className="text-xs text-gray-400">{katLabel[item.category] || item.category} · Avg {formatRupiah(item.unit_cost || 0)}/{item.unit}</p>
+            </div>
+            <div className="text-right flex-shrink-0">
+              <p className={`text-sm font-semibold ${item.qty <= item.min_stock && item.min_stock > 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                {item.qty} <span className="text-xs font-normal text-gray-400">{item.unit}</span>
+              </p>
+              <p className="text-xs text-gray-400">{formatRupiah(item.nilai)}</p>
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+        {filteredItems.length === 0 && (
+          <div className="py-10 text-center text-sm text-gray-400">
+            {search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada stok'}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -60,7 +60,7 @@ function GroupSelect({ value, onChange }: { value: 'hari'|'bulan'|'tahun'; onCha
 // Context untuk toolbar
 const ToolbarCtx = createContext<(node: React.ReactNode) => void>(() => {})
 
-type Tab = 'stok' | 'produksi' | 'kirim'
+type Tab = 'produksi'
 
 // Produk setengah jadi (hasil produksi, bukan produk menu kasir)
 // Ini yang diproduksi oleh tim produksi: Puff kosong, Fla, dll

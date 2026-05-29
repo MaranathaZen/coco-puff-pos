@@ -492,7 +492,7 @@ export default function CashierPage() {
                   <button key={m} onClick={() => setPayMethod(m)}
                     className={cn('py-2 rounded-xl text-sm font-medium border capitalize',
                       payMethod === m ? 'bg-brand-600 text-white border-brand-600' : 'border-gray-200 text-gray-700')}>
-                    {m === 'cash' ? 'Tunai' : m === 'qris' ? 'QRIS' : 'Transfer'}
+                    {m === 'cash' ? 'Tunai' : m === 'qris' ? 'QRIS' : m === 'transfer' ? 'Transfer' : m === 'gopay' ? 'GoPay' : m === 'grab' ? 'Grab' : 'Shopee'}
                   </button>
                 ))}
               </div>

@@ -5,112 +5,108 @@ import { useAuthStore } from '@/store/auth'
 import { db } from '@/lib/db'
 import {
   LogOut, Wifi, WifiOff,
-  ShoppingCart, Warehouse, FlaskConical,
+  ShoppingCart, FlaskConical,
   BarChart3, LayoutDashboard, Settings,
   MoreHorizontal, X, Receipt, ArrowRightLeft,
-  Package, BookOpen, Calculator
+  Package, BookOpen,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
-// ── Menu per role sesuai gambar ───────────────────────────────
-// Owner/Manager: Dashboard · Stok · Pembelian · Mutasi · Biaya · Close Order · Setting · Resep · Produk · Accounting
-// Gudang:        Dashboard · Stok · Pembelian · Mutasi · Biaya · Close Order
-// Produksi:      Dashboard · Stok · Pembelian · Mutasi · Biaya · Close Order
-// Kasir:         Dashboard · Stok · Pembelian · Mutasi · Biaya · Close Order
-
+// ── Icon map ───────────────────────────────────────────────────
 const ICON_MAP: Record<string, LucideIcon> = {
-  '/owner':         LayoutDashboard,
-  '/stok':          Package,
-  '/pembelian':     ShoppingCart,
-  '/mutasi':        ArrowRightLeft,
-  '/biaya':         Receipt,
-  '/kasir':         ShoppingCart,
-  '/tutup-toko':    BarChart3,
-  '/laporan':       BarChart3,
-  '/laporan-gudang':BarChart3,
-  '/pengaturan':    Settings,
-  '/resep':         FlaskConical,
-  '/produk':        Package,
-  '/accounting':    Calculator,
-  '/gudang':        Warehouse,
-  '/produksi':      FlaskConical,
+  '/owner':          LayoutDashboard,
+  '/stok':           Package,
+  '/pembelian':      ShoppingCart,
+  '/mutasi':         ArrowRightLeft,
+  '/biaya':          Receipt,
+  '/kasir':          ShoppingCart,
+  '/tutup-toko':     BarChart3,
+  '/laporan':        BarChart3,
+  '/laporan-gudang': BarChart3,
+  '/pengaturan':     Settings,
+  '/resep':          FlaskConical,
+  '/produk':         Package,
+  '/produksi':       FlaskConical,
 }
 
+// ── Menu definitions ───────────────────────────────────────────
+// Accounting dihapus dari semua role sampai fitur siap.
+// "Kirim" diganti "Mutasi" di semua role.
 const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
   owner: [
-    { path: '/owner',          label: 'Dashboard' },
-    { path: '/stok',           label: 'Stok' },
-    { path: '/pembelian',      label: 'Pembelian' },
-    { path: '/mutasi',         label: 'Kirim' },
-    { path: '/biaya',          label: 'Biaya' },
-    { path: '/kasir',          label: 'Kasir' },
+    { path: '/owner',          label: 'Dashboard'   },
+    { path: '/stok',           label: 'Stok'        },
+    { path: '/pembelian',      label: 'Pembelian'   },
+    { path: '/mutasi',         label: 'Mutasi'      },
+    { path: '/biaya',          label: 'Biaya'       },
+    { path: '/kasir',          label: 'Kasir'       },
     { path: '/tutup-toko',     label: 'Close Order' },
-    { path: '/resep',          label: 'Resep' },
-    { path: '/produk',         label: 'Produk' },
-    { path: '/pengaturan',     label: 'Setting' },
-    { path: '/accounting',     label: 'Accounting' },
-    { path: '/laporan',        label: 'Laporan' },
+    { path: '/resep',          label: 'Resep'       },
+    { path: '/produk',         label: 'Produk'      },
+    { path: '/pengaturan',     label: 'Setting'     },
+    { path: '/laporan',        label: 'Laporan'     },
     { path: '/laporan-gudang', label: 'Lap. Gudang' },
   ],
   manager: [
-    { path: '/owner',          label: 'Dashboard' },
-    { path: '/stok',           label: 'Stok' },
-    { path: '/pembelian',      label: 'Pembelian' },
-    { path: '/mutasi',         label: 'Kirim' },
-    { path: '/biaya',          label: 'Biaya' },
-    { path: '/kasir',          label: 'Kasir' },
+    { path: '/owner',          label: 'Dashboard'   },
+    { path: '/stok',           label: 'Stok'        },
+    { path: '/pembelian',      label: 'Pembelian'   },
+    { path: '/mutasi',         label: 'Mutasi'      },
+    { path: '/biaya',          label: 'Biaya'       },
+    { path: '/kasir',          label: 'Kasir'       },
     { path: '/tutup-toko',     label: 'Close Order' },
-    { path: '/resep',          label: 'Resep' },
-    { path: '/pengaturan',     label: 'Setting' },
-    { path: '/laporan',        label: 'Laporan' },
+    { path: '/resep',          label: 'Resep'       },
+    { path: '/pengaturan',     label: 'Setting'     },
+    { path: '/laporan',        label: 'Laporan'     },
   ],
   gudang: [
-    { path: '/stok',           label: 'Stok' },
-    { path: '/pembelian',      label: 'Pembelian' },
-    { path: '/mutasi',         label: 'Kirim' },
-    { path: '/biaya',          label: 'Biaya' },
+    { path: '/stok',           label: 'Stok'        },
+    { path: '/pembelian',      label: 'Pembelian'   },
+    { path: '/mutasi',         label: 'Mutasi'      },
+    { path: '/biaya',          label: 'Biaya'       },
     { path: '/tutup-toko',     label: 'Close Order' },
-    { path: '/accounting',     label: 'Accounting' },
+    // Accounting dihapus dari gudang
   ],
   produksi: [
-    { path: '/stok',           label: 'Stok' },
-    { path: '/produksi',       label: 'Produksi' },
-    { path: '/mutasi',         label: 'Kirim' },
-    { path: '/biaya',          label: 'Biaya' },
+    { path: '/stok',           label: 'Stok'        },
+    { path: '/produksi',       label: 'Produksi'    },
+    { path: '/mutasi',         label: 'Mutasi'      },
+    { path: '/biaya',          label: 'Biaya'       },
   ],
   kasir: [
-    { path: '/kasir',          label: 'Kasir' },
-    { path: '/stok',           label: 'Stok' },
-    { path: '/pembelian',      label: 'Pembelian' },
-    { path: '/mutasi',         label: 'Kirim' },
-    { path: '/biaya',          label: 'Biaya' },
+    { path: '/kasir',          label: 'Kasir'       },
+    { path: '/stok',           label: 'Stok'        },
+    { path: '/pembelian',      label: 'Pembelian'   },
+    { path: '/mutasi',         label: 'Mutasi'      },
+    { path: '/biaya',          label: 'Biaya'       },
     { path: '/tutup-toko',     label: 'Close Order' },
-    { path: '/accounting',     label: 'Accounting' },
+    // Accounting dihapus dari kasir
   ],
 }
 
-const MAX_NAV = 4  // Slot ke-5 selalu untuk 'Lainnya'
+const MAX_NAV = 4  // Slot ke-5 selalu 'Lainnya'
 
 export default function Layout() {
   const { user, logout } = useAuthStore()
-  const navigate = useNavigate()
-  const location = useLocation()
+  const navigate  = useNavigate()
+  const location  = useLocation()
   const [showMore, setShowMore] = useState(false)
   const [isOnline, setIsOnline] = useState(navigator.onLine)
 
   useEffect(() => {
     const up = () => setIsOnline(true)
     const dn = () => setIsOnline(false)
-    window.addEventListener('online', up)
+    window.addEventListener('online',  up)
     window.addEventListener('offline', dn)
-    return () => { window.removeEventListener('online', up); window.removeEventListener('offline', dn) }
+    return () => {
+      window.removeEventListener('online',  up)
+      window.removeEventListener('offline', dn)
+    }
   }, [])
 
   const dbMenus = useLiveQuery(async () => {
     if (!user?.role) return []
-    const configs = await db.menu_role_config
-      .where('role').equals(user.role).toArray()
-    return configs
+    return db.menu_role_config.where('role').equals(user.role).toArray()
   }, [user?.role])
 
   const allMenus = (() => {
@@ -126,8 +122,6 @@ export default function Layout() {
 
   const navMenus  = allMenus.slice(0, MAX_NAV)
   const moreMenus = allMenus.slice(MAX_NAV)
-  const hasMore   = true  // Selalu tampilkan Lainnya untuk logout
-
   const isMoreActive = moreMenus.some(m => location.pathname.startsWith(m.menu_path))
 
   function handleLogout() {
@@ -138,6 +132,7 @@ export default function Layout() {
 
   return (
     <div className="flex flex-col h-[100dvh] bg-gray-50 max-w-lg mx-auto">
+
       {/* Offline banner */}
       {!isOnline && (
         <div className="bg-amber-500 text-white text-xs text-center py-1 px-3 flex items-center justify-center gap-1.5 flex-shrink-0">
@@ -156,7 +151,8 @@ export default function Layout() {
         <div className="flex">
           {navMenus.map(menu => {
             const Icon = ICON_MAP[menu.menu_path] || Package
-            const isActive = location.pathname === menu.menu_path || location.pathname.startsWith(menu.menu_path + '/')
+            const isActive = location.pathname === menu.menu_path ||
+              location.pathname.startsWith(menu.menu_path + '/')
             return (
               <NavLink key={menu.menu_path} to={menu.menu_path}
                 className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${
@@ -168,15 +164,15 @@ export default function Layout() {
             )
           })}
 
-          {hasMore && (
-            <button onClick={() => setShowMore(true)}
-              className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${
-                isMoreActive ? 'text-gray-900' : 'text-gray-400'
-              }`}>
-              <MoreHorizontal size={20} strokeWidth={isMoreActive ? 2 : 1.5} />
-              <span>Lainnya</span>
-            </button>
-          )}
+          {/* Lainnya — selalu tampil untuk logout */}
+          <button
+            onClick={() => setShowMore(true)}
+            className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${
+              isMoreActive ? 'text-gray-900' : 'text-gray-400'
+            }`}>
+            <MoreHorizontal size={20} strokeWidth={isMoreActive ? 2 : 1.5} />
+            <span>Lainnya</span>
+          </button>
         </div>
       </div>
 
@@ -184,7 +180,10 @@ export default function Layout() {
       {showMore && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end" onClick={() => setShowMore(false)}>
           <div className="absolute inset-0 bg-black/40" />
-          <div className="relative bg-white rounded-t-2xl p-4 pb-8 max-w-lg mx-auto w-full" onClick={e => e.stopPropagation()}>
+          <div
+            className="relative bg-white rounded-t-2xl p-4 pb-8 max-w-lg mx-auto w-full"
+            onClick={e => e.stopPropagation()}>
+
             <div className="flex items-center justify-between mb-4">
               <div>
                 <p className="text-sm font-semibold text-gray-900">{user?.name}</p>
@@ -200,22 +199,26 @@ export default function Layout() {
               </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-2 mb-4">
-              {moreMenus.map(menu => {
-                const Icon = ICON_MAP[menu.menu_path] || Package
-                const isActive = location.pathname.startsWith(menu.menu_path)
-                return (
-                  <NavLink key={menu.menu_path} to={menu.menu_path}
-                    onClick={() => setShowMore(false)}
-                    className={`flex flex-col items-center gap-1.5 p-3 rounded-xl transition-colors ${
-                      isActive ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-600 active:bg-gray-100'
-                    }`}>
-                    <Icon size={22} />
-                    <span className="text-[10px] font-medium text-center leading-tight">{menu.menu_label}</span>
-                  </NavLink>
-                )
-              })}
-            </div>
+            {moreMenus.length > 0 && (
+              <div className="grid grid-cols-4 gap-2 mb-4">
+                {moreMenus.map(menu => {
+                  const Icon = ICON_MAP[menu.menu_path] || Package
+                  const isActive = location.pathname.startsWith(menu.menu_path)
+                  return (
+                    <NavLink key={menu.menu_path} to={menu.menu_path}
+                      onClick={() => setShowMore(false)}
+                      className={`flex flex-col items-center gap-1.5 p-3 rounded-xl transition-colors ${
+                        isActive ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-600 active:bg-gray-100'
+                      }`}>
+                      <Icon size={22} />
+                      <span className="text-[10px] font-medium text-center leading-tight">
+                        {menu.menu_label}
+                      </span>
+                    </NavLink>
+                  )
+                })}
+              </div>
+            )}
 
             <button onClick={handleLogout}
               className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-gray-200 text-sm font-medium text-red-500 active:bg-red-50">

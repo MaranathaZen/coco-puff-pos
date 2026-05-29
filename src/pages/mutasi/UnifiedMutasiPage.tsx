@@ -52,7 +52,7 @@ const TYPE_CONFIG: Record<string, { label: string; color: string }> = {
   to_store:       { label: 'ke Toko',      color: 'text-green-600 bg-green-50' },
   to_partner:     { label: 'ke Franchise', color: 'text-purple-600 bg-purple-50' },
   internal_use:   { label: 'Pemakaian',    color: 'text-amber-600 bg-amber-50' },
-  adjustment:     { label: 'Retur',        color: 'text-red-600 bg-red-50' },
+  adjustment:     { label: 'Retur/Rusak',   color: 'text-red-600 bg-red-50' },
   opening_stock:  { label: 'Stok Awal',    color: 'text-orange-600 bg-orange-50' },
 }
 
@@ -63,6 +63,24 @@ const ROLE_TYPES: Record<string, string[]> = {
   gudang:   ['to_production','to_store','to_partner','internal_use','adjustment'],
   produksi: ['to_store','to_partner','internal_use','adjustment'],
   kasir:    ['to_store','internal_use','adjustment'],
+}
+
+
+function CopyBtn({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  function handleCopy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+  return (
+    <button onClick={handleCopy}
+      className="inline-flex items-center gap-0.5 text-[10px] text-blue-400 hover:text-blue-600 ml-1 align-middle"
+      title="Copy ID">
+      {copied ? '✓' : '⧉'}
+    </button>
+  )
 }
 
 export default function UnifiedMutasiPage() {
@@ -234,7 +252,7 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
                   <div key={m.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                     <div className="flex items-start justify-between mb-1">
                       <div className="flex-1 min-w-0">
-                        {(m as any).mutation_number && <p className="text-xs font-mono text-blue-600 mb-0.5">{(m as any).mutation_number}</p>}
+                        {(m as any).mutation_number && <p className="text-xs font-mono text-blue-600 mb-0.5">{(m as any).mutation_number}<CopyBtn text={(m as any).mutation_number} /></p>}
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tc.color}`}>{tc.label}</span>
                           {m.destination_name && <span className="text-xs text-gray-700 font-medium">{m.destination_name}</span>}
@@ -321,15 +339,10 @@ function MutasiForm({ userId, role, onClose }: { userId: string; role: string; o
 
         const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
         if (ws) {
-          const newQty = type === 'adjustment'
-            ? ws.qty_on_hand + Number(item.qty)
-            : Math.max(0, ws.qty_on_hand - Number(item.qty))
+          // Semua tipe mutasi mengurangi stok (retur = bahan rusak/hilang = kurang)
+          const newQty = Math.max(0, ws.qty_on_hand - Number(item.qty))
           await db.warehouse_stock.update(ws.id, { qty_on_hand: newQty, last_updated: now() })
           await supabase.from('warehouse_stock').update({ qty_on_hand: newQty }).eq('id', ws.id)
-        } else if (type === 'adjustment') {
-          const wsd: WarehouseStock = { id: generateId(), material_id: item.material_id, qty_on_hand: Number(item.qty), last_updated: now() }
-          await db.warehouse_stock.add(wsd)
-          await supabase.from('warehouse_stock').insert(wsd)
         }
 
         if (type === 'to_production') {

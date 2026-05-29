@@ -66,6 +66,24 @@ type Tab = 'produksi'
 // Ini yang diproduksi oleh tim produksi: Puff kosong, Fla, dll
 const PRODUK_SETENGAH_JADI_KATEGORI = ['bahan_setengah_jadi']
 
+
+function CopyBtn({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  function handleCopy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+  return (
+    <button onClick={handleCopy}
+      className="inline-flex items-center gap-0.5 text-[10px] text-blue-400 hover:text-blue-600 ml-1 align-middle"
+      title="Copy ID">
+      {copied ? '✓' : '⧉'}
+    </button>
+  )
+}
+
 export default function ProduksiPage() {
   const { user } = useAuthStore()
   const [tab, setTab] = useState<Tab>('produksi')

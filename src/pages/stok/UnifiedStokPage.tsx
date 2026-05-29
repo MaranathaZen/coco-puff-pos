@@ -117,7 +117,11 @@ function StokGudangView() {
   const allItems = data?.items || []
   const filteredItems = allItems.filter(item => {
     const matchSearch = !search || item.name.toLowerCase().includes(search.toLowerCase())
-    const matchKat = filterKat === 'semua' || item.category === filterKat
+    const matchKat = filterKat === 'semua'
+      ? true
+      : filterKat === 'stok_rendah'
+        ? item.qty <= item.min_stock && item.min_stock > 0
+        : item.category === filterKat
     return matchSearch && matchKat
   })
 
@@ -153,12 +157,14 @@ function StokGudangView() {
 
       {/* Filter pills */}
       <div className="flex gap-1.5 overflow-x-auto pb-1">
-        {['semua', 'bahan_baku', 'bahan_setengah_jadi', 'packaging', 'non_produksi'].map(k => (
+        {['semua', 'stok_rendah', 'bahan_baku', 'bahan_setengah_jadi', 'packaging', 'non_produksi'].map(k => (
           <button key={k} onClick={() => setFilterKat(k)}
             className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-              filterKat === k ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'
+              filterKat === k
+                ? k === 'stok_rendah' ? 'bg-red-600 text-white' : 'bg-gray-900 text-white'
+                : k === 'stok_rendah' ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-white text-gray-600 border border-gray-200'
             }`}>
-            {k === 'semua' ? 'Semua' : katLabel[k] || k}
+            {k === 'semua' ? 'Semua' : k === 'stok_rendah' ? `⚠ Stok Rendah (${data?.lowStock?.length || 0})` : katLabel[k] || k}
           </button>
         ))}
       </div>
@@ -302,6 +308,7 @@ function StokProduksiView() {
 // ── STOK TOKO ─────────────────────────────────────────────────
 function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
   const [search, setSearch] = useState('')
+  const [filterTokoKat, setFilterTokoKat] = useState('semua')
   const canSeeAllStores = ['owner','manager','gudang','produksi'].includes(role)
 
   const stores = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
@@ -331,9 +338,15 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
     })
   }, [activeStoreId])
 
-  const filtered = (data || []).filter(s =>
-    !search || s.displayName.toLowerCase().includes(search.toLowerCase())
-  )
+  const filtered = (data || []).filter(s => {
+    const matchSearch = !search || s.displayName.toLowerCase().includes(search.toLowerCase())
+    const matchKat = filterTokoKat === 'semua'
+      ? true
+      : filterTokoKat === 'stok_habis'
+        ? s.qty_on_hand <= 0
+        : s.categoryName?.toLowerCase().includes(filterTokoKat.replace('_',' ')) || false
+    return matchSearch && matchKat
+  })
 
   return (
     <div className="p-4 space-y-3">
@@ -348,6 +361,23 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
           ))}
         </div>
       )}
+
+      {/* Filter pills toko */}
+      <div className="flex gap-1.5 overflow-x-auto pb-1">
+        {[
+          { k: 'semua',             l: 'Semua' },
+          { k: 'stok_habis',        l: 'Habis' },
+          { k: 'bahan_baku',        l: 'Bahan Baku' },
+          { k: 'bahan_setengah_jadi', l: 'Setengah Jadi' },
+          { k: 'packaging',         l: 'Packaging' },
+          { k: 'non_produksi',      l: 'Non-Produksi' },
+        ].map(({ k, l }) => (
+          <button key={k} onClick={() => setFilterTokoKat(k)}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+              filterTokoKat === k ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'
+            }`}>{l}</button>
+        ))}
+      </div>
 
       <input value={search} onChange={e => setSearch(e.target.value)}
         className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"

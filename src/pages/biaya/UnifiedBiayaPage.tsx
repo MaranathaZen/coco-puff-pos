@@ -61,6 +61,23 @@ function Modal({ title, onClose, children }: any) {
   )
 }
 
+function CopyBtn({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  function handleCopy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+  return (
+    <button onClick={handleCopy}
+      className="inline-flex items-center gap-0.5 text-[10px] text-blue-400 hover:text-blue-600 ml-1 align-middle"
+      title="Copy ID">
+      {copied ? '✓' : '⧉'}
+    </button>
+  )
+}
+
 export default function UnifiedBiayaPage() {
   const { user } = useAuthStore()
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
@@ -136,7 +153,12 @@ function BiayaList({ userId, role }: { userId: string; role: string }) {
     if (filterCat !== 'semua') list = list.filter(e => e.category === filterCat)
     if (search) {
       const q = search.toLowerCase()
-      list = list.filter(e => e.name.toLowerCase().includes(q) || (e as any).expense_number?.toLowerCase().includes(q))
+      list = list.filter(e =>
+        e.name.toLowerCase().includes(q) ||
+        (e as any).expense_number?.toLowerCase().includes(q) ||
+        e.notes?.toLowerCase().includes(q) ||
+        (e as any).payment_method?.toLowerCase().includes(q)
+      )
     }
     return list
   }, [expenses, filterCat, search])
@@ -194,7 +216,7 @@ function BiayaList({ userId, role }: { userId: string; role: string }) {
               {grpItems.map((e, idx) => (
                 <div key={e.id} className={`flex items-start justify-between px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex-1 min-w-0">
-                    {(e as any).expense_number && <p className="text-xs font-mono text-blue-600 mb-0.5">{(e as any).expense_number}</p>}
+                    {(e as any).expense_number && <p className="text-xs font-mono text-blue-600 mb-0.5">{(e as any).expense_number}<CopyBtn text={(e as any).expense_number} /></p>}
                     <p className="text-sm font-medium text-gray-900 truncate">{e.name}</p>
                     <p className="text-xs text-gray-400 mt-0.5">
                       {KATEGORI_BIAYA.find(k => k.value === e.category)?.label || e.category}
@@ -202,6 +224,7 @@ function BiayaList({ userId, role }: { userId: string; role: string }) {
                       {(e as any).payment_method ? ` · ${(e as any).payment_method}` : ''}
                       {(e as any).transfer_to ? ` → ${(e as any).transfer_to}` : ''}
                     </p>
+                    {e.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {e.notes}</p>}
                   </div>
                   <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(e.amount)}</p>
                 </div>

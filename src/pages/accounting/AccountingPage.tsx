@@ -103,6 +103,8 @@ export default function AccountingPage() {
 function SetoranTab({ userId, storeId, isOwnerManager }: { userId: string; storeId: string; isOwnerManager: boolean }) {
   const [showForm, setShowForm] = useState(false)
   const [filterStatus, setFilterStatus] = useState<'all' | SetoranStatus>('all')
+  const [search, setSearch] = useState('')
+  const [filterStore, setFilterStore] = useState('semua')
 
   const [setoranList, setSetoranList] = useState<Setoran[]>([])
   const [loaded, setLoaded] = useState(false)
@@ -127,14 +129,24 @@ function SetoranTab({ userId, storeId, isOwnerManager }: { userId: string; store
     loadData()
   }, [])
 
-  const stores = useLiveQuery(() => db.stores.toArray(), [])
+  const stores = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
   const storeMap = Object.fromEntries((stores || []).map(s => [s.id, s.name]))
 
   const filtered = useMemo(() => {
     let list = isOwnerManager ? setoranList : setoranList.filter(s => s.store_id === storeId)
     if (filterStatus !== 'all') list = list.filter(s => s.status === filterStatus)
+    if (filterStore !== 'semua') list = list.filter(s => s.store_id === filterStore)
+    if (search) {
+      const q = search.toLowerCase()
+      list = list.filter(s =>
+        storeMap[s.store_id]?.toLowerCase().includes(q) ||
+        s.bank_account?.toLowerCase().includes(q) ||
+        String(s.amount).includes(q) ||
+        s.notes?.toLowerCase().includes(q)
+      )
+    }
     return list.sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime())
-  }, [setoranList, filterStatus, isOwnerManager, storeId])
+  }, [setoranList, filterStatus, filterStore, search, isOwnerManager, storeId, storeMap])
 
   async function handleApprove(setoran: Setoran) {
     const updated = { ...setoran, status: 'approved' as SetoranStatus, approved_by: userId, approved_at: now() }
@@ -192,6 +204,27 @@ function SetoranTab({ userId, storeId, isOwnerManager }: { userId: string; store
           <p className="text-xs text-green-500">{filtered.filter(s => s.status === 'approved').length} setoran</p>
         </div>
       </div>
+
+      {/* Search */}
+      <input value={search} onChange={e => setSearch(e.target.value)}
+        className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
+        placeholder="Cari toko, jumlah, rekening..." />
+
+      {/* Filter toko (owner/manager only) */}
+      {isOwnerManager && stores && stores.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
+          <button onClick={() => setFilterStore('semua')}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore === 'semua' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
+            Semua Toko
+          </button>
+          {stores.map(s => (
+            <button key={s.id} onClick={() => setFilterStore(s.id)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore === s.id ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex items-center justify-between">

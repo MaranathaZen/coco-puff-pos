@@ -62,6 +62,24 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
   return <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">{children}{required && <span className="text-red-400 ml-0.5">*</span>}</label>
 }
 
+
+function CopyBtn({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  function handleCopy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+  return (
+    <button onClick={handleCopy}
+      className="inline-flex items-center gap-0.5 text-[10px] text-blue-400 hover:text-blue-600 ml-1 align-middle"
+      title="Copy ID">
+      {copied ? '✓' : '⧉'}
+    </button>
+  )
+}
+
 export default function UnifiedPembelianPage() {
   const { user } = useAuthStore()
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
@@ -168,7 +186,9 @@ function PembelianList({ userId, role }: { userId: string; role: string }) {
     return purchases.filter(p =>
       p.supplier?.name?.toLowerCase().includes(q) ||
       (p as any).po_number?.toLowerCase().includes(q) ||
-      p.items.some(i => i.material?.name?.toLowerCase().includes(q))
+      p.items.some(i => i.material?.name?.toLowerCase().includes(q)) ||
+      p.notes?.toLowerCase().includes(q) ||
+      (p as any).payment_method?.toLowerCase().includes(q)
     )
   }, [purchases, search])
 
@@ -216,12 +236,13 @@ function PembelianList({ userId, role }: { userId: string; role: string }) {
                 <div key={p.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex items-start justify-between mb-1">
                     <div className="flex-1 min-w-0">
-                      {(p as any).po_number && <p className="text-xs font-mono text-blue-600 mb-0.5">{(p as any).po_number}</p>}
+                      {(p as any).po_number && <p className="text-xs font-mono text-blue-600 mb-0.5">{(p as any).po_number}<CopyBtn text={(p as any).po_number} /></p>}
                       <p className="text-sm font-medium text-gray-900">{p.supplier?.name || 'Tanpa Supplier'}</p>
                       <p className="text-xs text-gray-400 mt-0.5">
                         {new Date(p.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })}, {new Date(p.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
                         {(p as any).payment_method ? ` · ${(p as any).payment_method}` : ''}
                       </p>
+                      {p.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {p.notes}</p>}
                     </div>
                     <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(p.total_amount)}</p>
                   </div>

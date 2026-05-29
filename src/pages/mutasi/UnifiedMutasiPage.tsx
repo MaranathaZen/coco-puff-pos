@@ -324,13 +324,10 @@ function MutasiForm({ userId, role, onClose }: { userId: string; role: string; o
           await supabase.from('production_stock').upsert(psd)
         }
 
-        // to_store: tambah ke stock toko (tabel stock, bukan warehouse_stock)
+        // to_store: tambah ke stock toko
         if (type === 'to_store' && destId) {
-          // stock toko menggunakan ingredient_id sebagai foreign key ke bahan
-          // Cari apakah sudah ada stock record untuk bahan ini di toko tujuan
           const storeStock = await db.stock
-            .where('[store_id+ingredient_id]')
-            .equals([destId, item.material_id])
+            .filter(s => s.store_id === destId && s.ingredient_id === item.material_id)
             .first()
           const stockData: any = {
             id: storeStock?.id || generateId(),

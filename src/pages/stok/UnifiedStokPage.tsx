@@ -191,6 +191,14 @@ function StokGudangView() {
 
 // ── STOK PRODUKSI ─────────────────────────────────────────────
 function StokProduksiView() {
+  const [search, setSearch] = useState('')
+  const [filterKat, setFilterKat] = useState('semua')
+
+  const katLabel: Record<string, string> = {
+    bahan_baku: 'Bahan Baku', bahan_setengah_jadi: 'Setengah Jadi',
+    packaging: 'Packaging', non_produksi: 'Non-Produksi',
+  }
+
   const data = useLiveQuery(async () => {
     const ps     = await db.production_stock.toArray()
     const fgs    = await db.finished_goods_stock.toArray()
@@ -236,23 +244,54 @@ function StokProduksiView() {
         </div>
       )}
 
+      {/* Search + filter bahan */}
+      <input value={search} onChange={e => setSearch(e.target.value)}
+        className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
+        placeholder="Cari nama bahan..." />
+
+      <div className="flex gap-1.5 overflow-x-auto pb-1">
+        {['semua','bahan_baku','bahan_setengah_jadi','packaging','non_produksi'].map(k => (
+          <button key={k} onClick={() => setFilterKat(k)}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+              filterKat === k ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'
+            }`}>
+            {k === 'semua' ? 'Semua' : katLabel[k] || k}
+          </button>
+        ))}
+      </div>
+
       {/* Bahan baku produksi */}
-      {data?.bahan && data.bahan.length > 0 && (
+      {data?.bahan && (
         <div>
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Bahan Baku</p>
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Stok Bahan</p>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            {data.bahan.map((s, idx) => (
-              <div key={s.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900">{s.material?.name}</p>
-                  <p className="text-xs text-gray-400">Avg {formatRupiah(s.material?.unit_cost || 0)}/{s.material?.unit}</p>
+            {data.bahan
+              .filter(s => {
+                const matchSearch = !search || s.material?.name?.toLowerCase().includes(search.toLowerCase())
+                const matchKat = filterKat === 'semua' || s.material?.category === filterKat
+                return matchSearch && matchKat
+              })
+              .map((s, idx) => (
+                <div key={s.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">{s.material?.name}</p>
+                    <p className="text-xs text-gray-400">{katLabel[s.material?.category || ''] || ''} · Avg {formatRupiah(s.material?.unit_cost || 0)}/{s.material?.unit}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-semibold text-gray-900">{s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.material?.unit}</span></p>
+                    <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand * (s.material?.unit_cost || 0))}</p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-sm font-semibold text-gray-900">{s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.material?.unit}</span></p>
-                  <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand * (s.material?.unit_cost || 0))}</p>
-                </div>
+              ))}
+            {data.bahan.filter(s => {
+              const matchSearch = !search || s.material?.name?.toLowerCase().includes(search.toLowerCase())
+              const matchKat = filterKat === 'semua' || s.material?.category === filterKat
+              return matchSearch && matchKat
+            }).length === 0 && (
+              <div className="py-8 text-center text-sm text-gray-400">
+                {search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada stok bahan'}
               </div>
-            ))}
+            )}
           </div>
         </div>
       )}
@@ -262,33 +301,55 @@ function StokProduksiView() {
 
 // ── STOK TOKO ─────────────────────────────────────────────────
 function StokTokoView({ storeId }: { storeId: string }) {
+  const [search, setSearch] = useState('')
+
   const data = useLiveQuery(async () => {
     const stocks   = await db.stock.where('store_id').equals(storeId).toArray()
     const prods    = await db.products.toArray()
     const pMap     = Object.fromEntries(prods.map(p => [p.id, p]))
     const cats     = await db.categories.toArray()
     const cMap     = Object.fromEntries(cats.map(c => [c.id, c]))
-    return stocks.map(s => ({
-      ...s,
-      product: pMap[s.ingredient_id || ''],
-      category: cMap[pMap[s.ingredient_id || '']?.category_id || ''],
-    }))
+    // ingredient_id bisa berisi product_id atau material_id
+    const mats     = await db.materials.toArray()
+    const mMap     = Object.fromEntries(mats.map(m => [m.id, m]))
+    return stocks.map(s => {
+      const prod = pMap[s.ingredient_id || '']
+      const mat  = mMap[s.ingredient_id || '']
+      return {
+        ...s,
+        displayName: prod?.name || mat?.name || s.ingredient_id || '-',
+        displayUnit: mat?.unit || 'pcs',
+        categoryName: prod ? cMap[prod.category_id || '']?.name || '' : mat?.category || '',
+      }
+    })
   }, [storeId])
 
+  const filtered = data?.filter(s =>
+    !search || s.displayName.toLowerCase().includes(search.toLowerCase())
+  ) || []
+
   return (
-    <div className="p-4">
+    <div className="p-4 space-y-3">
+      <input value={search} onChange={e => setSearch(e.target.value)}
+        className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
+        placeholder="Cari nama produk / bahan..." />
+
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        {data?.map((s, idx) => (
+        {filtered.map((s, idx) => (
           <div key={s.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900">{s.product?.name || s.ingredient_id}</p>
-              <p className="text-xs text-gray-400">{s.category?.name}</p>
+              <p className="text-sm font-medium text-gray-900">{s.displayName}</p>
+              {s.categoryName && <p className="text-xs text-gray-400">{s.categoryName}</p>}
             </div>
-            <p className="text-sm font-semibold text-gray-900">{s.qty_on_hand}</p>
+            <p className="text-sm font-semibold text-gray-900">
+              {s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.displayUnit}</span>
+            </p>
           </div>
         ))}
-        {!data?.length && (
-          <div className="py-12 text-center text-sm text-gray-400">Belum ada data stok toko</div>
+        {filtered.length === 0 && (
+          <div className="py-12 text-center text-sm text-gray-400">
+            {search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada data stok toko'}
+          </div>
         )}
       </div>
     </div>

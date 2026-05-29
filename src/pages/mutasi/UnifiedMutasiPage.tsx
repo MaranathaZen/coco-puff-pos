@@ -231,7 +231,8 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
 
       {grouped.map(({ key, items: grpItems }) => {
         const total = grpItems.reduce((s, m) => s + m.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0)
-        const expanded = expandedGroups[key] !== false
+        const today = new Date().toISOString().slice(0,10)
+        const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : key === today
         return (
           <div key={key}>
             <button onClick={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))}
@@ -263,9 +264,10 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
                         </div>
                         <p className="text-xs text-gray-400 mt-0.5">
                           {new Date(m.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })}, {new Date(m.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
-                          {m.notes ? ` · ${m.notes}` : ''}
+                          
                         </p>
                       </div>
+                      {(m as any).notes && <p className="text-xs text-gray-500 italic mt-0.5 px-0">📝 {(m as any).notes}</p>}
                       {totalNilai > 0 && <p className="text-sm font-semibold text-gray-900 flex-shrink-0 ml-2">{formatRupiah(totalNilai)}</p>}
                     </div>
                     {m.items.length > 0 && (

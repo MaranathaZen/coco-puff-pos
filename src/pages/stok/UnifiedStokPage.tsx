@@ -256,13 +256,20 @@ function StokProduksiView() {
         placeholder="Cari nama bahan..." />
 
       <div className="flex gap-1.5 overflow-x-auto pb-1">
-        {['semua','bahan_baku','bahan_setengah_jadi','packaging','non_produksi'].map(k => (
+        {[
+          { k: 'semua', l: 'Semua' },
+          { k: 'stok_rendah', l: `⚠ Stok Rendah` },
+          { k: 'bahan_baku', l: 'Bahan Baku' },
+          { k: 'bahan_setengah_jadi', l: 'Setengah Jadi' },
+          { k: 'packaging', l: 'Packaging' },
+          { k: 'non_produksi', l: 'Non-Produksi' },
+        ].map(({ k, l }) => (
           <button key={k} onClick={() => setFilterKat(k)}
             className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-              filterKat === k ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'
-            }`}>
-            {k === 'semua' ? 'Semua' : katLabel[k] || k}
-          </button>
+              filterKat === k
+                ? k === 'stok_rendah' ? 'bg-red-600 text-white' : 'bg-gray-900 text-white'
+                : k === 'stok_rendah' ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-white text-gray-600 border border-gray-200'
+            }`}>{l}</button>
         ))}
       </div>
 
@@ -274,7 +281,11 @@ function StokProduksiView() {
             {data.bahan
               .filter(s => {
                 const matchSearch = !search || s.material?.name?.toLowerCase().includes(search.toLowerCase())
-                const matchKat = filterKat === 'semua' || s.material?.category === filterKat
+                const matchKat = filterKat === 'semua'
+                  ? true
+                  : filterKat === 'stok_rendah'
+                    ? s.qty_on_hand <= (s.material?.min_stock || 0) && (s.material?.min_stock || 0) > 0
+                    : s.material?.category === filterKat
                 return matchSearch && matchKat
               })
               .map((s, idx) => (
@@ -291,7 +302,11 @@ function StokProduksiView() {
               ))}
             {data.bahan.filter(s => {
               const matchSearch = !search || s.material?.name?.toLowerCase().includes(search.toLowerCase())
-              const matchKat = filterKat === 'semua' || s.material?.category === filterKat
+              const matchKat = filterKat === 'semua'
+                  ? true
+                  : filterKat === 'stok_rendah'
+                    ? s.qty_on_hand <= (s.material?.min_stock || 0) && (s.material?.min_stock || 0) > 0
+                    : s.material?.category === filterKat
               return matchSearch && matchKat
             }).length === 0 && (
               <div className="py-8 text-center text-sm text-gray-400">
@@ -352,6 +367,8 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
     const matchSearch = !search || s.displayName.toLowerCase().includes(search.toLowerCase())
     const matchKat = filterTokoKat === 'semua'
       ? true
+      : filterTokoKat === 'stok_rendah'
+        ? s.qty_on_hand > 0 && s.qty_on_hand <= 5
       : filterTokoKat === 'stok_habis'
         ? s.qty_on_hand <= 0
         : filterTokoKat === 'produk_jadi'
@@ -378,7 +395,8 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {[
           { k: 'semua',             l: 'Semua' },
-          { k: 'stok_habis',        l: '⚠ Habis' },
+          { k: 'stok_rendah',       l: '⚠ Stok Rendah' },
+          { k: 'stok_habis',        l: 'Habis' },
           { k: 'produk_jadi',       l: 'Produk Jadi' },
           { k: 'bahan_baku',        l: 'Bahan Baku' },
           { k: 'bahan_setengah_jadi', l: 'Setengah Jadi' },

@@ -240,11 +240,12 @@ export default function CloseOrderPage() {
             ) : sortedDays.map(day => {
               const dayShifts = shiftsByDay[day]
               const dayTotal = dayShifts.reduce((s, sh) => s + sh.total, 0)
-              const isExpanded = expandedDays[`${store.id}-${day}`] !== false && (expandedDays[`${store.id}-${day}`] === true || day === today)
+              const dayKey = `${store.id}-${day}`
+              const isExpanded = expandedDays[dayKey] !== undefined ? expandedDays[dayKey] : day === today
               const dayLabel = new Date(day).toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' })
               return (
                 <div key={day} className="mb-2">
-                  <button onClick={() => setExpandedDays(prev => ({ ...prev, [`${store.id}-${day}`]: !isExpanded }))}
+                  <button onClick={() => setExpandedDays(prev => ({ ...prev, [dayKey]: !isExpanded }))}
                     className="w-full flex items-center justify-between px-1 py-1.5">
                     <div className="flex items-center gap-2">
                       {isExpanded ? <ChevronDown size={13} className="text-gray-400" /> : <ChevronRight size={13} className="text-gray-400" />}

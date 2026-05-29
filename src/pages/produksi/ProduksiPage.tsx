@@ -353,7 +353,8 @@ function CatatProduksiTab({ userId }: { userId: string }) {
         const grouped = groupBy(filteredLogs, l => groupKey(l.created_at, groupMode))
         if (!grouped.length) return <div className="bg-white rounded-xl border border-gray-100 py-10 text-center text-sm text-gray-400">Belum ada catatan produksi</div>
         return grouped.map(({ key, items: grpItems }) => {
-          const expanded = expandedGroups[key] !== false
+          const today = new Date().toISOString().slice(0,10)
+        const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : key === today
           return (
           <div key={key}>
             <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} count={grpItems.length}
@@ -363,6 +364,7 @@ function CatatProduksiTab({ userId }: { userId: string }) {
                 <div key={log.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-mono text-blue-600 mb-0.5">{log.id.slice(0,8).toUpperCase()}<CopyBtn text={log.id} /></p>
                       <p className="text-sm font-medium text-gray-900">{log.recipe?.name || '-'}</p>
                       <p className="text-xs text-gray-400 mt-0.5">
                         {new Date(log.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' }) + ', ' + new Date(log.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
@@ -463,7 +465,8 @@ function KirimTab({ userId }: { userId: string }) {
         const grouped = groupBy(mutations || [], m => groupKey(m.created_at, groupMode))
         if (!grouped.length) return <div className="bg-white rounded-xl border border-gray-100 py-10 text-center text-sm text-gray-400">Belum ada pengiriman</div>
         return grouped.map(({ key, items: grpItems }) => {
-          const expanded = expandedGroups[key] !== false
+          const today = new Date().toISOString().slice(0,10)
+        const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : key === today
           return (
           <div key={key}>
             <GroupHeader label={groupLabel(grpItems[0].created_at, groupMode)} count={grpItems.length}

@@ -116,20 +116,7 @@ export default function ProduksiPage() {
         </div>
       </div>
 
-      <div className="bg-white border-b border-gray-100 flex mt-2 flex-shrink-0">
-        {TABS.map(t => {
-          const Icon = t.icon
-          return (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-xs font-medium transition-colors border-b-2 ${
-                tab === t.id ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-400'
-              }`}>
-              <Icon size={18} />
-              {t.label}
-            </button>
-          )
-        })}
-      </div>
+
 
       <ToolbarCtx.Provider value={setToolbarActions}>
         <div className="flex-1 overflow-auto bg-gray-50">
@@ -298,11 +285,50 @@ function CatatProduksiTab({ userId }: { userId: string }) {
     }))
   }, [])
 
+  // Summary hari ini
+  const todayTotal = useMemo(() => {
+    if (!logs) return { count: 0, yield: 0 }
+    const today = new Date().toISOString().slice(0, 10)
+    const todayLogs = logs.filter(l => l.created_at.slice(0, 10) === today)
+    return { count: todayLogs.length, yield: todayLogs.reduce((s, l) => s + l.total_yield, 0) }
+  }, [logs])
+
+  const [search, setSearch] = useState('')
+
+  const filteredLogs = useMemo(() => {
+    if (!logs || !search) return logs || []
+    const q = search.toLowerCase()
+    return logs.filter(l =>
+      l.recipe?.name?.toLowerCase().includes(q) ||
+      (l as any).productName?.toLowerCase().includes(q) ||
+      l.notes?.toLowerCase().includes(q)
+    )
+  }, [logs, search])
+
   return (
     <div className="p-4 space-y-3">
+      {/* Summary card */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-white rounded-xl border border-gray-100 p-3">
+          <p className="text-xs text-gray-400">Produksi Hari Ini</p>
+          <p className="text-xl font-bold text-gray-900">{todayTotal.yield}</p>
+          <p className="text-xs text-gray-400">{todayTotal.count} batch</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-100 p-3">
+          <p className="text-xs text-gray-400">Total Semua</p>
+          <p className="text-xl font-bold text-brand-600">{logs?.reduce((s,l) => s + l.total_yield, 0) || 0}</p>
+          <p className="text-xs text-gray-400">{logs?.length || 0} produksi</p>
+        </div>
+      </div>
+
+      {/* Search */}
+      <input value={search} onChange={e => setSearch(e.target.value)}
+        className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
+        placeholder="Cari nama resep, produk..." />
+
       {/* Log produksi — grouped */}
       {(() => {
-        const grouped = groupBy(logs || [], l => groupKey(l.created_at, groupMode))
+        const grouped = groupBy(filteredLogs, l => groupKey(l.created_at, groupMode))
         if (!grouped.length) return <div className="bg-white rounded-xl border border-gray-100 py-10 text-center text-sm text-gray-400">Belum ada catatan produksi</div>
         return grouped.map(({ key, items: grpItems }) => {
           const expanded = expandedGroups[key] !== false
@@ -541,7 +567,16 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
 
     setSaving(true)
     try {
+      // Hitung finalYield dan HPP DULU sebelum insert apapun
       const recipeItems = await db.production_recipe_items.where('recipe_id').equals(recipeId).toArray()
+      const matDefs = await db.materials.toArray()
+      const mMapHPP = Object.fromEntries(matDefs.map(m => [m.id, m]))
+      const finalYield = actualYield && Number(actualYield) > 0 ? Number(actualYield) : estimatedYield
+      const totalCostHPP = recipeItems.reduce((s, ri) => {
+        return s + ri.qty_per_batch * Number(batchCount) * (mMapHPP[ri.material_id]?.unit_cost || 0)
+      }, 0)
+      const hppPerUnit = finalYield > 0 ? totalCostHPP / finalYield : 0
+
       const logId = generateId()
       const log: ProductionLog = {
         id: logId, recipe_id: recipeId,
@@ -567,16 +602,6 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
           await supabase.from('production_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', ps.id)
         }
       }
-
-      // Hitung HPP produksi ini
-      const recipeItemsForHPP = await db.production_recipe_items.where('recipe_id').equals(recipeId).toArray()
-      const matDefs = await db.materials.toArray()
-      const mMapHPP = Object.fromEntries(matDefs.map(m => [m.id, m]))
-      const totalCostHPP = recipeItemsForHPP.reduce((s, ri) => {
-        return s + ri.qty_per_batch * Number(batchCount) * (mMapHPP[ri.material_id]?.unit_cost || 0)
-      }, 0)
-      const finalYield = actualYield && Number(actualYield) > 0 ? Number(actualYield) : estimatedYield
-      const hppPerUnit = finalYield > 0 ? totalCostHPP / finalYield : 0
 
       // Tambah stok produk setengah jadi + simpan HPP
       const existing = await db.finished_goods_stock.filter(f => f.product_name === productName.trim()).first()

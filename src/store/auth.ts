@@ -2,6 +2,10 @@
  * Auth store — menyimpan user yang login, store aktif, dan shift.
  * Shift otomatis dibuka saat login, ditutup saat logout.
  * forceLogout: dipanggil setelah ganti password/PIN — wajib login ulang.
+ *
+ * CHANGELOG:
+ * - login() sekarang return User | null (bukan boolean) agar LoginPage
+ *   tidak perlu getState() yang bisa race condition dengan persist middleware.
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
@@ -17,12 +21,25 @@ interface AuthState {
   isLoading:   boolean
   error:       string | null
 
-  login:        (username: string, password: string) => Promise<boolean>
-  logout:       () => void
-  forceLogout:  () => void   // ← dipanggil setelah ganti password/PIN
-  setShift:     (shift: Shift | null) => void
-  clearError:   () => void
+  /** Return User jika berhasil, null jika gagal. Error detail ada di state.error */
+  login:       (username: string, password: string) => Promise<User | null>
+  logout:      () => void
+  /**
+   * forceLogout — dipanggil setelah user berhasil ganti password/PIN.
+   * Menutup shift aktif lalu clear session.
+   * User akan diarahkan ke /login oleh ProtectedRoute.
+   *
+   * Cara pakai di SettingsPage:
+   *   const { forceLogout } = useAuthStore()
+   *   toast.success('Password berhasil diubah. Silakan login ulang.')
+   *   forceLogout()
+   */
+  forceLogout: () => void
+  setShift:    (shift: Shift | null) => void
+  clearError:  () => void
 }
+
+// ── Helpers ────────────────────────────────────────────────────
 
 async function openShift(user: User): Promise<Shift> {
   const allShifts = await db.shifts
@@ -64,6 +81,8 @@ async function closeShift(shift: Shift): Promise<void> {
   }
 }
 
+// ── Store ──────────────────────────────────────────────────────
+
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
@@ -77,17 +96,21 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null })
         try {
           const hashed = await hashPassword(password)
+
           const user = await db.users
-            .filter(u => u.username?.toLowerCase() === username.toLowerCase() && u.is_active)
+            .filter(u =>
+              u.username?.toLowerCase() === username.toLowerCase() &&
+              u.is_active
+            )
             .first()
 
           if (!user) {
             set({ error: 'Username tidak ditemukan', isLoading: false })
-            return false
+            return null
           }
           if (user.password_hash !== hashed) {
             set({ error: 'PIN atau password salah', isLoading: false })
-            return false
+            return null
           }
 
           const store = await db.stores.get(user.store_id) || null
@@ -98,10 +121,11 @@ export const useAuthStore = create<AuthState>()(
           }
 
           set({ user, store, activeShift: shift, isLoading: false })
-          return true
-        } catch {
-          set({ error: 'Terjadi kesalahan', isLoading: false })
-          return false
+          return user  // ← kembalikan objek user, bukan true/false
+        } catch (e) {
+          console.error('[AUTH] login error', e)
+          set({ error: 'Terjadi kesalahan saat login', isLoading: false })
+          return null
         }
       },
 
@@ -113,23 +137,12 @@ export const useAuthStore = create<AuthState>()(
         set({ user: null, store: null, activeShift: null })
       },
 
-      /**
-       * forceLogout — dipanggil setelah user berhasil ganti password/PIN.
-       * Menutup shift aktif (sama seperti logout biasa), lalu clear session.
-       * User akan diarahkan ke /login oleh App.tsx / ProtectedRoute.
-       *
-       * Cara pakai di SettingsPage:
-       *   const { forceLogout } = useAuthStore()
-       *   // setelah simpan password baru:
-       *   toast.success('Password berhasil diubah. Silakan login ulang.')
-       *   forceLogout()
-       */
       forceLogout: async () => {
         const { activeShift } = get()
         if (activeShift && activeShift.status === 'open') {
           await closeShift(activeShift)
         }
-        // Beri jeda singkat agar toast sempat tampil
+        // Jeda singkat agar toast sempat tampil sebelum redirect
         setTimeout(() => {
           set({ user: null, store: null, activeShift: null })
         }, 1500)

@@ -350,12 +350,6 @@ function CatatProduksiTab({ userId }: { userId: string }) {
                     </div>
                     <div className="text-right flex-shrink-0 ml-3">
                       <p className="text-sm font-bold text-brand-600">{log.total_yield} {log.recipe?.yield_unit || 'pcs'}</p>
-                      {(log as any).hpp_per_unit > 0 && (
-                        <p className="text-xs text-gray-500">HPP {formatRupiah((log as any).hpp_per_unit)}/pcs</p>
-                      )}
-                      {(log as any).total_cost > 0 && (
-                        <p className="text-xs font-medium text-gray-700">{formatRupiah((log as any).total_cost)}</p>
-                      )}
                     </div>
                   </div>
                   {log.materials.length > 0 && (

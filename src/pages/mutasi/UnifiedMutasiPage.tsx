@@ -93,7 +93,7 @@ export default function UnifiedMutasiPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
-        <h1 className="text-lg font-semibold text-gray-900">Mutasi</h1>
+        <h1 className="text-lg font-semibold text-gray-900">Kirim</h1>
         <div className="flex items-center gap-2">
           {toolbarActions}
           <button onClick={syncData} disabled={syncing} className="p-2 text-gray-400 rounded-full">
@@ -278,9 +278,10 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
 }
 
 function MutasiForm({ userId, role, onClose }: { userId: string; role: string; onClose: () => void }) {
-  const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
-  const partners  = useLiveQuery(() => db.partners.filter(p => p.is_active).toArray(), [])
-  const stores    = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
+  const materials  = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
+  const fgStocks   = useLiveQuery(() => db.finished_goods_stock.toArray(), [])
+  const partners   = useLiveQuery(() => db.partners.filter(p => p.is_active).toArray(), [])
+  const stores     = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
 
   const availableTypes = ROLE_TYPES[role] || ROLE_TYPES.gudang
   const [type, setType]     = useState(availableTypes[0])
@@ -312,7 +313,9 @@ function MutasiForm({ userId, role, onClose }: { userId: string; role: string; o
 
       for (const item of valid) {
         const mat = materials?.find(m => m.id === item.material_id)
-        const mi: WarehouseMutationItem = { id: generateId(), mutation_id: mutId, material_id: item.material_id, qty: Number(item.qty), unit_cost: mat?.unit_cost || 0 }
+        const fgItem = fgStocks?.find(f => f.product_id === item.material_id)
+        const unitCost = fgItem ? ((fgItem as any).hpp_per_unit || 0) : (mat?.unit_cost || 0)
+        const mi: WarehouseMutationItem = { id: generateId(), mutation_id: mutId, material_id: item.material_id, qty: Number(item.qty), unit_cost: unitCost }
         await db.warehouse_mutation_items.add(mi)
         await supabase.from('warehouse_mutation_items').insert(mi)
 
@@ -352,14 +355,14 @@ function MutasiForm({ userId, role, onClose }: { userId: string; role: string; o
           await supabase.from('stock').upsert(stockData)
         }
       }
-      toast.success('Mutasi dicatat')
+      toast.success('Berhasil dicatat')
       onClose()
     } catch (e) { console.error(e); toast.error('Gagal menyimpan') }
     finally { setSaving(false) }
   }
 
   return (
-    <Modal title="Mutasi" onClose={onClose}>
+    <Modal title="Kirim" onClose={onClose}>
       <div>
         <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Tujuan <span className="text-red-400">*</span></label>
         <div className="grid grid-cols-2 gap-2">
@@ -395,13 +398,26 @@ function MutasiForm({ userId, role, onClose }: { userId: string; role: string; o
             return (
               <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
                 <select className="input text-sm" value={item.material_id} onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x, material_id: e.target.value} : x))}>
-                  <option value="">Pilih bahan</option>
-                  {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
+                  {role === 'produksi' && (type === 'to_store' || type === 'to_partner') ? (
+                    <>
+                      <option value="">Pilih produk jadi</option>
+                      {fgStocks?.map(f => <option key={f.product_id} value={f.product_id}>{f.product_name} (stok: {f.qty_on_hand} pcs)</option>)}
+                    </>
+                  ) : (
+                    <>
+                      <option value="">Pilih bahan</option>
+                      {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
+                    </>
+                  )}
                 </select>
                 <div className="flex items-center gap-2">
                   <input className="input text-sm flex-1" type="number" placeholder={`Qty (${mat?.unit || ''})`}
                     value={item.qty} onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x, qty: e.target.value} : x))} />
-                  {mat && item.qty && <span className="text-xs text-gray-400 flex-shrink-0">{formatRupiah(Number(item.qty) * mat.unit_cost)}</span>}
+                  {item.qty && (mat || fgStocks?.find(f => f.product_id === item.material_id)) && (
+                    <span className="text-xs text-gray-400 flex-shrink-0">
+                      {formatRupiah(Number(item.qty) * (fgStocks?.find(f => f.product_id === item.material_id) as any)?.hpp_per_unit || Number(item.qty) * (mat?.unit_cost || 0))}
+                    </span>
+                  )}
                 </div>
                 {items.length > 1 && <button onClick={() => setItems(p => p.filter((_,idx) => idx !== i))} className="text-xs text-red-400">Hapus</button>}
               </div>

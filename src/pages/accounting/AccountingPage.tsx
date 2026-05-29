@@ -1,6 +1,6 @@
 // src/pages/accounting/AccountingPage.tsx
 // Accounting — Setoran Toko + Approval
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
@@ -38,14 +38,16 @@ export default function AccountingPage() {
   async function syncData() {
     setSyncing(true)
     try {
-      const { data } = await supabase.from('setoran').select('*').order('submitted_at', { ascending: false })
-      if (data?.length) {
-        // Store in IndexedDB via localStorage as fallback
+      const { data, error } = await supabase.from('setoran').select('*').order('submitted_at', { ascending: false })
+      if (error) throw error
+      if (data) {
         localStorage.setItem('setoran_data', JSON.stringify(data))
+        // Trigger re-render di child via reload
+        window.dispatchEvent(new CustomEvent('setoran-updated'))
       }
       toast.success('Data diperbarui')
     } catch {
-      toast.error('Gagal sync — pastikan tabel setoran sudah dibuat di Supabase')
+      toast.error('Tabel setoran belum dibuat — jalankan SQL di Supabase dulu')
     } finally { setSyncing(false) }
   }
 
@@ -72,8 +74,8 @@ export default function AccountingPage() {
       </div>
 
       <div className="flex-1 overflow-auto">
-        {tab === 'setoran'   && <SetoranTab userId={user!.id} storeId={user!.store_id} isOwnerManager={isOwnerManager} />}
-        {tab === 'ringkasan' && <RingkasanTab isOwnerManager={isOwnerManager} storeId={user!.store_id} />}
+        {tab === 'setoran'   && <SetoranTab userId={user!.id} storeId={user!.store_id} isOwnerManager={isOwnerManager} setoranList={setoranList} setSetoranList={setSetoranList} />}
+        {tab === 'ringkasan' && <RingkasanTab isOwnerManager={isOwnerManager} storeId={user!.store_id} setoranList={setoranList} />}
       </div>
     </div>
   )
@@ -84,12 +86,28 @@ function SetoranTab({ userId, storeId, isOwnerManager }: { userId: string; store
   const [showForm, setShowForm] = useState(false)
   const [filterStatus, setFilterStatus] = useState<'all' | SetoranStatus>('all')
 
-  // Load dari localStorage (karena belum tentu ada tabel di Supabase)
-  const [setoranList, setSetoranList] = useState<Setoran[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('setoran_data') || '[]')
-    } catch { return [] }
-  })
+  const [setoranList, setSetoranList] = useState<Setoran[]>([])
+  const [loaded, setLoaded] = useState(false)
+
+  // Load dari Supabase saat pertama render
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const { data } = await supabase.from('setoran').select('*').order('submitted_at', { ascending: false })
+        if (data) {
+          setSetoranList(data)
+          localStorage.setItem('setoran_data', JSON.stringify(data))
+        }
+      } catch {
+        // Fallback ke localStorage
+        try {
+          const local = JSON.parse(localStorage.getItem('setoran_data') || '[]')
+          setSetoranList(local)
+        } catch {}
+      } finally { setLoaded(true) }
+    }
+    loadData()
+  }, [])
 
   const stores = useLiveQuery(() => db.stores.toArray(), [])
   const storeMap = Object.fromEntries((stores || []).map(s => [s.id, s.name]))
@@ -99,12 +117,6 @@ function SetoranTab({ userId, storeId, isOwnerManager }: { userId: string; store
     if (filterStatus !== 'all') list = list.filter(s => s.status === filterStatus)
     return list.sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime())
   }, [setoranList, filterStatus, isOwnerManager, storeId])
-
-  function refreshList() {
-    try {
-      setSetoranList(JSON.parse(localStorage.getItem('setoran_data') || '[]'))
-    } catch {}
-  }
 
   async function handleApprove(setoran: Setoran) {
     const updated = { ...setoran, status: 'approved' as SetoranStatus, approved_by: userId, approved_at: now() }
@@ -342,10 +354,7 @@ function SetoranForm({ userId, storeId, storeName, onClose, onSaved }: {
 }
 
 // ── TAB RINGKASAN ─────────────────────────────────────────────
-function RingkasanTab({ isOwnerManager, storeId }: { isOwnerManager: boolean; storeId: string }) {
-  const setoranList: Setoran[] = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem('setoran_data') || '[]') } catch { return [] }
-  }, [])
+function RingkasanTab({ isOwnerManager, storeId, setoranList }: { isOwnerManager: boolean; storeId: string; setoranList: Setoran[] }) {
 
   const stores = useLiveQuery(() => db.stores.toArray(), [])
   const storeMap = Object.fromEntries((stores || []).map(s => [s.id, s.name]))

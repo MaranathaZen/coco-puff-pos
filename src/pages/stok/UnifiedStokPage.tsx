@@ -79,7 +79,7 @@ export default function UnifiedStokPage() {
       <div className="flex-1 overflow-auto bg-gray-50">
         {tab === 'gudang'   && <StokGudangView />}
         {tab === 'produksi' && <StokProduksiView />}
-        {tab === 'toko'     && <StokTokoView storeId={user?.store_id || ''} />}
+        {tab === 'toko'     && <StokTokoView storeId={user?.store_id || ''} role={user?.role || 'kasir'} />}
       </div>
     </div>
   )
@@ -300,11 +300,18 @@ function StokProduksiView() {
 }
 
 // ── STOK TOKO ─────────────────────────────────────────────────
-function StokTokoView({ storeId }: { storeId: string }) {
+function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
   const [search, setSearch] = useState('')
+  const canSeeAllStores = ['owner','manager','gudang','produksi'].includes(role)
+
+  const stores = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
+  const [selectedStore, setSelectedStore] = useState(storeId)
+
+  const activeStoreId = canSeeAllStores ? selectedStore : storeId
 
   const data = useLiveQuery(async () => {
-    const stocks   = await db.stock.where('store_id').equals(storeId).toArray()
+    if (!activeStoreId) return []
+    const stocks   = await db.stock.where('store_id').equals(activeStoreId).toArray()
     const prods    = await db.products.toArray()
     const pMap     = Object.fromEntries(prods.map(p => [p.id, p]))
     const cats     = await db.categories.toArray()
@@ -322,14 +329,26 @@ function StokTokoView({ storeId }: { storeId: string }) {
         categoryName: prod ? cMap[prod.category_id || '']?.name || '' : mat?.category || '',
       }
     })
-  }, [storeId])
+  }, [activeStoreId])
 
-  const filtered = data?.filter(s =>
+  const filtered = (data || []).filter(s =>
     !search || s.displayName.toLowerCase().includes(search.toLowerCase())
-  ) || []
+  )
 
   return (
     <div className="p-4 space-y-3">
+      {/* Pilih toko — hanya untuk owner/manager/gudang */}
+      {canSeeAllStores && stores && stores.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
+          {stores.map(s => (
+            <button key={s.id} onClick={() => setSelectedStore(s.id)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                selectedStore === s.id ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'
+              }`}>{s.name}</button>
+          ))}
+        </div>
+      )}
+
       <input value={search} onChange={e => setSearch(e.target.value)}
         className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
         placeholder="Cari nama produk / bahan..." />

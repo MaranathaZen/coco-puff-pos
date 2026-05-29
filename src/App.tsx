@@ -121,7 +121,7 @@ export default function App() {
           <Route path="produk"        element={<RequireRole roles={['owner','manager']}><ProductsPage /></RequireRole>} />
           <Route path="resep-toko"    element={<RequireRole roles={['owner','manager']}><StoreRecipePage /></RequireRole>} />
           <Route path="pengaturan"    element={<RequireRole roles={['owner','manager']}><SettingsPage /></RequireRole>} />
-          <Route path="accounting"    element={<RequireRole roles={['owner','manager']}><AccountingPage /></RequireRole>} />
+          <Route path="accounting"    element={<AccountingPage />} />
 
           {/* Legacy routes — redirect ke halaman baru */}
           <Route path="gudang"        element={<Navigate to="/stok" replace />} />

@@ -70,6 +70,7 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
     { path: '/mutasi',         label: 'Mutasi' },
     { path: '/biaya',          label: 'Biaya' },
     { path: '/tutup-toko',     label: 'Close Order' },
+    { path: '/accounting',     label: 'Accounting' },
   ],
   produksi: [
     { path: '/stok',           label: 'Stok' },
@@ -77,6 +78,7 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
     { path: '/mutasi',         label: 'Mutasi' },
     { path: '/biaya',          label: 'Biaya' },
     { path: '/tutup-toko',     label: 'Close Order' },
+    { path: '/accounting',     label: 'Accounting' },
   ],
   kasir: [
     { path: '/kasir',          label: 'Kasir' },
@@ -85,6 +87,7 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
     { path: '/mutasi',         label: 'Mutasi' },
     { path: '/biaya',          label: 'Biaya' },
     { path: '/tutup-toko',     label: 'Close Order' },
+    { path: '/accounting',     label: 'Accounting' },
   ],
 }
 

@@ -78,8 +78,7 @@ export const useAuthStore = create<AuthState>()(
         try {
           const hashed = await hashPassword(password)
           const user = await db.users
-            .where('username').equals(username)
-            .filter(u => u.is_active)
+            .filter(u => u.username?.toLowerCase() === username.toLowerCase() && u.is_active)
             .first()
 
           if (!user) {

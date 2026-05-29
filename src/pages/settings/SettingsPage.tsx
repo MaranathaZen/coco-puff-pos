@@ -752,21 +752,24 @@ function ResetDataTab() {
       // WAJIB: Hapus dari Supabase DULU baru IndexedDB
       // Kalau Supabase gagal, IndexedDB tidak dihapus (data aman)
       setDone(prev => [...prev, 'Menghapus dari server...'])
-      const tables = ['warehouse_stock','warehouse_mutation_items','warehouse_mutations',
-        'purchase_items','purchase_returns','purchases','warehouse_expenses']
-      for (const t of tables) {
-        await supabase.from(t).delete().gte('created_at', '2000-01-01')
-      }
+      // Hapus per tabel dengan kolom yang benar
+      await supabase.from('warehouse_mutation_items').delete().gte('created_at', '2000-01-01')
+      await supabase.from('warehouse_mutations').delete().gte('created_at', '2000-01-01')
+      await supabase.from('purchase_items').delete().gte('created_at', '2000-01-01')
+      await supabase.from('purchase_returns').delete().gte('created_at', '2000-01-01')
+      await supabase.from('purchases').delete().gte('created_at', '2000-01-01')
+      await supabase.from('warehouse_expenses').delete().gte('created_at', '2000-01-01')
+      await supabase.from('warehouse_stock').delete().gte('last_updated', '2000-01-01')
       setDone(prev => [...prev, 'Server: data gudang dihapus'])
 
       // Baru hapus IndexedDB
-      await db.warehouse_stock.clear()
       await db.warehouse_mutation_items.clear()
       await db.warehouse_mutations.clear()
       await db.purchase_items.clear()
       await db.purchase_returns.clear()
       await db.purchases.clear()
       await db.warehouse_expenses.clear()
+      await db.warehouse_stock.clear()
       setDone(prev => [...prev, 'Lokal: data gudang dihapus'])
       toast.success('Data gudang berhasil direset')
     } catch (e) {

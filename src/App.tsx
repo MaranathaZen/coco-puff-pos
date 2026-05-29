@@ -4,20 +4,24 @@ import { useAuthStore } from '@/store/auth'
 import { seedIfEmpty } from '@/lib/seed'
 import { startSyncWorker, stopSyncWorker } from '@/lib/sync'
 
-import LoginPage         from '@/pages/auth/LoginPage'
-import Layout            from '@/components/layout/Layout'
-import CashierPage       from '@/pages/cashier/CashierPage'
-import ProductsPage      from '@/pages/products/ProductsPage'
-import StoreRecipePage   from '@/pages/products/StoreRecipePage'
-import ResepPage         from '@/pages/resep/ResepPage'
-import StockPage         from '@/pages/stock/StockPage'
-import ReportsPage       from '@/pages/reports/ReportsPage'
-import SettingsPage      from '@/pages/settings/SettingsPage'
-import OwnerPage         from '@/pages/owner/OwnerPage'
-import GudangPage        from '@/pages/gudang/GudangPage'
-import ProduksiPage      from '@/pages/produksi/ProduksiPage'
-import LaporanGudangPage from '@/pages/laporan/LaporanGudangPage'
-import EndOfDayPage      from '@/pages/cashier/EndOfDayPage'
+import LoginPage            from '@/pages/auth/LoginPage'
+import Layout               from '@/components/layout/Layout'
+import CashierPage          from '@/pages/cashier/CashierPage'
+import ProductsPage         from '@/pages/products/ProductsPage'
+import StoreRecipePage      from '@/pages/products/StoreRecipePage'
+import ReportsPage          from '@/pages/reports/ReportsPage'
+import SettingsPage         from '@/pages/settings/SettingsPage'
+import OwnerPage            from '@/pages/owner/OwnerPage'
+import GudangPage           from '@/pages/gudang/GudangPage'
+import ProduksiPage         from '@/pages/produksi/ProduksiPage'
+import LaporanGudangPage    from '@/pages/laporan/LaporanGudangPage'
+import EndOfDayPage         from '@/pages/cashier/EndOfDayPage'
+import ResepPage            from '@/pages/resep/ResepPage'
+import UnifiedStokPage      from '@/pages/stok/UnifiedStokPage'
+import UnifiedPembelianPage from '@/pages/pembelian/UnifiedPembelianPage'
+import UnifiedMutasiPage    from '@/pages/mutasi/UnifiedMutasiPage'
+import UnifiedBiayaPage     from '@/pages/biaya/UnifiedBiayaPage'
+import AccountingPage       from '@/pages/accounting/AccountingPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const user = useAuthStore(s => s.user)
@@ -31,41 +35,21 @@ function RequireRole({ roles, children }: { roles: string[]; children: React.Rea
   return <>{children}</>
 }
 
-
 // ── Auto-update notifier ──────────────────────────────────────
-// Deteksi saat service worker baru tersedia, reload otomatis
 function useAutoUpdate() {
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
-
-    // Listen untuk pesan dari service worker baru
-    const handleSWMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'SW_UPDATED') {
-        window.location.reload()
-      }
-    }
-    navigator.serviceWorker.addEventListener('message', handleSWMessage)
-
-    // Cek update setiap kali tab menjadi aktif kembali
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        navigator.serviceWorker.getRegistration().then(reg => {
-          if (reg) reg.update()
-        })
+        navigator.serviceWorker.getRegistration().then(reg => { if (reg) reg.update() })
       }
     }
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-
-    // Cek update saat online kembali
     const handleOnline = () => {
-      navigator.serviceWorker.getRegistration().then(reg => {
-        if (reg) reg.update()
-      })
+      navigator.serviceWorker.getRegistration().then(reg => { if (reg) reg.update() })
     }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
     window.addEventListener('online', handleOnline)
-
     return () => {
-      navigator.serviceWorker.removeEventListener('message', handleSWMessage)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('online', handleOnline)
     }
@@ -74,46 +58,26 @@ function useAutoUpdate() {
 
 function UpdateBanner() {
   const [showBanner, setShowBanner] = useState(false)
-
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
-
     navigator.serviceWorker.ready.then(reg => {
-      // Saat ada service worker baru menunggu
-      const checkWaiting = () => {
-        if (reg.waiting) {
-          setShowBanner(true)
-          // Kirim pesan ke SW baru untuk skipWaiting
-          reg.waiting.postMessage({ type: 'SKIP_WAITING' })
-        }
-      }
-
-      checkWaiting()
       reg.addEventListener('updatefound', () => {
-        const newWorker = reg.installing
-        if (!newWorker) return
-        newWorker.addEventListener('statechange', () => {
-          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+        const nw = reg.installing
+        if (!nw) return
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
             setShowBanner(true)
-            // Auto reload setelah 2 detik
             setTimeout(() => window.location.reload(), 2000)
           }
         })
       })
     })
-
-    // Reload otomatis saat SW baru aktif
     let refreshing = false
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!refreshing) {
-        refreshing = true
-        window.location.reload()
-      }
+      if (!refreshing) { refreshing = true; window.location.reload() }
     })
   }, [])
-
   if (!showBanner) return null
-
   return (
     <div className="fixed top-0 left-0 right-0 z-[9999] bg-gray-900 text-white text-xs text-center py-2 px-4">
       Memperbarui aplikasi...
@@ -124,9 +88,7 @@ function UpdateBanner() {
 export default function App() {
   const user = useAuthStore(s => s.user)
   useAutoUpdate()
-
   useEffect(() => { seedIfEmpty() }, [])
-
   useEffect(() => {
     if (user?.store_id) startSyncWorker(user.store_id)
     else stopSyncWorker()
@@ -134,26 +96,38 @@ export default function App() {
 
   return (
     <>
-    <UpdateBanner />
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
-        <Route index element={<RoleRedirect />} />
-        <Route path="kasir"         element={<CashierPage />} />
-        <Route path="produk"        element={<RequireRole roles={['owner','manager']}><ProductsPage /></RequireRole>} />
-        <Route path="resep-toko"    element={<RequireRole roles={['owner','manager']}><StoreRecipePage /></RequireRole>} />
-        <Route path="resep"         element={<RequireRole roles={['owner','manager']}><ResepPage /></RequireRole>} />
-        <Route path="stok"          element={<RequireRole roles={['owner','manager','gudang']}><StockPage /></RequireRole>} />
-        <Route path="laporan"       element={<RequireRole roles={['owner','manager']}><ReportsPage /></RequireRole>} />
-        <Route path="laporan-gudang" element={<RequireRole roles={['owner','manager','gudang']}><LaporanGudangPage /></RequireRole>} />
-        <Route path="pengaturan"    element={<RequireRole roles={['owner','manager']}><SettingsPage /></RequireRole>} />
-        <Route path="owner"         element={<RequireRole roles={['owner']}><OwnerPage /></RequireRole>} />
-        <Route path="gudang"        element={<RequireRole roles={['owner','manager','gudang']}><GudangPage /></RequireRole>} />
-        <Route path="produksi"      element={<RequireRole roles={['owner','manager','produksi']}><ProduksiPage /></RequireRole>} />
-        <Route path="tutup-toko"    element={<RequireRole roles={['owner','manager','kasir']}><EndOfDayPage /></RequireRole>} />
-      </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      <UpdateBanner />
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
+          <Route index element={<RoleRedirect />} />
+
+          {/* Halaman utama per role */}
+          <Route path="owner"         element={<RequireRole roles={['owner','manager']}><OwnerPage /></RequireRole>} />
+          <Route path="kasir"         element={<CashierPage />} />
+          <Route path="tutup-toko"    element={<EndOfDayPage />} />
+
+          {/* Unified pages — akses per role dikontrol di dalam komponen */}
+          <Route path="stok"          element={<UnifiedStokPage />} />
+          <Route path="pembelian"     element={<UnifiedPembelianPage />} />
+          <Route path="mutasi"        element={<UnifiedMutasiPage />} />
+          <Route path="biaya"         element={<UnifiedBiayaPage />} />
+
+          {/* Owner/Manager only */}
+          <Route path="laporan"       element={<RequireRole roles={['owner','manager']}><ReportsPage /></RequireRole>} />
+          <Route path="laporan-gudang" element={<RequireRole roles={['owner','manager','gudang']}><LaporanGudangPage /></RequireRole>} />
+          <Route path="resep"         element={<RequireRole roles={['owner','manager']}><ResepPage /></RequireRole>} />
+          <Route path="produk"        element={<RequireRole roles={['owner','manager']}><ProductsPage /></RequireRole>} />
+          <Route path="resep-toko"    element={<RequireRole roles={['owner','manager']}><StoreRecipePage /></RequireRole>} />
+          <Route path="pengaturan"    element={<RequireRole roles={['owner','manager']}><SettingsPage /></RequireRole>} />
+          <Route path="accounting"    element={<RequireRole roles={['owner','manager']}><AccountingPage /></RequireRole>} />
+
+          {/* Legacy routes — redirect ke halaman baru */}
+          <Route path="gudang"        element={<Navigate to="/stok" replace />} />
+          <Route path="produksi"      element={<Navigate to="/stok" replace />} />
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </>
   )
 }
@@ -163,10 +137,10 @@ function RoleRedirect() {
   if (!user) return <Navigate to="/login" replace />
   const roleMap: Record<string, string> = {
     owner:    '/owner',
-    manager:  '/laporan',
+    manager:  '/owner',
     kasir:    '/kasir',
-    gudang:   '/gudang',
-    produksi: '/produksi',
+    gudang:   '/stok',
+    produksi: '/stok',
   }
   return <Navigate to={roleMap[user.role] || '/kasir'} replace />
 }

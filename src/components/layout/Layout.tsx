@@ -1,231 +1,225 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useAuthStore } from '@/store/auth'
 import { db } from '@/lib/db'
-import { supabase, APP_NAME } from '@/lib/supabase'
-import { isOnline } from '@/lib/sync'
-import { cn } from '@/lib/utils'
 import {
-  LogOut, Wifi, WifiOff, FileText, DoorClosed,
-  ShoppingCart, Package, Warehouse, FlaskConical,
-  BarChart3, LayoutDashboard, Settings, Layers,
-  MoreHorizontal, X, LucideIcon
+  LogOut, Wifi, WifiOff,
+  ShoppingCart, Warehouse, FlaskConical,
+  BarChart3, LayoutDashboard, Settings,
+  MoreHorizontal, X, Receipt, ArrowRightLeft,
+  Package, BookOpen, Calculator
 } from 'lucide-react'
-import { useEffect } from 'react'
+import type { LucideIcon } from 'lucide-react'
+
+// ── Menu per role sesuai gambar ───────────────────────────────
+// Owner/Manager: Dashboard · Stok · Pembelian · Mutasi · Biaya · Close Order · Setting · Resep · Produk · Accounting
+// Gudang:        Dashboard · Stok · Pembelian · Mutasi · Biaya · Close Order
+// Produksi:      Dashboard · Stok · Pembelian · Mutasi · Biaya · Close Order
+// Kasir:         Dashboard · Stok · Pembelian · Mutasi · Biaya · Close Order
 
 const ICON_MAP: Record<string, LucideIcon> = {
-  '/kasir':          ShoppingCart,
-  '/produk':         Package,
-  '/stok':           Layers,
-  '/gudang':         Warehouse,
-  '/produksi':       FlaskConical,
-  '/laporan':        BarChart3,
-  '/laporan-gudang': FileText,
-  '/owner':          LayoutDashboard,
-  '/pengaturan':     Settings,
-  '/tutup-toko':     DoorClosed,
-  '/resep-toko':     FlaskConical,
-  '/resep':           FlaskConical,
+  '/owner':         LayoutDashboard,
+  '/stok':          Package,
+  '/pembelian':     ShoppingCart,
+  '/mutasi':        ArrowRightLeft,
+  '/biaya':         Receipt,
+  '/kasir':         ShoppingCart,
+  '/tutup-toko':    BarChart3,
+  '/laporan':       BarChart3,
+  '/laporan-gudang':BarChart3,
+  '/pengaturan':    Settings,
+  '/resep':         FlaskConical,
+  '/produk':        Package,
+  '/accounting':    Calculator,
+  '/gudang':        Warehouse,
+  '/produksi':      FlaskConical,
 }
 
-// Default menu per role — fallback kalau menu_role_config belum di-set di DB
 const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
-  // Owner: Dashboard · Gudang · Produksi · Kasir · [Lainnya: Laporan, Setting, Tutup Toko]
   owner: [
     { path: '/owner',          label: 'Dashboard' },
-    { path: '/gudang',         label: 'Gudang' },
-    { path: '/produksi',       label: 'Produksi' },
+    { path: '/stok',           label: 'Stok' },
+    { path: '/pembelian',      label: 'Pembelian' },
+    { path: '/mutasi',         label: 'Mutasi' },
+    { path: '/biaya',          label: 'Biaya' },
     { path: '/kasir',          label: 'Kasir' },
+    { path: '/tutup-toko',     label: 'Close Order' },
+    { path: '/resep',          label: 'Resep' },
+    { path: '/produk',         label: 'Produk' },
+    { path: '/pengaturan',     label: 'Setting' },
+    { path: '/accounting',     label: 'Accounting' },
     { path: '/laporan',        label: 'Laporan' },
     { path: '/laporan-gudang', label: 'Lap. Gudang' },
-    { path: '/pengaturan',     label: 'Setting' },
-    { path: '/resep',          label: 'Resep' },
-    { path: '/tutup-toko',     label: 'Tutup Toko' },
   ],
-  // Manager: Kasir · Gudang · Produksi · Laporan · [Lainnya: Setting, Tutup Toko]
   manager: [
+    { path: '/owner',          label: 'Dashboard' },
+    { path: '/stok',           label: 'Stok' },
+    { path: '/pembelian',      label: 'Pembelian' },
+    { path: '/mutasi',         label: 'Mutasi' },
+    { path: '/biaya',          label: 'Biaya' },
     { path: '/kasir',          label: 'Kasir' },
-    { path: '/gudang',         label: 'Gudang' },
-    { path: '/produksi',       label: 'Produksi' },
-    { path: '/laporan',        label: 'Laporan' },
+    { path: '/tutup-toko',     label: 'Close Order' },
     { path: '/resep',          label: 'Resep' },
     { path: '/pengaturan',     label: 'Setting' },
-    { path: '/tutup-toko',     label: 'Tutup Toko' },
+    { path: '/laporan',        label: 'Laporan' },
   ],
-  // Kasir: Kasir · Tutup Toko
+  gudang: [
+    { path: '/stok',           label: 'Stok' },
+    { path: '/pembelian',      label: 'Pembelian' },
+    { path: '/mutasi',         label: 'Mutasi' },
+    { path: '/biaya',          label: 'Biaya' },
+    { path: '/tutup-toko',     label: 'Close Order' },
+  ],
+  produksi: [
+    { path: '/stok',           label: 'Stok' },
+    { path: '/pembelian',      label: 'Pembelian' },
+    { path: '/mutasi',         label: 'Mutasi' },
+    { path: '/biaya',          label: 'Biaya' },
+    { path: '/tutup-toko',     label: 'Close Order' },
+  ],
   kasir: [
     { path: '/kasir',          label: 'Kasir' },
-    { path: '/tutup-toko',     label: 'Tutup Toko' },
-  ],
-  // Gudang: Gudang · Lap. Gudang
-  gudang: [
-    { path: '/gudang',         label: 'Gudang' },
-    { path: '/laporan-gudang', label: 'Lap. Gudang' },
-  ],
-  // Produksi: Produksi saja
-  produksi: [
-    { path: '/produksi',       label: 'Produksi' },
+    { path: '/stok',           label: 'Stok' },
+    { path: '/pembelian',      label: 'Pembelian' },
+    { path: '/mutasi',         label: 'Mutasi' },
+    { path: '/biaya',          label: 'Biaya' },
+    { path: '/tutup-toko',     label: 'Close Order' },
   ],
 }
 
-const MAX_NAV = 4
+const MAX_NAV = 5
 
 export default function Layout() {
-  const { user, store, logout } = useAuthStore()
+  const { user, logout } = useAuthStore()
   const navigate = useNavigate()
   const location = useLocation()
-  const online   = isOnline()
   const [showMore, setShowMore] = useState(false)
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
 
   useEffect(() => {
-    async function pullMenuConfig() {
-      const { data } = await supabase.from('menu_role_config').select('*')
-      if (data?.length) await db.menu_role_config.bulkPut(data)
-    }
-    pullMenuConfig()
+    const up = () => setIsOnline(true)
+    const dn = () => setIsOnline(false)
+    window.addEventListener('online', up)
+    window.addEventListener('offline', dn)
+    return () => { window.removeEventListener('online', up); window.removeEventListener('offline', dn) }
   }, [])
 
   const dbMenus = useLiveQuery(async () => {
-    if (!user) return []
-    return db.menu_role_config
-      .where('role').equals(user.role)
-      .filter(m => m.is_visible)
-      .sortBy('sort_order')
+    if (!user?.role) return []
+    const configs = await db.menu_role_config
+      .where('role').equals(user.role).toArray()
+    return configs
   }, [user?.role])
 
-  // Pakai DB config kalau ada, fallback ke default
-  // DEFAULT_MENUS jadi master — DB hanya filter visibility per menu
-  const allMenus: { menu_path: string; menu_label: string }[] = (() => {
+  const allMenus = (() => {
     const defaults = DEFAULT_MENUS[user?.role || ''] || []
     if (!dbMenus || dbMenus.length === 0) {
-      // Belum ada config di DB — pakai semua default
       return defaults.map(d => ({ menu_path: d.path, menu_label: d.label }))
     }
-    // Ada config di DB — filter: tampilkan default yang is_visible=true di DB
-    // Menu yang tidak ada di DB config → tetap tampil (default on)
     const dbMap = Object.fromEntries(dbMenus.map(m => [m.menu_path, m.is_visible]))
     return defaults
-      .filter(d => dbMap[d.path] !== false) // false = explicitly hidden
+      .filter(d => dbMap[d.path] !== false)
       .map(d => ({ menu_path: d.path, menu_label: d.label }))
   })()
 
   const navMenus  = allMenus.slice(0, MAX_NAV)
   const moreMenus = allMenus.slice(MAX_NAV)
   const hasMore   = moreMenus.length > 0
-  const activeInMore = moreMenus.some(m => location.pathname.startsWith(m.menu_path))
+
+  const isMoreActive = moreMenus.some(m => location.pathname.startsWith(m.menu_path))
 
   function handleLogout() {
-    if (confirm('Yakin ingin keluar?')) { logout(); navigate('/login') }
+    logout()
+    navigate('/login')
   }
 
-  const storeName = user?.role === 'owner' ? APP_NAME : (store?.name || APP_NAME)
-  const roleLabel = user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : ''
-
   return (
-    // Pakai 100dvh (dynamic viewport height) agar tidak terpotong address bar Android
-    <div className="flex flex-col bg-gray-50" style={{ height: '100dvh' }}>
-
-      {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
-        <div>
-          <h1 className="font-semibold text-gray-800 text-sm leading-tight">{storeName}</h1>
-          <p className="text-xs text-gray-500">
-            {user?.role === 'owner' ? 'Owner' : `${user?.name} · ${roleLabel}`}
-          </p>
+    <div className="flex flex-col h-[100dvh] bg-gray-50 max-w-lg mx-auto">
+      {/* Offline banner */}
+      {!isOnline && (
+        <div className="bg-amber-500 text-white text-xs text-center py-1 px-3 flex items-center justify-center gap-1.5 flex-shrink-0">
+          <WifiOff size={12} />
+          <span>Offline — data tersimpan lokal</span>
         </div>
-        <div className="flex items-center gap-3">
-          {online
-            ? <Wifi size={16} className="text-green-500" />
-            : <WifiOff size={16} className="text-amber-400" />}
-          <button onClick={handleLogout} className="p-2 rounded-xl text-gray-500 active:bg-gray-100">
-            <LogOut size={18} />
-          </button>
-        </div>
-      </header>
+      )}
 
-      {/* Main content — flex-1 + min-h-0 agar tidak overflow */}
-      <main className="flex-1 overflow-hidden min-h-0">
+      {/* Content */}
+      <div className="flex-1 overflow-hidden relative">
         <Outlet />
-      </main>
+      </div>
 
-      {/* Bottom navigation */}
-      <nav className="bg-white border-t border-gray-100 flex-shrink-0 safe-area-bottom">
+      {/* Bottom Nav */}
+      <div className="bg-white border-t border-gray-100 flex-shrink-0 safe-area-pb">
         <div className="flex">
-          {navMenus.map((menu) => {
+          {navMenus.map(menu => {
             const Icon = ICON_MAP[menu.menu_path] || Package
+            const isActive = location.pathname === menu.menu_path || location.pathname.startsWith(menu.menu_path + '/')
             return (
-              <NavLink
-                key={menu.menu_path}
-                to={menu.menu_path}
-                className={({ isActive }) => cn(
-                  'flex-1 flex flex-col items-center py-2 gap-0.5 text-xs transition-colors min-w-[56px]',
+              <NavLink key={menu.menu_path} to={menu.menu_path}
+                className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${
                   isActive ? 'text-gray-900' : 'text-gray-400'
-                )}>
-                {({ isActive }) => (
-                  <>
-                    <Icon size={20} strokeWidth={isActive ? 2.5 : 1.8} />
-                    <span className={cn('font-medium text-[10px]', isActive && 'font-semibold')}>
-                      {menu.menu_label}
-                    </span>
-                  </>
-                )}
+                }`}>
+                <Icon size={20} strokeWidth={isActive ? 2 : 1.5} />
+                <span>{menu.menu_label}</span>
               </NavLink>
             )
           })}
 
           {hasMore && (
-            <button
-              onClick={() => setShowMore(true)}
-              className={cn(
-                'flex-1 flex flex-col items-center py-2 gap-0.5 text-xs min-w-[56px] transition-colors',
-                activeInMore ? 'text-gray-900' : 'text-gray-400'
-              )}>
-              <MoreHorizontal size={20} strokeWidth={activeInMore ? 2.5 : 1.8} />
-              <span className={cn('font-medium text-[10px]', activeInMore && 'font-semibold')}>Lainnya</span>
+            <button onClick={() => setShowMore(true)}
+              className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${
+                isMoreActive ? 'text-gray-900' : 'text-gray-400'
+              }`}>
+              <MoreHorizontal size={20} strokeWidth={isMoreActive ? 2 : 1.5} />
+              <span>Lainnya</span>
             </button>
           )}
         </div>
-      </nav>
+      </div>
 
-      {/* Drawer "Lainnya" */}
+      {/* More Menu Sheet */}
       {showMore && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end">
-          <div className="absolute inset-0 bg-black/30" onClick={() => setShowMore(false)} />
-          <div className="relative bg-white rounded-t-2xl shadow-xl">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-              <p className="font-semibold text-gray-900 text-sm">Menu Lainnya</p>
-              <button onClick={() => setShowMore(false)} className="p-1 text-gray-400">
-                <X size={18} />
-              </button>
+        <div className="fixed inset-0 z-50 flex flex-col justify-end" onClick={() => setShowMore(false)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative bg-white rounded-t-2xl p-4 pb-8 max-w-lg mx-auto w-full" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">{user?.name}</p>
+                <p className="text-xs text-gray-400 capitalize">{user?.role}</p>
+              </div>
+              <div className="flex items-center gap-3">
+                {isOnline
+                  ? <Wifi size={16} className="text-green-500" />
+                  : <WifiOff size={16} className="text-amber-500" />}
+                <button onClick={() => setShowMore(false)} className="p-1 text-gray-400">
+                  <X size={20} />
+                </button>
+              </div>
             </div>
-            <div className="grid grid-cols-4 gap-1 p-4 pb-8">
-              {moreMenus.map((menu) => {
+
+            <div className="grid grid-cols-4 gap-2 mb-4">
+              {moreMenus.map(menu => {
                 const Icon = ICON_MAP[menu.menu_path] || Package
                 const isActive = location.pathname.startsWith(menu.menu_path)
                 return (
-                  <button
-                    key={menu.menu_path}
-                    onClick={() => { navigate(menu.menu_path); setShowMore(false) }}
-                    className={cn(
-                      'flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl transition-colors',
-                      isActive ? 'bg-gray-100' : 'active:bg-gray-50'
-                    )}>
-                    <Icon
-                      size={22}
-                      className={isActive ? 'text-gray-900' : 'text-gray-500'}
-                      strokeWidth={isActive ? 2.5 : 1.8}
-                    />
-                    <span className={cn(
-                      'text-[10px] font-medium text-center leading-tight',
-                      isActive ? 'text-gray-900' : 'text-gray-500'
-                    )}>
-                      {menu.menu_label}
-                    </span>
-                  </button>
+                  <NavLink key={menu.menu_path} to={menu.menu_path}
+                    onClick={() => setShowMore(false)}
+                    className={`flex flex-col items-center gap-1.5 p-3 rounded-xl transition-colors ${
+                      isActive ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-600 active:bg-gray-100'
+                    }`}>
+                    <Icon size={22} />
+                    <span className="text-[10px] font-medium text-center leading-tight">{menu.menu_label}</span>
+                  </NavLink>
                 )
               })}
             </div>
+
+            <button onClick={handleLogout}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-gray-200 text-sm font-medium text-red-500 active:bg-red-50">
+              <LogOut size={16} />
+              Keluar
+            </button>
           </div>
         </div>
       )}

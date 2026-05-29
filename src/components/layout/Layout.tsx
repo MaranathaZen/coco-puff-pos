@@ -74,11 +74,9 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
   ],
   produksi: [
     { path: '/stok',           label: 'Stok' },
-    { path: '/pembelian',      label: 'Pembelian' },
+    { path: '/produksi',       label: 'Produksi' },
     { path: '/mutasi',         label: 'Mutasi' },
     { path: '/biaya',          label: 'Biaya' },
-    { path: '/tutup-toko',     label: 'Close Order' },
-    { path: '/accounting',     label: 'Accounting' },
   ],
   kasir: [
     { path: '/kasir',          label: 'Kasir' },

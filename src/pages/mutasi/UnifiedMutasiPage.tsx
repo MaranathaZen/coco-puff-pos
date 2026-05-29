@@ -103,14 +103,14 @@ export default function UnifiedMutasiPage() {
       </div>
       <ToolbarCtx.Provider value={setToolbarActions}>
         <div className="flex-1 overflow-auto bg-gray-50">
-          <MutasiList userId={user!.id} role={user!.role} />
+          <MutasiList userId={user!.id} role={user!.role} storeId={user!.store_id || ''} />
         </div>
       </ToolbarCtx.Provider>
     </div>
   )
 }
 
-function MutasiList({ userId, role }: { userId: string; role: string }) {
+function MutasiList({ userId, role, storeId }: { userId: string; role: string; storeId: string }) {
   const setToolbar = useContext(ToolbarCtx)
   const [showForm, setShowForm] = useState(false)
   const [groupMode, setGroupMode] = useState<Period>('hari')
@@ -136,7 +136,19 @@ function MutasiList({ userId, role }: { userId: string; role: string }) {
   }, [groupMode])
 
   const mutations = useLiveQuery(async () => {
-    const m    = await db.warehouse_mutations.orderBy('created_at').reverse().toArray()
+    let m = await db.warehouse_mutations.orderBy('created_at').reverse().toArray()
+    // Filter berdasarkan role:
+    // - gudang/owner/manager: semua mutasi
+    // - produksi: hanya mutasi yang dibuat oleh user produksi (created_by) atau tipe kirim produk
+    // - kasir: hanya mutasi toko sendiri
+    if (role === 'produksi') {
+      m = m.filter(x => x.created_by === userId ||
+        ['to_store','to_partner','internal_use','adjustment'].includes(x.mutation_type) &&
+        x.created_by === userId
+      )
+    } else if (role === 'kasir') {
+      m = m.filter(x => x.destination_id === storeId || x.created_by === userId)
+    }
     const mi   = await db.warehouse_mutation_items.toArray()
     const mats = await db.materials.toArray()
     const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
@@ -144,7 +156,7 @@ function MutasiList({ userId, role }: { userId: string; role: string }) {
       ...x,
       items: mi.filter(i => i.mutation_id === x.id).map(i => ({ ...i, material: mMap[i.material_id] }))
     }))
-  }, [])
+  }, [role, userId, storeId])
 
   const filtered = useMemo(() => {
     if (!mutations) return []

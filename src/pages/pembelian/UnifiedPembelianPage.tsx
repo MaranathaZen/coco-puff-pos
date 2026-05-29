@@ -67,6 +67,24 @@ export default function UnifiedPembelianPage() {
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
   const [syncing, setSyncing] = useState(false)
 
+  // Produksi tidak punya akses pembelian
+  if (user?.role === 'produksi') {
+    return (
+      <div className="flex flex-col h-full bg-gray-50">
+        <div className="bg-white border-b border-gray-100 px-4 py-3">
+          <h1 className="text-lg font-semibold text-gray-900">Pembelian</h1>
+        </div>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center p-8">
+            <p className="text-4xl mb-3">🚫</p>
+            <p className="text-sm font-medium text-gray-700">Akses Terbatas</p>
+            <p className="text-xs text-gray-400 mt-1">Divisi produksi tidak memiliki akses pembelian</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   async function syncData() {
     setSyncing(true)
     try {

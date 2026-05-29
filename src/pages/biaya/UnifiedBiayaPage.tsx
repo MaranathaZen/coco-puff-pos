@@ -89,14 +89,14 @@ export default function UnifiedBiayaPage() {
       </div>
       <ToolbarCtx.Provider value={setToolbarActions}>
         <div className="flex-1 overflow-auto bg-gray-50">
-          <BiayaList userId={user!.id} />
+          <BiayaList userId={user!.id} role={user!.role} />
         </div>
       </ToolbarCtx.Provider>
     </div>
   )
 }
 
-function BiayaList({ userId }: { userId: string }) {
+function BiayaList({ userId, role }: { userId: string; role: string }) {
   const setToolbar = useContext(ToolbarCtx)
   const [showForm, setShowForm] = useState(false)
   const [groupMode, setGroupMode] = useState<Period>('hari')
@@ -121,7 +121,14 @@ function BiayaList({ userId }: { userId: string }) {
     return () => setToolbar(null)
   }, [groupMode])
 
-  const expenses = useLiveQuery(() => db.warehouse_expenses.orderBy('created_at').reverse().toArray(), [])
+  const expenses = useLiveQuery(async () => {
+    let list = await db.warehouse_expenses.orderBy('created_at').reverse().toArray()
+    // Produksi dan kasir hanya lihat biaya yang mereka input sendiri
+    if (role === 'produksi' || role === 'kasir') {
+      list = list.filter(e => e.created_by === userId)
+    }
+    return list
+  }, [role, userId])
 
   const filtered = useMemo(() => {
     if (!expenses) return []

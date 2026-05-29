@@ -125,7 +125,7 @@ export default function App() {
 
           {/* Legacy routes — redirect ke halaman baru */}
           <Route path="gudang"        element={<Navigate to="/stok" replace />} />
-          <Route path="produksi"      element={<Navigate to="/stok" replace />} />
+          <Route path="produksi"      element={<RequireRole roles={['owner','manager','produksi']}><ProduksiPage /></RequireRole>} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

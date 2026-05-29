@@ -107,7 +107,7 @@ export default function LoginPage() {
 
       if (data?.length) {
         await db.users.bulkPut(data)
-        setKasirs(data.filter((u: User) => u.role === 'kasir'))
+        setKasirs(data.filter((u: User) => ['kasir', 'gudang', 'produksi'].includes(u.role)))
       } else {
         throw new Error('Supabase kosong')
       }
@@ -226,7 +226,7 @@ export default function LoginPage() {
               onClick={() => { setScreen('master'); setError('') }}
               className="text-xs text-gray-400 underline underline-offset-2"
             >
-              Login sebagai Owner / Manager
+              Login sebagai Staff / Admin
             </button>
           </div>
 
@@ -371,8 +371,8 @@ export default function LoginPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
             </svg>
           </div>
-          <h2 className="text-xl font-bold text-gray-900">Login Owner / Manager</h2>
-          <p className="text-sm text-gray-400">Akses penuh ke semua fitur</p>
+          <h2 className="text-xl font-bold text-gray-900">Login Staff / Admin</h2>
+          <p className="text-sm text-gray-400">Owner, Manager, Gudang, Produksi</p>
         </div>
 
         <div className="space-y-3">

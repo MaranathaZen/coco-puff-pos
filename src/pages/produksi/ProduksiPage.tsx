@@ -68,7 +68,7 @@ const PRODUK_SETENGAH_JADI_KATEGORI = ['bahan_setengah_jadi']
 
 export default function ProduksiPage() {
   const { user } = useAuthStore()
-  const [tab, setTab] = useState<Tab>('stok')
+  const [tab, setTab] = useState<Tab>('produksi')
   const [isSyncing, setIsSyncing] = useState(false)
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
 
@@ -101,9 +101,7 @@ export default function ProduksiPage() {
   }
 
   const TABS = [
-    { id: 'stok',     label: 'Stok',     icon: Package },
     { id: 'produksi', label: 'Produksi', icon: FlaskConical },
-    { id: 'kirim',    label: 'Kirim',    icon: ArrowRightLeft },
   ] as const
 
   return (
@@ -135,9 +133,7 @@ export default function ProduksiPage() {
 
       <ToolbarCtx.Provider value={setToolbarActions}>
         <div className="flex-1 overflow-auto bg-gray-50">
-          {tab === 'stok'     && <StokProduksiTab />}
           {tab === 'produksi' && <CatatProduksiTab userId={user!.id} />}
-          {tab === 'kirim'    && <KirimTab userId={user!.id} />}
         </div>
       </ToolbarCtx.Provider>
     </div>

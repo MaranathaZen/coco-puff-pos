@@ -131,6 +131,7 @@ export default function Layout() {
   const isMoreActive = moreMenus.some(m => location.pathname.startsWith(m.menu_path))
 
   function handleLogout() {
+    if (!confirm('Yakin ingin keluar?')) return
     logout()
     navigate('/login')
   }

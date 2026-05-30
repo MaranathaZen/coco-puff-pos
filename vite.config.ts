@@ -7,28 +7,47 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      // Paksa service worker baru langsung aktif tanpa tunggu tab lama ditutup
       injectRegister: 'auto',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
+      // Semua asset di public/ yang perlu di-cache
+      includeAssets: [
+        'favicon-32x32.png',
+        'apple-touch-icon.png',
+        'icon-192.png',
+        'icon-512.png',
+      ],
       manifest: {
         name: 'Coco Puff POS',
-        short_name: 'CocoPuff',
+        short_name: 'CP POS',
         description: 'Point of Sale Coco Puff',
-        theme_color: '#ffffff',
-        background_color: '#ffffff',
+        theme_color: '#111111',
+        background_color: '#111111',
         display: 'standalone',
         orientation: 'portrait',
+        lang: 'id',
         icons: [
-          { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }
-        ]
+          {
+            src: 'icon-192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any maskable',
+          },
+          {
+            src: 'icon-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any maskable',
+          },
+          {
+            src: 'apple-touch-icon.png',
+            sizes: '180x180',
+            type: 'image/png',
+          },
+        ],
       },
       workbox: {
-        // Paksa service worker baru langsung claim semua client
         clientsClaim: true,
         skipWaiting: true,
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        // Jangan cache index.html — selalu ambil dari network
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api/, /^\/sw/],
         runtimeCaching: [
@@ -38,13 +57,13 @@ export default defineConfig({
             options: {
               cacheName: 'supabase-cache',
               networkTimeoutSeconds: 10,
-            }
-          }
-        ]
-      }
-    })
+            },
+          },
+        ],
+      },
+    }),
   ],
   resolve: {
-    alias: { '@': '/src' }
-  }
+    alias: { '@': '/src' },
+  },
 })

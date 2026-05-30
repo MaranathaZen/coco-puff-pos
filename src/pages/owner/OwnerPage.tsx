@@ -1,21 +1,27 @@
 // src/pages/owner/OwnerPage.tsx
 // CHANGELOG:
-// - Hapus card notif stok rendah
-// - Fix omzet per toko: hapus "avg", tampilkan total + jumlah transaksi saja
-// - Progress bar tetap ada
+// - Dashboard: omzet per toko, nilai stok, tanpa avg, tanpa notif stok rendah
+// - Quick Actions: shortcut ke semua halaman input tanpa ganti login
+// - Owner bisa akses kasir, gudang, produksi, biaya langsung dari dashboard
 
 import { useState, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useNavigate } from 'react-router-dom'
 import { db } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
-import { TrendingUp, Store, Package, RefreshCw, ShoppingBag } from 'lucide-react'
+import {
+  TrendingUp, Store, Package, RefreshCw, ShoppingBag,
+  ShoppingCart, FlaskConical, ArrowRightLeft, Receipt,
+  BarChart3, Settings, BookOpen, ChevronRight,
+} from 'lucide-react'
 
 type Period = 'hari' | 'minggu' | 'bulan'
 
 export default function OwnerPage() {
-  const { user } = useAuthStore()
+  const { user }    = useAuthStore()
+  const navigate    = useNavigate()
   const [period, setPeriod]   = useState<Period>('hari')
   const [syncing, setSyncing] = useState(false)
 
@@ -23,12 +29,12 @@ export default function OwnerPage() {
     setSyncing(true)
     try {
       const [txRes, storesRes, matsRes, stockRes] = await Promise.all([
-        supabase.from('transactions').select('*').eq('status', 'completed'),
+        supabase.from('transactions').select('*').eq('status','completed'),
         supabase.from('stores').select('*').eq('is_active', true),
         supabase.from('materials').select('*'),
         supabase.from('warehouse_stock').select('*'),
       ])
-      if (txRes.data?.length)    await db.transactions.bulkPut(txRes.data)
+      if (txRes.data?.length)     await db.transactions.bulkPut(txRes.data)
       if (storesRes.data?.length) await db.stores.bulkPut(storesRes.data)
       if (matsRes.data?.length)   await db.materials.bulkPut(matsRes.data)
       if (stockRes.data?.length)  await db.warehouse_stock.bulkPut(stockRes.data)
@@ -36,8 +42,8 @@ export default function OwnerPage() {
   }
 
   const dateRange = useMemo(() => {
-    const now = new Date()
-    const end = new Date(now); end.setHours(23,59,59,999)
+    const now   = new Date()
+    const end   = new Date(now); end.setHours(23,59,59,999)
     const start = new Date(now)
     if (period === 'hari')   start.setHours(0,0,0,0)
     if (period === 'minggu') { start.setDate(now.getDate()-6); start.setHours(0,0,0,0) }
@@ -76,11 +82,44 @@ export default function OwnerPage() {
   const totalTrx   = storeStats.reduce((s, x) => s + x.count, 0)
   const periodLabel = { hari: 'Hari Ini', minggu: '7 Hari', bulan: 'Bulan Ini' }
 
+  // Quick action groups
+  const quickActions = [
+    {
+      group: 'Kasir & Toko',
+      items: [
+        { label: 'Kasir',        icon: ShoppingBag,    path: '/kasir',      color: 'bg-blue-50 text-blue-600'   },
+        { label: 'Close Order',  icon: BarChart3,       path: '/tutup-toko', color: 'bg-green-50 text-green-600' },
+        { label: 'Mutasi',       icon: ArrowRightLeft,  path: '/mutasi',     color: 'bg-purple-50 text-purple-600' },
+        { label: 'Biaya',        icon: Receipt,         path: '/biaya',      color: 'bg-orange-50 text-orange-600' },
+      ]
+    },
+    {
+      group: 'Gudang',
+      items: [
+        { label: 'Pembelian',    icon: ShoppingCart,    path: '/pembelian',  color: 'bg-amber-50 text-amber-600'  },
+        { label: 'Stok',         icon: Package,         path: '/stok',       color: 'bg-gray-100 text-gray-600'   },
+      ]
+    },
+    {
+      group: 'Produksi & Setting',
+      items: [
+        { label: 'Produksi',     icon: FlaskConical,    path: '/produksi',   color: 'bg-cyan-50 text-cyan-600'    },
+        { label: 'Resep',        icon: BookOpen,        path: '/resep',      color: 'bg-pink-50 text-pink-600'    },
+        { label: 'Produk',       icon: Package,         path: '/produk',     color: 'bg-indigo-50 text-indigo-600'},
+        { label: 'Setting',      icon: Settings,        path: '/pengaturan', color: 'bg-gray-100 text-gray-600'   },
+      ]
+    },
+  ]
+
   return (
     <div className="flex flex-col h-full bg-gray-50">
+      {/* Header */}
       <div className="bg-white px-4 pt-4 pb-3 flex-shrink-0">
         <div className="flex items-center justify-between mb-3">
-          <h1 className="text-lg font-semibold text-gray-900">Dashboard</h1>
+          <div>
+            <h1 className="text-lg font-semibold text-gray-900">Dashboard</h1>
+            <p className="text-xs text-gray-400 capitalize">{user?.name} · {user?.role}</p>
+          </div>
           <button onClick={syncAll} disabled={syncing} className="p-2 rounded-full text-gray-400">
             <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
           </button>
@@ -97,7 +136,7 @@ export default function OwnerPage() {
 
       <div className="flex-1 overflow-auto p-4 space-y-4">
 
-        {/* Summary */}
+        {/* KPI summary */}
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-white rounded-xl border border-gray-100 p-4">
             <div className="flex items-center gap-2 mb-1">
@@ -116,38 +155,73 @@ export default function OwnerPage() {
           </div>
         </div>
 
-        {/* Per toko — tanpa avg */}
+        {/* Per toko */}
         {storeStats.length > 0 && (
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Omzet per Toko</p>
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              {storeStats.map((s, idx) => {
-                const pct = totalOmzet > 0 ? (s.omzet / totalOmzet) * 100 : 0
-                return (
-                  <div key={s.store.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                          <Store size={13} className="text-gray-500" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{s.store.name}</p>
-                          <p className="text-xs text-gray-400">{s.store.city} · {s.count} transaksi</p>
-                        </div>
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 border-b border-gray-50">Omzet per Toko</p>
+            {storeStats.map((s, idx) => {
+              const pct = totalOmzet > 0 ? (s.omzet / totalOmzet) * 100 : 0
+              return (
+                <div key={s.store.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <Store size={13} className="text-gray-500" />
                       </div>
-                      <p className="text-sm font-semibold text-gray-900">{formatRupiah(s.omzet)}</p>
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{s.store.name}</p>
+                        <p className="text-xs text-gray-400">{s.store.city} · {s.count} transaksi</p>
+                      </div>
                     </div>
-                    {totalOmzet > 0 && (
-                      <div className="w-full bg-gray-100 rounded-full h-1">
-                        <div className="bg-gray-900 h-1 rounded-full transition-all" style={{ width: `${pct}%` }} />
-                      </div>
-                    )}
+                    <p className="text-sm font-semibold text-gray-900">{formatRupiah(s.omzet)}</p>
                   </div>
-                )
-              })}
-            </div>
+                  {totalOmzet > 0 && (
+                    <div className="w-full bg-gray-100 rounded-full h-1">
+                      <div className="bg-gray-900 h-1 rounded-full" style={{ width: `${pct}%` }} />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
+
+        {/* Quick Actions — owner bisa input semua divisi */}
+        <div className="space-y-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Aksi Cepat</p>
+          {quickActions.map(group => (
+            <div key={group.group}>
+              <p className="text-xs text-gray-400 px-1 mb-1.5">{group.group}</p>
+              <div className="grid grid-cols-4 gap-2">
+                {group.items.map(action => {
+                  const Icon = action.icon
+                  return (
+                    <button key={action.path} onClick={() => navigate(action.path)}
+                      className="bg-white rounded-xl border border-gray-100 p-3 flex flex-col items-center gap-1.5 active:scale-95 transition-transform">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${action.color}`}>
+                        <Icon size={18} />
+                      </div>
+                      <span className="text-[10px] font-medium text-gray-600 text-center leading-tight">{action.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Laporan shortcut */}
+        <button onClick={() => navigate('/laporan')}
+          className="w-full bg-gray-900 text-white rounded-xl p-4 flex items-center justify-between active:opacity-90">
+          <div className="flex items-center gap-3">
+            <BarChart3 size={20} />
+            <div className="text-left">
+              <p className="text-sm font-semibold">Lihat Laporan Lengkap</p>
+              <p className="text-xs text-gray-400">Penjualan · Gudang · Produksi · Biaya</p>
+            </div>
+          </div>
+          <ChevronRight size={18} className="text-gray-400" />
+        </button>
 
         {storeStats.length === 0 && (
           <div className="bg-white rounded-xl border border-gray-100 py-12 text-center">
@@ -156,6 +230,7 @@ export default function OwnerPage() {
             <button onClick={syncAll} className="mt-3 text-xs text-blue-500 underline">Sync data</button>
           </div>
         )}
+
       </div>
     </div>
   )

@@ -1,3 +1,10 @@
+// src/components/layout/Layout.tsx
+// CHANGELOG:
+// - Desktop responsive: sidebar navigation di kiri, content di kanan
+// - Mobile: bottom nav (existing behavior)
+// - Breakpoint: md (768px) ke atas = desktop layout
+// - Accounting kembali untuk owner/manager/gudang
+
 import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -8,7 +15,7 @@ import {
   ShoppingCart, FlaskConical,
   BarChart3, LayoutDashboard, Settings,
   MoreHorizontal, X, Receipt, ArrowRightLeft,
-  Package, Calculator,
+  Package, Calculator, BookOpen, Tag,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -29,7 +36,6 @@ const ICON_MAP: Record<string, LucideIcon> = {
   '/accounting':     Calculator,
 }
 
-// Accounting: owner, manager, gudang saja
 const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
   owner: [
     { path: '/owner',          label: 'Dashboard'   },
@@ -87,8 +93,8 @@ const MAX_NAV = 4
 
 export default function Layout() {
   const { user, logout } = useAuthStore()
-  const navigate  = useNavigate()
-  const location  = useLocation()
+  const navigate   = useNavigate()
+  const location   = useLocation()
   const [showMore, setShowMore] = useState(false)
   const [isOnline, setIsOnline] = useState(navigator.onLine)
 
@@ -126,37 +132,102 @@ export default function Layout() {
     navigate('/login')
   }
 
+  function NavItem({ menu_path, menu_label, onClick }: { menu_path: string; menu_label: string; onClick?: () => void }) {
+    const Icon     = ICON_MAP[menu_path] || Package
+    const isActive = location.pathname === menu_path || location.pathname.startsWith(menu_path + '/')
+    return (
+      <NavLink to={menu_path} onClick={onClick}
+        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+          isActive ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+        }`}>
+        <Icon size={18} strokeWidth={isActive ? 2 : 1.5} />
+        <span>{menu_label}</span>
+      </NavLink>
+    )
+  }
+
   return (
-    <div className="flex flex-col h-[100dvh] bg-gray-50 max-w-lg mx-auto">
-      {!isOnline && (
-        <div className="bg-amber-500 text-white text-xs text-center py-1 px-3 flex items-center justify-center gap-1.5 flex-shrink-0">
-          <WifiOff size={12} /><span>Offline — data tersimpan lokal</span>
+    <div className="flex h-[100dvh] bg-gray-50">
+
+      {/* ── DESKTOP SIDEBAR ── */}
+      <aside className="hidden md:flex flex-col w-56 bg-white border-r border-gray-100 flex-shrink-0">
+        {/* Logo */}
+        <div className="px-4 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center flex-shrink-0">
+              <span className="text-white text-xs font-bold">CP</span>
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-900 truncate">Coco Puff POS</p>
+              <p className="text-xs text-gray-400 capitalize truncate">{user?.name}</p>
+            </div>
+          </div>
         </div>
-      )}
-      <div className="flex-1 overflow-hidden relative"><Outlet /></div>
-      <div className="bg-white border-t border-gray-100 flex-shrink-0 safe-area-pb">
-        <div className="flex">
-          {navMenus.map(menu => {
-            const Icon = ICON_MAP[menu.menu_path] || Package
-            const isActive = location.pathname === menu.menu_path || location.pathname.startsWith(menu.menu_path + '/')
-            return (
-              <NavLink key={menu.menu_path} to={menu.menu_path}
-                className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${isActive ? 'text-gray-900' : 'text-gray-400'}`}>
-                <Icon size={20} strokeWidth={isActive ? 2 : 1.5} />
-                <span>{menu.menu_label}</span>
-              </NavLink>
-            )
-          })}
-          <button onClick={() => setShowMore(true)}
-            className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${isMoreActive ? 'text-gray-900' : 'text-gray-400'}`}>
-            <MoreHorizontal size={20} strokeWidth={isMoreActive ? 2 : 1.5} />
-            <span>Lainnya</span>
+
+        {/* Nav items */}
+        <nav className="flex-1 overflow-auto p-2 space-y-0.5">
+          {allMenus.map(menu => (
+            <NavItem key={menu.menu_path} menu_path={menu.menu_path} menu_label={menu.menu_label} />
+          ))}
+        </nav>
+
+        {/* Footer */}
+        <div className="p-2 border-t border-gray-100 space-y-1">
+          {/* Online indicator */}
+          <div className="flex items-center gap-2 px-3 py-2">
+            {isOnline
+              ? <><Wifi size={14} className="text-green-500" /><span className="text-xs text-green-600">Online</span></>
+              : <><WifiOff size={14} className="text-amber-500" /><span className="text-xs text-amber-600">Offline</span></>}
+          </div>
+          <button onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-red-500 hover:bg-red-50 transition-colors">
+            <LogOut size={18} />
+            <span>Keluar</span>
           </button>
+        </div>
+      </aside>
+
+      {/* ── MAIN CONTENT ── */}
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+
+        {/* Offline banner */}
+        {!isOnline && (
+          <div className="bg-amber-500 text-white text-xs text-center py-1 px-3 flex items-center justify-center gap-1.5 flex-shrink-0">
+            <WifiOff size={12} /><span>Offline — data tersimpan lokal</span>
+          </div>
+        )}
+
+        {/* Content */}
+        <div className="flex-1 overflow-hidden relative max-w-lg mx-auto w-full md:max-w-none">
+          <Outlet />
+        </div>
+
+        {/* ── MOBILE BOTTOM NAV ── */}
+        <div className="md:hidden bg-white border-t border-gray-100 flex-shrink-0 safe-area-pb">
+          <div className="flex">
+            {navMenus.map(menu => {
+              const Icon     = ICON_MAP[menu.menu_path] || Package
+              const isActive = location.pathname === menu.menu_path || location.pathname.startsWith(menu.menu_path + '/')
+              return (
+                <NavLink key={menu.menu_path} to={menu.menu_path}
+                  className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${isActive ? 'text-gray-900' : 'text-gray-400'}`}>
+                  <Icon size={20} strokeWidth={isActive ? 2 : 1.5} />
+                  <span>{menu.menu_label}</span>
+                </NavLink>
+              )
+            })}
+            <button onClick={() => setShowMore(true)}
+              className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${isMoreActive ? 'text-gray-900' : 'text-gray-400'}`}>
+              <MoreHorizontal size={20} strokeWidth={isMoreActive ? 2 : 1.5} />
+              <span>Lainnya</span>
+            </button>
+          </div>
         </div>
       </div>
 
+      {/* ── MOBILE MORE SHEET ── */}
       {showMore && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end" onClick={() => setShowMore(false)}>
+        <div className="md:hidden fixed inset-0 z-50 flex flex-col justify-end" onClick={() => setShowMore(false)}>
           <div className="absolute inset-0 bg-black/40" />
           <div className="relative bg-white rounded-t-2xl p-4 pb-8 max-w-lg mx-auto w-full" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
@@ -172,11 +243,11 @@ export default function Layout() {
             {moreMenus.length > 0 && (
               <div className="grid grid-cols-4 gap-2 mb-4">
                 {moreMenus.map(menu => {
-                  const Icon = ICON_MAP[menu.menu_path] || Package
+                  const Icon     = ICON_MAP[menu.menu_path] || Package
                   const isActive = location.pathname.startsWith(menu.menu_path)
                   return (
                     <NavLink key={menu.menu_path} to={menu.menu_path} onClick={() => setShowMore(false)}
-                      className={`flex flex-col items-center gap-1.5 p-3 rounded-xl transition-colors ${isActive ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-600 active:bg-gray-100'}`}>
+                      className={`flex flex-col items-center gap-1.5 p-3 rounded-xl transition-colors ${isActive ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-600'}`}>
                       <Icon size={22} />
                       <span className="text-[10px] font-medium text-center leading-tight">{menu.menu_label}</span>
                     </NavLink>

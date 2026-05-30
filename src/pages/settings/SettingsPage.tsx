@@ -1,66 +1,66 @@
 // src/pages/settings/SettingsPage.tsx
+// CHANGELOG:
+// - Tambah tab Promo (diskon, buy1get1, promo persen/nominal) untuk owner/manager
+// - Tab order: User · Supplier · Franchise · Menu · Toko · Password · PPN · Promo · Reset
+
 import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now, addToSyncQueue } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { hashPassword } from '@/lib/utils'
-import { X, ChevronRight, Plus, Check } from 'lucide-react'
+import { X, ChevronRight, Plus, Check, Trash2, Tag } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { User, Role } from '@/types'
 import type { Supplier, Partner, MenuRoleConfig } from '@/lib/db'
 
-type Tab = 'users' | 'supplier' | 'mitra' | 'menu' | 'toko' | 'password' | 'ppn' | 'reset'
+type Tab = 'users' | 'supplier' | 'mitra' | 'menu' | 'toko' | 'password' | 'ppn' | 'promo' | 'reset'
 
 const ALL_MENUS = [
-  { path: '/kasir',         label: 'Kasir' },
-  { path: '/produk',        label: 'Produk' },
-  { path: '/stok',          label: 'Stok' },
-  { path: '/gudang',        label: 'Gudang' },
-  { path: '/produksi',      label: 'Produksi' },
-  { path: '/laporan',       label: 'Laporan' },
-  { path: '/laporan-gudang',label: 'Lap. Gudang' },
-  { path: '/owner',         label: 'Dashboard' },
-  { path: '/pengaturan',    label: 'Setting' },
-  { path: '/tutup-toko',     label: 'Tutup Toko' },
+  { path: '/kasir',          label: 'Kasir'        },
+  { path: '/produk',         label: 'Produk'       },
+  { path: '/stok',           label: 'Stok'         },
+  { path: '/gudang',         label: 'Gudang'       },
+  { path: '/produksi',       label: 'Produksi'     },
+  { path: '/laporan',        label: 'Laporan'      },
+  { path: '/laporan-gudang', label: 'Lap. Gudang'  },
+  { path: '/owner',          label: 'Dashboard'    },
+  { path: '/pengaturan',     label: 'Setting'      },
+  { path: '/tutup-toko',     label: 'Close Order'  },
 ]
 
-const ROLES = ['owner', 'manager', 'kasir', 'gudang', 'produksi']
+const ROLES = ['owner','manager','kasir','gudang','produksi']
 
 export default function SettingsPage() {
   const { user } = useAuthStore()
   const [tab, setTab] = useState<Tab>('users')
-
-  const isOwner = user?.role === 'owner'
+  const isOwnerManager = user?.role === 'owner' || user?.role === 'manager'
 
   const tabs: { id: Tab; label: string; ownerOnly?: boolean }[] = [
-    { id: 'users',    label: 'User' },
-    { id: 'supplier', label: 'Supplier' },
+    { id: 'users',    label: 'User'      },
+    { id: 'supplier', label: 'Supplier'  },
     { id: 'mitra',    label: 'Franchise' },
-    { id: 'menu',     label: 'Menu', ownerOnly: true },
-    { id: 'toko',     label: 'Toko', ownerOnly: true },
-    { id: 'password', label: 'Password' },
-    { id: 'ppn',      label: 'PPN', ownerOnly: true },
+    { id: 'menu',     label: 'Menu',     ownerOnly: true },
+    { id: 'toko',     label: 'Toko',     ownerOnly: true },
+    { id: 'password', label: 'Password'  },
+    { id: 'ppn',      label: 'PPN',      ownerOnly: true },
+    { id: 'promo',    label: 'Promo',    ownerOnly: true },
     { id: 'reset',    label: 'Reset Data', ownerOnly: true },
-  ].filter(t => !t.ownerOnly || isOwner)
+  ].filter(t => !t.ownerOnly || isOwnerManager)
 
   return (
     <div className="flex flex-col h-full bg-white">
       <div className="px-4 pt-4 pb-0">
         <h1 className="text-lg font-semibold text-gray-900">Pengaturan</h1>
       </div>
-
-      <div className="px-4 mt-3 flex gap-0 border-b border-gray-100 overflow-x-auto">
+      <div className="px-4 mt-3 flex gap-0 border-b border-gray-100 overflow-x-auto scrollbar-hide">
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            className={`pb-2.5 mr-5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-              tab === t.id ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'
-            }`}>
+            className={`pb-2.5 mr-5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${tab === t.id ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
             {t.label}
           </button>
         ))}
       </div>
-
       <div className="flex-1 overflow-auto bg-gray-50">
         {tab === 'users'    && <UsersTab currentUser={user!} />}
         {tab === 'supplier' && <SupplierTab />}
@@ -69,9 +69,298 @@ export default function SettingsPage() {
         {tab === 'toko'     && <TokoTab />}
         {tab === 'password' && <ChangePasswordTab userId={user!.id} storeId={user!.store_id} />}
         {tab === 'ppn'      && <PPNTab storeId={user!.store_id} />}
+        {tab === 'promo'    && <PromoTab storeId={user!.store_id} />}
         {tab === 'reset'    && <ResetDataTab />}
       </div>
     </div>
+  )
+}
+
+// ── PROMO TAB ─────────────────────────────────────────────────
+// Mendukung: diskon nominal, diskon persen, buy1get1, promo produk
+
+interface PromoItem {
+  id: string
+  store_id: string
+  product_id: string
+  name: string
+  promo_type: 'percent' | 'fixed' | 'buy1get1'
+  value: number
+  min_qty: number
+  valid_from: string
+  valid_until: string
+  is_active: boolean
+  created_at: string
+}
+
+function PromoTab({ storeId }: { storeId: string }) {
+  const [promos, setPromos]     = useState<PromoItem[]>([])
+  const [loading, setLoading]   = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [editPromo, setEdit]    = useState<PromoItem | null>(null)
+
+  async function loadPromos() {
+    setLoading(true)
+    try {
+      const { data } = await supabase
+        .from('promotions')
+        .select('*')
+        .eq('store_id', storeId)
+        .order('created_at', { ascending: false })
+      if (data) { setPromos(data); await db.promotions.bulkPut(data) }
+      else {
+        const local = await db.promotions.where('store_id').equals(storeId).toArray()
+        setPromos(local as any)
+      }
+    } catch {
+      const local = await db.promotions.where('store_id').equals(storeId).toArray()
+      setPromos(local as any)
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => { loadPromos() }, [storeId])
+
+  async function toggleActive(promo: PromoItem) {
+    const updated = { ...promo, is_active: !promo.is_active }
+    setPromos(prev => prev.map(p => p.id === promo.id ? updated : p))
+    await db.promotions.put(updated as any)
+    await supabase.from('promotions').update({ is_active: updated.is_active }).eq('id', promo.id)
+  }
+
+  async function deletePromo(id: string) {
+    if (!confirm('Hapus promo ini?')) return
+    setPromos(prev => prev.filter(p => p.id !== id))
+    await db.promotions.delete(id)
+    await supabase.from('promotions').delete().eq('id', id)
+    toast.success('Promo dihapus')
+  }
+
+  const promoTypeLabel = (t: string) =>
+    t === 'percent' ? 'Diskon %' : t === 'fixed' ? 'Diskon Nominal' : 'Buy 1 Get 1'
+
+  const now_ = new Date().toISOString()
+  const activePromos = promos.filter(p => p.is_active && p.valid_from <= now_ && p.valid_until >= now_)
+  const inactivePromos = promos.filter(p => !p.is_active || p.valid_from > now_ || p.valid_until < now_)
+
+  return (
+    <div className="p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-gray-900">Promo & Diskon</p>
+          <p className="text-xs text-gray-400">{activePromos.length} promo aktif</p>
+        </div>
+        <button onClick={() => { setEdit(null); setShowForm(true) }}
+          className="flex items-center gap-1.5 text-sm font-medium text-gray-900 bg-white border border-gray-200 px-3 py-1.5 rounded-lg">
+          <Plus size={14} /> Tambah
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="bg-white rounded-xl border border-gray-100 py-8 text-center text-sm text-gray-400">Memuat...</div>
+      ) : (
+        <>
+          {activePromos.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Aktif Sekarang</p>
+              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                {activePromos.map((p, idx) => (
+                  <PromoRow key={p.id} promo={p} idx={idx} onToggle={toggleActive} onEdit={pr => { setEdit(pr); setShowForm(true) }} onDelete={deletePromo} promoTypeLabel={promoTypeLabel} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {inactivePromos.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Nonaktif / Kadaluarsa</p>
+              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden opacity-60">
+                {inactivePromos.map((p, idx) => (
+                  <PromoRow key={p.id} promo={p} idx={idx} onToggle={toggleActive} onEdit={pr => { setEdit(pr); setShowForm(true) }} onDelete={deletePromo} promoTypeLabel={promoTypeLabel} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {promos.length === 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 py-12 text-center">
+              <Tag size={32} className="mx-auto text-gray-300 mb-2" />
+              <p className="text-sm text-gray-400">Belum ada promo</p>
+              <p className="text-xs text-gray-300 mt-1">Tambah diskon, buy1get1, atau promo spesial</p>
+            </div>
+          )}
+        </>
+      )}
+
+      {showForm && (
+        <PromoForm storeId={storeId} promo={editPromo}
+          onClose={() => { setShowForm(false); setEdit(null) }}
+          onSaved={() => { setShowForm(false); setEdit(null); loadPromos() }} />
+      )}
+    </div>
+  )
+}
+
+function PromoRow({ promo, idx, onToggle, onEdit, onDelete, promoTypeLabel }: {
+  promo: PromoItem; idx: number
+  onToggle: (p: PromoItem) => void
+  onEdit: (p: PromoItem) => void
+  onDelete: (id: string) => void
+  promoTypeLabel: (t: string) => string
+}) {
+  const validUntil = new Date(promo.valid_until).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })
+  const valueLabel = promo.promo_type === 'percent' ? `${promo.value}%`
+    : promo.promo_type === 'fixed' ? `Rp ${promo.value.toLocaleString('id-ID')}`
+    : 'Gratis 1'
+
+  return (
+    <div className={`flex items-center gap-3 px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <p className="text-sm font-medium text-gray-900 truncate">{promo.name}</p>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${
+            promo.promo_type === 'buy1get1' ? 'bg-purple-100 text-purple-700' :
+            promo.promo_type === 'percent'  ? 'bg-blue-100 text-blue-700' :
+                                              'bg-green-100 text-green-700'
+          }`}>{promoTypeLabel(promo.promo_type)}</span>
+        </div>
+        <p className="text-xs text-gray-500">{valueLabel} · s/d {validUntil}</p>
+      </div>
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        <button onClick={() => onEdit(promo)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+        </button>
+        <button onClick={() => onToggle(promo)}
+          className={`w-9 h-5 rounded-full transition-colors relative flex-shrink-0 ${promo.is_active ? 'bg-gray-900' : 'bg-gray-200'}`}>
+          <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${promo.is_active ? 'left-[18px]' : 'left-0.5'}`} />
+        </button>
+        <button onClick={() => onDelete(promo.id)} className="p-1.5 text-red-400 hover:text-red-600 rounded-lg">
+          <Trash2 size={14} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function PromoForm({ storeId, promo, onClose, onSaved }: {
+  storeId: string; promo: PromoItem | null; onClose: () => void; onSaved: () => void
+}) {
+  const products = useLiveQuery(() => db.products.filter(p => p.is_active).toArray(), [])
+
+  const today = new Date().toISOString().slice(0,10)
+  const nextMonth = new Date(Date.now() + 30*86400000).toISOString().slice(0,10)
+
+  const [name,       setName]      = useState(promo?.name || '')
+  const [productId,  setProdId]    = useState(promo?.product_id || '')
+  const [promoType,  setType]      = useState<'percent'|'fixed'|'buy1get1'>(promo?.promo_type || 'percent')
+  const [value,      setValue]     = useState(String(promo?.value || ''))
+  const [minQty,     setMinQty]    = useState(String(promo?.min_qty || '1'))
+  const [validFrom,  setFrom]      = useState(promo?.valid_from?.slice(0,10) || today)
+  const [validUntil, setUntil]     = useState(promo?.valid_until?.slice(0,10) || nextMonth)
+  const [isActive,   setActive]    = useState(promo?.is_active ?? true)
+  const [saving,     setSaving]    = useState(false)
+
+  async function handleSave() {
+    if (!name.trim())    return toast.error('Nama promo wajib diisi')
+    if (!productId)      return toast.error('Pilih produk')
+    if (promoType !== 'buy1get1' && !value) return toast.error('Nilai diskon wajib diisi')
+
+    setSaving(true)
+    try {
+      const data: PromoItem = {
+        id:          promo?.id || generateId(),
+        store_id:    storeId,
+        product_id:  productId,
+        name:        name.trim(),
+        promo_type:  promoType,
+        value:       promoType === 'buy1get1' ? 1 : Number(value),
+        min_qty:     Number(minQty) || 1,
+        valid_from:  new Date(validFrom).toISOString(),
+        valid_until: new Date(validUntil + 'T23:59:59').toISOString(),
+        is_active:   isActive,
+        created_at:  promo?.created_at || now(),
+      }
+      await db.promotions.put(data as any)
+      await supabase.from('promotions').upsert(data)
+      toast.success(promo ? 'Promo diupdate' : 'Promo ditambahkan')
+      onSaved()
+    } catch (e) { console.error(e); toast.error('Gagal menyimpan') }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title={promo ? 'Edit Promo' : 'Tambah Promo'} onClose={onClose}>
+      <div><Label>Nama Promo</Label><input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Diskon Akhir Pekan" autoFocus /></div>
+
+      <div>
+        <Label>Produk</Label>
+        <select className="input" value={productId} onChange={e => setProdId(e.target.value)}>
+          <option value="">-- Pilih produk *</option>
+          {products?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+
+      <div>
+        <Label>Tipe Promo</Label>
+        <div className="grid grid-cols-3 gap-2">
+          {([
+            { id: 'percent',  label: 'Diskon %'   },
+            { id: 'fixed',    label: 'Disc Nominal'},
+            { id: 'buy1get1', label: 'Buy 1 Get 1' },
+          ] as const).map(t => (
+            <button key={t.id} onClick={() => setType(t.id)}
+              className={`py-2 rounded-xl text-xs font-medium border transition-colors ${promoType === t.id ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {promoType !== 'buy1get1' && (
+        <div>
+          <Label>{promoType === 'percent' ? 'Diskon (%)' : 'Diskon (Rp)'}</Label>
+          <input className="input" inputMode="decimal" value={value}
+            onChange={e => setValue(e.target.value.replace(/[^0-9.]/g, ''))}
+            placeholder={promoType === 'percent' ? 'Contoh: 10' : 'Contoh: 5000'} />
+          {promoType === 'percent' && Number(value) > 0 && (
+            <p className="text-xs text-gray-400 mt-1">Contoh: produk Rp 14.000 → diskon Rp {(14000 * Number(value) / 100).toLocaleString('id-ID')} → bayar Rp {(14000 * (1 - Number(value)/100)).toLocaleString('id-ID')}</p>
+          )}
+        </div>
+      )}
+
+      {promoType === 'buy1get1' && (
+        <div className="bg-purple-50 border border-purple-100 rounded-xl p-3">
+          <p className="text-xs font-medium text-purple-700">Buy 1 Get 1</p>
+          <p className="text-xs text-purple-500 mt-0.5">Beli 1 produk, dapat 1 gratis. Minimum qty 2, harga dihitung 1 pcs.</p>
+        </div>
+      )}
+
+      <div>
+        <Label>Minimum Qty</Label>
+        <input className="input" inputMode="decimal" value={minQty}
+          onChange={e => setMinQty(e.target.value.replace(/[^0-9]/g, ''))} placeholder="1" />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label>Berlaku Dari</Label><input className="input" type="date" value={validFrom} onChange={e => setFrom(e.target.value)} /></div>
+        <div><Label>Berlaku Sampai</Label><input className="input" type="date" value={validUntil} onChange={e => setUntil(e.target.value)} /></div>
+      </div>
+
+      <div className="flex items-center justify-between py-2 border-t border-gray-100">
+        <p className="text-sm text-gray-700">Aktifkan Promo</p>
+        <button onClick={() => setActive(!isActive)}
+          className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
+          <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} />
+        </button>
+      </div>
+
+      <div className="flex gap-3 pt-1 border-t border-gray-100">
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+          {saving ? 'Menyimpan...' : 'Simpan'}
+        </button>
+      </div>
+    </Modal>
   )
 }
 
@@ -96,28 +385,21 @@ function MenuConfigTab() {
 
   useState(() => { loadConfigs(selectedRole) })
 
-  function handleRoleChange(role: string) {
-    setSelectedRole(role)
-    loadConfigs(role)
-  }
-
   async function toggleMenu(path: string, label: string) {
     const currentVisible = visibilityMap[path] ?? false
     const newVisible = !currentVisible
     setVisibilityMap(prev => ({ ...prev, [path]: newVisible }))
     setSaving(true)
     try {
-      const existing = await db.menu_role_config
-        .where('[role+menu_path]').equals([selectedRole, path]).first()
+      const existing = await db.menu_role_config.where('[role+menu_path]').equals([selectedRole, path]).first()
       if (existing) {
         const updated = { ...existing, is_visible: newVisible }
         await db.menu_role_config.put(updated)
         await supabase.from('menu_role_config').upsert(updated)
       } else {
         const newConfig: MenuRoleConfig = {
-          id: `mc-${selectedRole}-${path.replace(/\//g, '')}`,
-          role: selectedRole, menu_path: path, menu_label: label,
-          is_visible: newVisible,
+          id: `mc-${selectedRole}-${path.replace(/\//g, '')}`, role: selectedRole,
+          menu_path: path, menu_label: label, is_visible: newVisible,
           sort_order: ALL_MENUS.findIndex(m => m.path === path) + 1,
         }
         await db.menu_role_config.put(newConfig)
@@ -134,31 +416,25 @@ function MenuConfigTab() {
       <p className="text-xs text-gray-400">Pilih role lalu centang menu yang ingin ditampilkan</p>
       <div className="flex flex-wrap gap-2">
         {ROLES.map(r => (
-          <button key={r} onClick={() => handleRoleChange(r)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium border capitalize transition-colors ${
-              selectedRole === r ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 text-gray-600'
-            }`}>{r}</button>
+          <button key={r} onClick={() => { setSelectedRole(r); loadConfigs(r) }}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium border capitalize transition-colors ${selectedRole === r ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-200 text-gray-600'}`}>{r}</button>
         ))}
       </div>
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        {!loaded ? (
-          <div className="py-8 text-center text-sm text-gray-400">Memuat...</div>
-        ) : ALL_MENUS.map((menu, idx) => {
-          const visible = visibilityMap[menu.path] ?? false
-          return (
-            <button key={menu.path} onClick={() => toggleMenu(menu.path, menu.label)}
-              disabled={saving}
-              className={`w-full flex items-center px-4 py-3 text-left active:bg-gray-50 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-              <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center mr-3 flex-shrink-0 transition-colors ${
-                visible ? 'bg-gray-900 border-gray-900' : 'border-gray-300'
-              }`}>
-                {visible && <Check size={12} className="text-white" strokeWidth={3} />}
-              </div>
-              <p className="text-sm text-gray-800 flex-1">{menu.label}</p>
-              <p className="text-xs text-gray-400">{menu.path}</p>
-            </button>
-          )
-        })}
+        {!loaded ? <div className="py-8 text-center text-sm text-gray-400">Memuat...</div>
+          : ALL_MENUS.map((menu, idx) => {
+            const visible = visibilityMap[menu.path] ?? false
+            return (
+              <button key={menu.path} onClick={() => toggleMenu(menu.path, menu.label)} disabled={saving}
+                className={`w-full flex items-center px-4 py-3 text-left active:bg-gray-50 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center mr-3 flex-shrink-0 transition-colors ${visible ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                  {visible && <Check size={12} className="text-white" strokeWidth={3} />}
+                </div>
+                <p className="text-sm text-gray-800 flex-1">{menu.label}</p>
+                <p className="text-xs text-gray-400">{menu.path}</p>
+              </button>
+            )
+          })}
       </div>
       <p className="text-xs text-gray-400 text-center">Perubahan aktif saat user login ulang</p>
     </div>
@@ -170,9 +446,7 @@ function UsersTab({ currentUser }: { currentUser: User }) {
   const { store } = useAuthStore()
   const [showForm, setShowForm] = useState(false)
   const [editUser, setEdit]     = useState<User | null>(null)
-
-  const users = useLiveQuery(() =>
-    db.users.where('store_id').equals(currentUser.store_id).toArray(), [currentUser.store_id])
+  const users = useLiveQuery(() => db.users.where('store_id').equals(currentUser.store_id).toArray(), [currentUser.store_id])
 
   return (
     <div className="p-4 space-y-3">
@@ -189,17 +463,13 @@ function UsersTab({ currentUser }: { currentUser: User }) {
         {users?.map((u, idx) => (
           <button key={u.id} onClick={() => currentUser.role === 'owner' && u.id !== currentUser.id && (setEdit(u), setShowForm(true))}
             className={`w-full flex items-center px-4 py-3 text-left ${idx !== 0 ? 'border-t border-gray-50' : ''} ${currentUser.role === 'owner' ? 'active:bg-gray-50' : ''}`}>
-            <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center text-sm font-semibold text-gray-600 mr-3 flex-shrink-0">
-              {u.name[0].toUpperCase()}
-            </div>
+            <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center text-sm font-semibold text-gray-600 mr-3 flex-shrink-0">{u.name[0].toUpperCase()}</div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900 truncate">{u.name}</p>
               <p className="text-xs text-gray-400">@{u.username} · {u.role}</p>
             </div>
             {!u.is_active && <span className="text-xs text-gray-400 mr-2">nonaktif</span>}
-            {currentUser.role === 'owner' && u.id !== currentUser.id && (
-              <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
-            )}
+            {currentUser.role === 'owner' && u.id !== currentUser.id && <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />}
           </button>
         ))}
         {users?.length === 0 && <div className="py-8 text-center text-sm text-gray-400">Belum ada user</div>}
@@ -209,28 +479,19 @@ function UsersTab({ currentUser }: { currentUser: User }) {
   )
 }
 
-// ── SUPPLIER TAB ──────────────────────────────────────────────
 function SupplierTab() {
   const [showForm, setShowForm] = useState(false)
   const [editItem, setEditItem] = useState<Supplier | null>(null)
   const suppliers = useLiveQuery(() => db.suppliers.toArray(), [])
-
   return (
     <div className="p-4 space-y-3">
       <div className="flex justify-end">
-        <button onClick={() => { setEditItem(null); setShowForm(true) }}
-          className="flex items-center gap-1.5 text-sm font-medium text-gray-900 bg-white border border-gray-200 px-3 py-1.5 rounded-lg">
-          <Plus size={14} /> Tambah Supplier
-        </button>
+        <button onClick={() => { setEditItem(null); setShowForm(true) }} className="flex items-center gap-1.5 text-sm font-medium text-gray-900 bg-white border border-gray-200 px-3 py-1.5 rounded-lg"><Plus size={14} /> Tambah Supplier</button>
       </div>
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {suppliers?.map((s, idx) => (
-          <button key={s.id} onClick={() => { setEditItem(s); setShowForm(true) }}
-            className={`w-full flex items-center px-4 py-3 text-left active:bg-gray-50 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 truncate">{s.name}</p>
-              <p className="text-xs text-gray-400">{s.phone || '-'} {s.address ? `· ${s.address}` : ''}</p>
-            </div>
+          <button key={s.id} onClick={() => { setEditItem(s); setShowForm(true) }} className={`w-full flex items-center px-4 py-3 text-left active:bg-gray-50 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+            <div className="flex-1 min-w-0"><p className="text-sm font-medium text-gray-900 truncate">{s.name}</p><p className="text-xs text-gray-400">{s.phone || '-'}</p></div>
             {!s.is_active && <span className="text-xs text-gray-400 mr-2">nonaktif</span>}
             <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
           </button>
@@ -242,28 +503,19 @@ function SupplierTab() {
   )
 }
 
-// ── MITRA TAB ─────────────────────────────────────────────────
 function MitraTab() {
   const [showForm, setShowForm] = useState(false)
   const [editItem, setEditItem] = useState<Partner | null>(null)
   const partners = useLiveQuery(() => db.partners.toArray(), [])
-
   return (
     <div className="p-4 space-y-3">
       <div className="flex justify-end">
-        <button onClick={() => { setEditItem(null); setShowForm(true) }}
-          className="flex items-center gap-1.5 text-sm font-medium text-gray-900 bg-white border border-gray-200 px-3 py-1.5 rounded-lg">
-          <Plus size={14} /> Tambah Franchise
-        </button>
+        <button onClick={() => { setEditItem(null); setShowForm(true) }} className="flex items-center gap-1.5 text-sm font-medium text-gray-900 bg-white border border-gray-200 px-3 py-1.5 rounded-lg"><Plus size={14} /> Tambah Franchise</button>
       </div>
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {partners?.map((p, idx) => (
-          <button key={p.id} onClick={() => { setEditItem(p); setShowForm(true) }}
-            className={`w-full flex items-center px-4 py-3 text-left active:bg-gray-50 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 truncate">{p.name}</p>
-              <p className="text-xs text-gray-400">{p.city || '-'} {p.contact ? `· ${p.contact}` : ''}</p>
-            </div>
+          <button key={p.id} onClick={() => { setEditItem(p); setShowForm(true) }} className={`w-full flex items-center px-4 py-3 text-left active:bg-gray-50 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+            <div className="flex-1 min-w-0"><p className="text-sm font-medium text-gray-900 truncate">{p.name}</p><p className="text-xs text-gray-400">{p.city || '-'}</p></div>
             {!p.is_active && <span className="text-xs text-gray-400 mr-2">nonaktif</span>}
             <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
           </button>
@@ -275,20 +527,15 @@ function MitraTab() {
   )
 }
 
-// ── PASSWORD TAB ──────────────────────────────────────────────
 function ChangePasswordTab({ userId, storeId }: { userId: string; storeId: string }) {
   const { forceLogout } = useAuthStore()
-  const [oldPass, setOld]   = useState('')
-  const [newPass, setNew]   = useState('')
-  const [saving, setSaving] = useState(false)
-
+  const [oldPass, setOld] = useState(''); const [newPass, setNew] = useState(''); const [saving, setSaving] = useState(false)
   async function handleChange() {
     if (!oldPass || !newPass) return toast.error('Semua field wajib diisi')
     if (newPass.length < 4)   return toast.error('Password minimal 4 karakter')
     setSaving(true)
     try {
-      const user = await db.users.get(userId)
-      if (!user) return
+      const user = await db.users.get(userId); if (!user) return
       const oldHash = await hashPassword(oldPass)
       if (user.password_hash !== oldHash) { toast.error('Password lama salah'); return }
       const newHash = await hashPassword(newPass)
@@ -297,41 +544,29 @@ function ChangePasswordTab({ userId, storeId }: { userId: string; storeId: strin
       await addToSyncQueue('users', userId, 'update', { id: userId, password_hash: newHash }, storeId)
       toast.success('Password berhasil diubah. Silakan login ulang.')
       setOld(''); setNew('')
-      // Auto logout setelah 1.5 detik agar toast sempat tampil
       forceLogout()
     } finally { setSaving(false) }
   }
-
   return (
     <div className="p-4">
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-50">
           <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-1.5">Password Lama</p>
-          <input className="w-full text-sm text-gray-900 outline-none bg-transparent" type="password"
-            value={oldPass} onChange={e => setOld(e.target.value)} placeholder="Masukkan password lama" />
+          <input className="w-full text-sm text-gray-900 outline-none bg-transparent" type="password" value={oldPass} onChange={e => setOld(e.target.value)} placeholder="Masukkan password lama" />
         </div>
         <div className="px-4 py-3">
           <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-1.5">Password Baru</p>
-          <input className="w-full text-sm text-gray-900 outline-none bg-transparent" type="password"
-            value={newPass} onChange={e => setNew(e.target.value)} placeholder="Min. 4 karakter" />
+          <input className="w-full text-sm text-gray-900 outline-none bg-transparent" type="password" value={newPass} onChange={e => setNew(e.target.value)} placeholder="Min. 4 karakter" />
         </div>
       </div>
-      <button onClick={handleChange} disabled={saving}
-        className="w-full mt-3 py-3 bg-gray-900 text-white rounded-xl text-sm font-medium disabled:opacity-50">
-        {saving ? 'Menyimpan...' : 'Ganti Password'}
-      </button>
+      <button onClick={handleChange} disabled={saving} className="w-full mt-3 py-3 bg-gray-900 text-white rounded-xl text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Ganti Password'}</button>
       <p className="text-xs text-gray-400 text-center mt-2">Setelah disimpan, Anda akan logout otomatis</p>
     </div>
   )
 }
 
-// ── TOKO TAB ──────────────────────────────────────────────────
 function TokoTab() {
-  const [stores, setStores]   = useState<any[]>([])
-  const [editStore, setEdit]  = useState<any | null>(null)
-  const [showForm, setForm]   = useState(false)
-  const [loading, setLoading] = useState(true)
-
+  const [stores, setStores] = useState<any[]>([]); const [editStore, setEdit] = useState<any|null>(null); const [showForm, setForm] = useState(false); const [loading, setLoading] = useState(true)
   useEffect(() => {
     async function load() {
       const { data } = await supabase.from('stores').select('*').order('created_at')
@@ -340,93 +575,160 @@ function TokoTab() {
     }
     load()
   }, [])
-
   return (
     <div className="p-4 space-y-3">
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        {loading ? (
-          <div className="py-8 text-center text-sm text-gray-400">Memuat...</div>
-        ) : stores.map((s, idx) => (
-          <button key={s.id} onClick={() => { setEdit(s); setForm(true) }}
-            className={`w-full flex items-center px-4 py-3 text-left active:bg-gray-50 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 truncate">{s.name}</p>
-              <p className="text-xs text-gray-400">{s.city} {s.phone ? `· ${s.phone}` : ''}</p>
-            </div>
-            {!s.is_active && <span className="text-xs text-gray-400 mr-2">nonaktif</span>}
-            <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
-          </button>
-        ))}
+        {loading ? <div className="py-8 text-center text-sm text-gray-400">Memuat...</div>
+          : stores.map((s, idx) => (
+            <button key={s.id} onClick={() => { setEdit(s); setForm(true) }} className={`w-full flex items-center px-4 py-3 text-left active:bg-gray-50 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+              <div className="flex-1 min-w-0"><p className="text-sm font-medium text-gray-900 truncate">{s.name}</p><p className="text-xs text-gray-400">{s.city}</p></div>
+              {!s.is_active && <span className="text-xs text-gray-400 mr-2">nonaktif</span>}
+              <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
+            </button>
+          ))}
       </div>
-      {showForm && editStore && (
-        <TokoForm store={editStore} onClose={() => { setForm(false); setEdit(null) }}
-          onSaved={(updated) => { setStores(prev => prev.map(s => s.id === updated.id ? updated : s)); setForm(false) }} />
-      )}
+      {showForm && editStore && <TokoForm store={editStore} onClose={() => { setForm(false); setEdit(null) }} onSaved={updated => { setStores(prev => prev.map(s => s.id === updated.id ? updated : s)); setForm(false) }} />}
     </div>
   )
 }
 
 function TokoForm({ store, onClose, onSaved }: { store: any; onClose: () => void; onSaved: (s: any) => void }) {
-  const [name, setName]     = useState(store.name || '')
-  const [city, setCity]     = useState(store.city || '')
-  const [phone, setPhone]   = useState(store.phone || '')
-  const [address, setAddr]  = useState(store.address || '')
-  const [accessCode, setAccessCode] = useState(store.access_code || '')
-  const [isActive, setAct]  = useState(store.is_active ?? true)
-  const [saving, setSaving] = useState(false)
-
+  const [name, setName] = useState(store.name || ''); const [city, setCity] = useState(store.city || ''); const [phone, setPhone] = useState(store.phone || ''); const [address, setAddr] = useState(store.address || ''); const [accessCode, setAccessCode] = useState(store.access_code || ''); const [isActive, setAct] = useState(store.is_active ?? true); const [saving, setSaving] = useState(false)
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama toko wajib diisi')
-    if (!accessCode.trim()) return toast.error('Kode toko wajib diisi')
     setSaving(true)
     try {
-      const updated = {
-        ...store, name: name.trim(), city, phone: phone || null,
-        address: address || null, is_active: isActive,
-        access_code: accessCode.trim().toUpperCase(),
-      }
+      const updated = { ...store, name: name.trim(), city, phone: phone || null, address: address || null, is_active: isActive, access_code: accessCode.trim().toUpperCase() }
       await db.stores.put(updated)
-      await supabase.from('stores').update({
-        name: updated.name, city, phone: updated.phone,
-        address: updated.address, is_active: isActive,
-        access_code: updated.access_code,
-      }).eq('id', store.id)
-      toast.success('Toko diupdate')
-      onSaved(updated)
+      await supabase.from('stores').update({ name: updated.name, city, phone: updated.phone, address: updated.address, is_active: isActive, access_code: updated.access_code }).eq('id', store.id)
+      toast.success('Toko diupdate'); onSaved(updated)
     } finally { setSaving(false) }
   }
-
   return (
     <Modal title="Edit Toko" onClose={onClose}>
       <div><Label>Nama Toko</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
-      <div>
-        <Label>Kode Toko</Label>
-        <input className="input uppercase tracking-widest font-bold" value={accessCode}
-          onChange={e => setAccessCode(e.target.value.toUpperCase())}
-          placeholder="Contoh: MLNG01" maxLength={8} />
-        <p className="text-xs text-gray-400 mt-1">Kode ini digunakan kasir untuk masuk ke halaman login toko</p>
-      </div>
-      <div><Label>Kota</Label><input className="input" value={city} onChange={e => setCity(e.target.value)} placeholder="Surabaya" /></div>
-      <div><Label>No. Telepon</Label><input className="input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="031-xxxx" /></div>
-      <div><Label>Alamat</Label><input className="input" value={address} onChange={e => setAddr(e.target.value)} placeholder="Opsional" /></div>
+      <div><Label>Kode Toko</Label><input className="input uppercase tracking-widest font-bold" value={accessCode} onChange={e => setAccessCode(e.target.value.toUpperCase())} placeholder="MLNG01" maxLength={8} /></div>
+      <div><Label>Kota</Label><input className="input" value={city} onChange={e => setCity(e.target.value)} /></div>
+      <div><Label>No. Telepon</Label><input className="input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} /></div>
+      <div><Label>Alamat</Label><input className="input" value={address} onChange={e => setAddr(e.target.value)} /></div>
       <div className="flex items-center justify-between py-2 border-t border-gray-100">
         <p className="text-sm text-gray-700">Aktif</p>
-        <button onClick={() => setAct(!isActive)}
-          className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
-          <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} />
-        </button>
+        <button onClick={() => setAct(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}><div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} /></button>
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
-          {saving ? 'Menyimpan...' : 'Simpan'}
-        </button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
       </div>
     </Modal>
   )
 }
 
-// ── MODAL BASE ────────────────────────────────────────────────
+function PPNTab({ storeId }: { storeId: string }) {
+  const [enabled, setEnabled] = useState(false); const [rate, setRate] = useState('11'); const [mode, setMode] = useState<'include'|'exclude'>('include'); const [saving, setSaving] = useState(false); const [loaded, setLoaded] = useState(false)
+  useEffect(() => {
+    const saved = localStorage.getItem(`ppn_config_${storeId}`)
+    if (saved) { try { const cfg = JSON.parse(saved); setEnabled(cfg.enabled ?? false); setRate(String(cfg.rate ?? 11)); setMode(cfg.mode ?? 'include') } catch {} }
+    setLoaded(true)
+  }, [storeId])
+  async function handleSave() {
+    setSaving(true)
+    try {
+      const cfg = { enabled, rate: Number(rate), mode }
+      localStorage.setItem(`ppn_config_${storeId}`, JSON.stringify(cfg))
+      await supabase.from('stores').update({ ppn_enabled: enabled, ppn_rate: Number(rate), ppn_mode: mode }).eq('id', storeId)
+      toast.success('Setting PPN disimpan')
+    } catch { toast.success('Setting PPN disimpan (lokal)') }
+    finally { setSaving(false) }
+  }
+  if (!loaded) return <div className="p-4 text-sm text-gray-400">Memuat...</div>
+  return (
+    <div className="p-4 space-y-4">
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-4">
+          <div><p className="text-sm font-medium text-gray-900">Aktifkan PPN</p><p className="text-xs text-gray-400 mt-0.5">PPN ditampilkan di struk dan laporan</p></div>
+          <button onClick={() => setEnabled(!enabled)} className={`w-11 h-6 rounded-full transition-colors relative ${enabled ? 'bg-gray-900' : 'bg-gray-200'}`}><div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${enabled ? 'left-[22px]' : 'left-0.5'}`} /></button>
+        </div>
+      </div>
+      {enabled && (
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-50">
+            <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-1.5">Tarif PPN (%)</p>
+            <input className="input w-24 text-lg font-semibold text-center" type="number" min="0" max="100" step="0.5" value={rate} onChange={e => setRate(e.target.value)} />
+          </div>
+          <div className="px-4 py-3 space-y-2">
+            {(['include','exclude'] as const).map(m => (
+              <button key={m} onClick={() => setMode(m)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors ${mode === m ? 'border-gray-900 bg-gray-50' : 'border-gray-100'}`}>
+                <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${mode === m ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`} />
+                <div>
+                  <p className="text-sm font-medium text-gray-800">{m === 'include' ? 'Include (sudah termasuk)' : 'Exclude (ditambahkan)'}</p>
+                  <p className="text-xs text-gray-400">{m === 'include' ? 'Harga sudah include PPN' : 'PPN ditambahkan di atas harga'}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <button onClick={handleSave} disabled={saving} className="w-full py-3 bg-gray-900 text-white rounded-xl text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan Setting PPN'}</button>
+    </div>
+  )
+}
+
+function ResetDataTab() {
+  const [resetting, setResetting] = useState(false); const [done, setDone] = useState<string[]>([])
+  async function resetGudang() {
+    setResetting(true); setDone([])
+    try {
+      setDone(prev => [...prev, 'Menghapus dari server...'])
+      await supabase.from('warehouse_mutation_items').delete().gte('created_at','2000-01-01')
+      await supabase.from('warehouse_mutations').delete().gte('created_at','2000-01-01')
+      await supabase.from('purchase_items').delete().gte('created_at','2000-01-01')
+      await supabase.from('purchases').delete().gte('created_at','2000-01-01')
+      await supabase.from('warehouse_expenses').delete().gte('created_at','2000-01-01')
+      await supabase.from('warehouse_stock').delete().gte('last_updated','2000-01-01')
+      setDone(prev => [...prev, 'Server: gudang dihapus'])
+      await db.warehouse_mutation_items.clear(); await db.warehouse_mutations.clear()
+      await db.purchase_items.clear(); await db.purchases.clear()
+      await db.warehouse_expenses.clear(); await db.warehouse_stock.clear()
+      setDone(prev => [...prev, 'Lokal: gudang dihapus'])
+      toast.success('Data gudang direset')
+    } catch (e) { toast.error('Gagal: ' + String(e)) }
+    finally { setResetting(false) }
+  }
+  async function resetProduksi() {
+    setResetting(true); setDone([])
+    try {
+      for (const t of ['production_log_materials','production_logs','production_mutation_items','production_mutations','production_stock','finished_goods_stock']) {
+        await supabase.from(t).delete().gte('created_at','2000-01-01')
+      }
+      setDone(prev => [...prev, 'Server: produksi dihapus'])
+      await db.production_log_materials.clear(); await db.production_logs.clear()
+      await db.production_mutation_items.clear(); await db.production_mutations.clear()
+      await db.production_stock.clear(); await db.finished_goods_stock.clear()
+      setDone(prev => [...prev, 'Lokal: produksi dihapus'])
+      toast.success('Data produksi direset')
+    } catch (e) { toast.error('Gagal: ' + String(e)) }
+    finally { setResetting(false) }
+  }
+  return (
+    <div className="p-4 space-y-4">
+      <div className="bg-red-50 border border-red-100 rounded-xl p-3">
+        <p className="text-sm font-medium text-red-700 mb-1">Hati-hati — Data tidak bisa dikembalikan</p>
+        <p className="text-xs text-red-500">Master data (bahan, supplier, resep) tetap aman.</p>
+      </div>
+      {[{ label:'Reset Data Gudang', sub:'Hapus: pembelian, mutasi, biaya, stok gudang', fn: resetGudang },
+        { label:'Reset Data Produksi', sub:'Hapus: log produksi, stok produksi & produk jadi', fn: resetProduksi }
+      ].map(btn => (
+        <div key={btn.label} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-50"><p className="text-sm font-medium text-gray-900">{btn.label}</p><p className="text-xs text-gray-400 mt-0.5">{btn.sub}</p></div>
+          <div className="px-4 py-3"><button onClick={btn.fn} disabled={resetting} className="w-full py-2.5 rounded-xl border border-red-200 text-sm font-medium text-red-600 active:bg-red-50 disabled:opacity-50">{resetting ? 'Mereset...' : btn.label}</button></div>
+        </div>
+      ))}
+      {done.length > 0 && <div className="bg-green-50 border border-green-100 rounded-xl p-3 space-y-1">{done.map((d,i) => <p key={i} className="text-xs text-green-700">✓ {d}</p>)}</div>}
+    </div>
+  )
+}
+
+// ── Shared components ──────────────────────────────────────────
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -440,453 +742,100 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
     </div>
   )
 }
-
 function Label({ children }: { children: React.ReactNode }) {
   return <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">{children}</label>
 }
-
-// ── FORM: User ────────────────────────────────────────────────
 function UserForm({ user, onClose, storeId }: { user: User | null; onClose: () => void; storeId: string }) {
-  const [name, setName]      = useState(user?.name || '')
-  const [username, setUname] = useState(user?.username || '')
-  const [password, setPass]  = useState('')
-  const [role, setRole]      = useState<Role>(user?.role || 'kasir')
-  const [isActive, setActive]= useState(user?.is_active ?? true)
-  const [saving, setSaving]  = useState(false)
-
+  const [name, setName] = useState(user?.name || ''); const [username, setUname] = useState(user?.username || ''); const [password, setPass] = useState(''); const [role, setRole] = useState<Role>(user?.role || 'kasir'); const [isActive, setActive] = useState(user?.is_active ?? true); const [saving, setSaving] = useState(false)
   async function handleSave() {
     if (!name || !username) return toast.error('Nama dan username wajib diisi')
     if (!user && !password)  return toast.error('Password wajib untuk user baru')
     setSaving(true)
     try {
       const isNew = !user
-      const data: User = {
-        id: user?.id || generateId(), store_id: storeId,
-        name, username,
-        password_hash: password ? await hashPassword(password) : user!.password_hash,
-        role, is_active: isActive, created_at: user?.created_at || now(),
-      }
-      await db.users.put(data)
-      await supabase.from('users').upsert(data)
+      const data: User = { id: user?.id || generateId(), store_id: storeId, name, username, password_hash: password ? await hashPassword(password) : user!.password_hash, role, is_active: isActive, created_at: user?.created_at || now() }
+      await db.users.put(data); await supabase.from('users').upsert(data)
       await addToSyncQueue('users', data.id, isNew ? 'insert' : 'update', data, storeId)
-      toast.success(isNew ? 'User ditambahkan' : 'User diupdate')
-      onClose()
+      toast.success(isNew ? 'User ditambahkan' : 'User diupdate'); onClose()
     } finally { setSaving(false) }
   }
-
   return (
     <Modal title={user ? 'Edit User' : 'Tambah User'} onClose={onClose}>
       <div><Label>Nama</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
       <div><Label>Username</Label><input className="input" value={username} onChange={e => setUname(e.target.value)} /></div>
-      <div>
-        <Label>Password {user ? '(kosongkan jika tidak diubah)' : ''}</Label>
-        <input className="input" type="password" value={password} onChange={e => setPass(e.target.value)} placeholder={user ? '••••••••' : 'Min. 4 karakter'} />
-      </div>
-      <div>
-        <Label>Role</Label>
+      <div><Label>Password {user ? '(kosongkan jika tidak diubah)' : ''}</Label><input className="input" type="password" value={password} onChange={e => setPass(e.target.value)} placeholder={user ? '••••' : 'Min. 4 karakter'} /></div>
+      <div><Label>Role</Label>
         <div className="grid grid-cols-2 gap-2">
           {(['kasir','gudang','produksi','manager'] as Role[]).map(r => (
-            <button key={r} onClick={() => setRole(r)}
-              className={`py-2 rounded-xl text-sm font-medium border capitalize transition-colors ${
-                role === r ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'
-              }`}>{r}</button>
+            <button key={r} onClick={() => setRole(r)} className={`py-2 rounded-xl text-sm font-medium border capitalize transition-colors ${role === r ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>{r}</button>
           ))}
         </div>
       </div>
       <div className="flex items-center justify-between py-2 border-t border-gray-100">
         <p className="text-sm text-gray-700">Aktif</p>
-        <button onClick={() => setActive(!isActive)}
-          className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
-          <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} />
-        </button>
+        <button onClick={() => setActive(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}><div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} /></button>
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
-          {saving ? 'Menyimpan...' : 'Simpan'}
-        </button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
       </div>
     </Modal>
   )
 }
-
-// ── FORM: Supplier ────────────────────────────────────────────
 function SupplierForm({ supplier, onClose }: { supplier: Supplier | null; onClose: () => void }) {
-  const [name, setName]       = useState(supplier?.name || '')
-  const [phone, setPhone]     = useState(supplier?.phone || '')
-  const [address, setAddress] = useState(supplier?.address || '')
-  const [isActive, setActive] = useState(supplier?.is_active ?? true)
-  const [saving, setSaving]   = useState(false)
-
+  const [name, setName] = useState(supplier?.name || ''); const [phone, setPhone] = useState(supplier?.phone || ''); const [address, setAddress] = useState(supplier?.address || ''); const [isActive, setActive] = useState(supplier?.is_active ?? true); const [saving, setSaving] = useState(false)
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama supplier wajib diisi')
     setSaving(true)
     try {
-      const data: Supplier = {
-        id: supplier?.id || generateId(), name: name.trim(),
-        phone: phone || undefined, address: address || undefined,
-        is_active: isActive, created_at: supplier?.created_at || now(),
-      }
-      await db.suppliers.put(data)
-      await supabase.from('suppliers').upsert(data)
-      toast.success(supplier ? 'Supplier diupdate' : 'Supplier ditambahkan')
-      onClose()
+      const data: Supplier = { id: supplier?.id || generateId(), name: name.trim(), phone: phone || undefined, address: address || undefined, is_active: isActive, created_at: supplier?.created_at || now() }
+      await db.suppliers.put(data); await supabase.from('suppliers').upsert(data)
+      toast.success(supplier ? 'Supplier diupdate' : 'Supplier ditambahkan'); onClose()
     } finally { setSaving(false) }
   }
-
   return (
     <Modal title={supplier ? 'Edit Supplier' : 'Tambah Supplier'} onClose={onClose}>
       <div><Label>Nama Supplier</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
-      <div><Label>No. Telepon</Label><input className="input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="08xx-xxxx-xxxx" /></div>
+      <div><Label>No. Telepon</Label><input className="input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} /></div>
       <div><Label>Alamat</Label><input className="input" value={address} onChange={e => setAddress(e.target.value)} placeholder="Opsional" /></div>
       <div className="flex items-center justify-between py-2 border-t border-gray-100">
         <p className="text-sm text-gray-700">Aktif</p>
-        <button onClick={() => setActive(!isActive)}
-          className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
-          <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} />
-        </button>
+        <button onClick={() => setActive(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}><div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} /></button>
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
-          {saving ? 'Menyimpan...' : 'Simpan'}
-        </button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
       </div>
     </Modal>
   )
 }
-
-// ── FORM: Mitra ───────────────────────────────────────────────
 function MitraForm({ partner, onClose }: { partner: Partner | null; onClose: () => void }) {
-  const [name, setName]       = useState(partner?.name || '')
-  const [contact, setContact] = useState(partner?.contact || '')
-  const [city, setCity]       = useState(partner?.city || '')
-  const [address, setAddress] = useState(partner?.address || '')
-  const [isActive, setActive] = useState(partner?.is_active ?? true)
-  const [saving, setSaving]   = useState(false)
-
+  const [name, setName] = useState(partner?.name || ''); const [contact, setContact] = useState(partner?.contact || ''); const [city, setCity] = useState(partner?.city || ''); const [address, setAddress] = useState(partner?.address || ''); const [isActive, setActive] = useState(partner?.is_active ?? true); const [saving, setSaving] = useState(false)
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama mitra wajib diisi')
     setSaving(true)
     try {
-      const data: Partner = {
-        id: partner?.id || generateId(), name: name.trim(),
-        contact: contact || undefined, city: city || undefined,
-        address: address || undefined,
-        is_active: isActive, created_at: partner?.created_at || now(),
-      }
-      await db.partners.put(data)
-      await supabase.from('partners').upsert(data)
-      toast.success(partner ? 'Franchise diupdate' : 'Franchise ditambahkan')
-      onClose()
+      const data: Partner = { id: partner?.id || generateId(), name: name.trim(), contact: contact || undefined, city: city || undefined, address: address || undefined, is_active: isActive, created_at: partner?.created_at || now() }
+      await db.partners.put(data); await supabase.from('partners').upsert(data)
+      toast.success(partner ? 'Franchise diupdate' : 'Franchise ditambahkan'); onClose()
     } finally { setSaving(false) }
   }
-
   return (
     <Modal title={partner ? 'Edit Mitra' : 'Tambah Franchise'} onClose={onClose}>
       <div><Label>Nama Franchise</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
       <div className="grid grid-cols-2 gap-3">
-        <div><Label>Kota</Label><input className="input" value={city} onChange={e => setCity(e.target.value)} placeholder="Surabaya" /></div>
-        <div><Label>Kontak</Label><input className="input" type="tel" value={contact} onChange={e => setContact(e.target.value)} placeholder="08xx-xxxx" /></div>
+        <div><Label>Kota</Label><input className="input" value={city} onChange={e => setCity(e.target.value)} /></div>
+        <div><Label>Kontak</Label><input className="input" type="tel" value={contact} onChange={e => setContact(e.target.value)} /></div>
       </div>
       <div><Label>Alamat</Label><input className="input" value={address} onChange={e => setAddress(e.target.value)} placeholder="Opsional" /></div>
       <div className="flex items-center justify-between py-2 border-t border-gray-100">
         <p className="text-sm text-gray-700">Aktif</p>
-        <button onClick={() => setActive(!isActive)}
-          className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
-          <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} />
-        </button>
+        <button onClick={() => setActive(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}><div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} /></button>
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
-          {saving ? 'Menyimpan...' : 'Simpan'}
-        </button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
       </div>
     </Modal>
-  )
-}
-
-// ── PPN TAB ───────────────────────────────────────────────────
-function PPNTab({ storeId }: { storeId: string }) {
-  const [enabled, setEnabled]   = useState(false)
-  const [rate, setRate]         = useState('11')
-  const [mode, setMode]         = useState<'include' | 'exclude'>('include')
-  const [saving, setSaving]     = useState(false)
-  const [loaded, setLoaded]     = useState(false)
-
-  // Load dari localStorage per store
-  useEffect(() => {
-    const saved = localStorage.getItem(`ppn_config_${storeId}`)
-    if (saved) {
-      try {
-        const cfg = JSON.parse(saved)
-        setEnabled(cfg.enabled ?? false)
-        setRate(String(cfg.rate ?? 11))
-        setMode(cfg.mode ?? 'include')
-      } catch {}
-    }
-    setLoaded(true)
-  }, [storeId])
-
-  async function handleSave() {
-    setSaving(true)
-    try {
-      const cfg = { enabled, rate: Number(rate), mode }
-      localStorage.setItem(`ppn_config_${storeId}`, JSON.stringify(cfg))
-      // Simpan ke Supabase juga agar sync antar device
-      await supabase.from('stores').update({
-        ppn_enabled: enabled,
-        ppn_rate: Number(rate),
-        ppn_mode: mode,
-      }).eq('id', storeId)
-      toast.success('Setting PPN disimpan')
-    } catch {
-      // Fallback: localStorage saja
-      toast.success('Setting PPN disimpan (lokal)')
-    } finally { setSaving(false) }
-  }
-
-  if (!loaded) return <div className="p-4 text-sm text-gray-400">Memuat...</div>
-
-  return (
-    <div className="p-4 space-y-4">
-      {/* Toggle PPN */}
-      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-4">
-          <div>
-            <p className="text-sm font-medium text-gray-900">Aktifkan PPN</p>
-            <p className="text-xs text-gray-400 mt-0.5">PPN akan ditampilkan di struk dan laporan</p>
-          </div>
-          <button onClick={() => setEnabled(!enabled)}
-            className={`w-11 h-6 rounded-full transition-colors relative ${enabled ? 'bg-gray-900' : 'bg-gray-200'}`}>
-            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${enabled ? 'left-[22px]' : 'left-0.5'}`} />
-          </button>
-        </div>
-      </div>
-
-      {enabled && (
-        <>
-          {/* Tarif PPN */}
-          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-50">
-              <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-1.5">Tarif PPN (%)</p>
-              <div className="flex items-center gap-3">
-                <input
-                  className="input w-24 text-lg font-semibold text-center"
-                  type="number" min="0" max="100" step="0.5"
-                  value={rate}
-                  onChange={e => setRate(e.target.value)}
-                />
-                <span className="text-sm text-gray-500">persen</span>
-              </div>
-              <p className="text-xs text-gray-400 mt-1.5">Standar Indonesia: 11%</p>
-            </div>
-
-            {/* Mode PPN */}
-            <div className="px-4 py-3">
-              <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-2">Mode PPN</p>
-              <div className="space-y-2">
-                <button onClick={() => setMode('include')}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors ${
-                    mode === 'include' ? 'border-gray-900 bg-gray-50' : 'border-gray-100'
-                  }`}>
-                  <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${mode === 'include' ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`} />
-                  <div>
-                    <p className="text-sm font-medium text-gray-800">Include (sudah termasuk)</p>
-                    <p className="text-xs text-gray-400">Harga yang tertera sudah include PPN. Struk menampilkan rincian PPN dari harga.</p>
-                  </div>
-                </button>
-                <button onClick={() => setMode('exclude')}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors ${
-                    mode === 'exclude' ? 'border-gray-900 bg-gray-50' : 'border-gray-100'
-                  }`}>
-                  <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${mode === 'exclude' ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`} />
-                  <div>
-                    <p className="text-sm font-medium text-gray-800">Exclude (ditambahkan)</p>
-                    <p className="text-xs text-gray-400">PPN dihitung dan ditambahkan di atas harga saat checkout.</p>
-                  </div>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Preview kalkulasi */}
-          <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
-            <p className="text-xs font-medium text-blue-700 mb-2">Contoh Kalkulasi</p>
-            {mode === 'include' ? (
-              <div className="space-y-1 text-xs text-blue-600">
-                <div className="flex justify-between"><span>Harga tertera</span><span>Rp 10.000</span></div>
-                <div className="flex justify-between"><span>DPP (harga sebelum PPN)</span><span>Rp {(10000 / (1 + Number(rate)/100)).toLocaleString('id-ID', {maximumFractionDigits: 0})}</span></div>
-                <div className="flex justify-between font-medium"><span>PPN {rate}%</span><span>Rp {(10000 - 10000 / (1 + Number(rate)/100)).toLocaleString('id-ID', {maximumFractionDigits: 0})}</span></div>
-                <div className="flex justify-between font-semibold border-t border-blue-200 pt-1 mt-1"><span>Dibayar customer</span><span>Rp 10.000</span></div>
-              </div>
-            ) : (
-              <div className="space-y-1 text-xs text-blue-600">
-                <div className="flex justify-between"><span>Harga produk</span><span>Rp 10.000</span></div>
-                <div className="flex justify-between font-medium"><span>PPN {rate}%</span><span>Rp {(10000 * Number(rate) / 100).toLocaleString('id-ID', {maximumFractionDigits: 0})}</span></div>
-                <div className="flex justify-between font-semibold border-t border-blue-200 pt-1 mt-1"><span>Dibayar customer</span><span>Rp {(10000 * (1 + Number(rate)/100)).toLocaleString('id-ID', {maximumFractionDigits: 0})}</span></div>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      <button onClick={handleSave} disabled={saving}
-        className="w-full py-3 bg-gray-900 text-white rounded-xl text-sm font-medium disabled:opacity-50">
-        {saving ? 'Menyimpan...' : 'Simpan Setting PPN'}
-      </button>
-    </div>
-  )
-}
-
-// ── RESET DATA TAB ────────────────────────────────────────────
-function ResetDataTab() {
-  const [resetting, setResetting] = useState(false)
-  const [done, setDone] = useState<string[]>([])
-
-  async function resetTransaksiGudang() {
-    setResetting(true)
-    setDone([])
-    try {
-      // WAJIB: Hapus dari Supabase DULU baru IndexedDB
-      // Kalau Supabase gagal, IndexedDB tidak dihapus (data aman)
-      setDone(prev => [...prev, 'Menghapus dari server...'])
-      // Hapus per tabel dengan kolom yang benar
-      await supabase.from('warehouse_mutation_items').delete().gte('created_at', '2000-01-01')
-      await supabase.from('warehouse_mutations').delete().gte('created_at', '2000-01-01')
-      await supabase.from('purchase_items').delete().gte('created_at', '2000-01-01')
-      await supabase.from('purchase_returns').delete().gte('created_at', '2000-01-01')
-      await supabase.from('purchases').delete().gte('created_at', '2000-01-01')
-      await supabase.from('warehouse_expenses').delete().gte('created_at', '2000-01-01')
-      await supabase.from('warehouse_stock').delete().gte('last_updated', '2000-01-01')
-      setDone(prev => [...prev, 'Server: data gudang dihapus'])
-
-      // Baru hapus IndexedDB
-      await db.warehouse_mutation_items.clear()
-      await db.warehouse_mutations.clear()
-      await db.purchase_items.clear()
-      await db.purchase_returns.clear()
-      await db.purchases.clear()
-      await db.warehouse_expenses.clear()
-      await db.warehouse_stock.clear()
-      setDone(prev => [...prev, 'Lokal: data gudang dihapus'])
-      toast.success('Data gudang berhasil direset')
-    } catch (e) {
-      console.error('[RESET]', e)
-      toast.error('Gagal reset: ' + String(e))
-    }
-    finally { setResetting(false) }
-  }
-
-  async function resetTransaksiProduksi() {
-    setResetting(true)
-    setDone([])
-    try {
-      setDone(prev => [...prev, 'Menghapus dari server...'])
-      const tables = ['production_log_materials','production_logs','production_mutation_items',
-        'production_mutations','production_stock','finished_goods_stock']
-      for (const t of tables) {
-        await supabase.from(t).delete().gte('created_at', '2000-01-01')
-      }
-
-      setDone(prev => [...prev, 'Server: data produksi dihapus'])
-
-      await db.production_log_materials.clear()
-      await db.production_logs.clear()
-      await db.production_mutation_items.clear()
-      await db.production_mutations.clear()
-      await db.production_stock.clear()
-      await db.finished_goods_stock.clear()
-      setDone(prev => [...prev, 'Lokal: data produksi dihapus'])
-      toast.success('Data produksi berhasil direset')
-    } catch (e) {
-      console.error('[RESET]', e)
-      toast.error('Gagal reset: ' + String(e))
-    }
-    finally { setResetting(false) }
-  }
-
-  async function resetSemuaTransaksi() {
-    if (!confirm('Reset SEMUA data transaksi gudang dan produksi? Master bahan, resep, supplier tetap ada.')) return
-    setResetting(true)
-    setDone([])
-    try {
-      await resetTransaksiGudang()
-      await resetTransaksiProduksi()
-      toast.success('Semua data transaksi berhasil direset')
-    } finally { setResetting(false) }
-  }
-
-  return (
-    <div className="p-4 space-y-4">
-      <div className="bg-red-50 border border-red-100 rounded-xl p-3">
-        <p className="text-sm font-medium text-red-700 mb-1">Hati-hati — Data tidak bisa dikembalikan</p>
-        <p className="text-xs text-red-500">
-          Reset hanya menghapus data transaksi (pembelian, mutasi, log produksi, stok).
-          Master data (bahan, supplier, resep) tetap aman.
-        </p>
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-50">
-          <p className="text-sm font-medium text-gray-900">Reset Data Gudang</p>
-          <p className="text-xs text-gray-400 mt-0.5">Hapus: pembelian, mutasi, pemakaian, biaya, stok gudang</p>
-        </div>
-        <div className="px-4 py-3">
-          <button onClick={resetTransaksiGudang} disabled={resetting}
-            className="w-full py-2.5 rounded-xl border border-red-200 text-sm font-medium text-red-600 active:bg-red-50 disabled:opacity-50">
-            {resetting ? 'Mereset...' : 'Reset Data Gudang'}
-          </button>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-50">
-          <p className="text-sm font-medium text-gray-900">Reset Data Produksi</p>
-          <p className="text-xs text-gray-400 mt-0.5">Hapus: log produksi, mutasi kirim, stok produksi & produk jadi</p>
-        </div>
-        <div className="px-4 py-3">
-          <button onClick={resetTransaksiProduksi} disabled={resetting}
-            className="w-full py-2.5 rounded-xl border border-red-200 text-sm font-medium text-red-600 active:bg-red-50 disabled:opacity-50">
-            {resetting ? 'Mereset...' : 'Reset Data Produksi'}
-          </button>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-50">
-          <p className="text-sm font-medium text-gray-900">Reset Semua Transaksi</p>
-          <p className="text-xs text-gray-400 mt-0.5">Reset gudang + produksi sekaligus</p>
-        </div>
-        <div className="px-4 py-3">
-          <button onClick={resetSemuaTransaksi} disabled={resetting}
-            className="w-full py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium disabled:opacity-50">
-            {resetting ? 'Mereset...' : 'Reset Semua Transaksi'}
-          </button>
-        </div>
-      </div>
-
-      {done.length > 0 && (
-        <div className="bg-green-50 border border-green-100 rounded-xl p-3 space-y-1">
-          {done.map((d, i) => (
-            <p key={i} className="text-xs text-green-700">✓ {d}</p>
-          ))}
-        </div>
-      )}
-
-      <div className="bg-gray-50 rounded-xl p-3">
-        <p className="text-xs font-medium text-gray-600 mb-1">Atau reset via SQL di Supabase:</p>
-        <pre className="text-xs text-gray-500 overflow-x-auto">
-{`TRUNCATE purchases, purchase_items, purchase_returns,
-  warehouse_mutations, warehouse_mutation_items,
-  warehouse_expenses, warehouse_stock,
-  production_logs, production_log_materials,
-  production_mutations, production_mutation_items,
-  production_stock, finished_goods_stock
-RESTART IDENTITY CASCADE;`}
-        </pre>
-      </div>
-    </div>
   )
 }

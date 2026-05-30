@@ -1,33 +1,35 @@
 // src/pages/pembelian/UnifiedPembelianPage.tsx
-// Pembelian terpadu — gudang, produksi, toko sesuai role
+// CHANGELOG:
+// - Data separation per role:
+//   · owner/manager/gudang: lihat semua pembelian
+//   · kasir: hanya pembelian yang dibuat sendiri (created_by) atau store_id toko sendiri
+//   · produksi: tidak ada akses (sudah ada gate)
+// - Auto expand hari ini, collapse hari lain
+// - Sync hanya pull data yang relevan per role
+
 import { useState, useMemo, useEffect, useContext, createContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
-import { Plus, RefreshCw, X, ShoppingCart } from 'lucide-react'
+import { Plus, RefreshCw, X } from 'lucide-react'
 import toast from 'react-hot-toast'
-import type { WarehouseStock, Material, Purchase, PurchaseItem } from '@/lib/db'
+import type { WarehouseStock } from '@/lib/db'
 
 const ToolbarCtx = createContext<(node: React.ReactNode) => void>(() => {})
-
 type Period = 'hari' | 'bulan'
 
-function groupKey(d: string, mode: Period) {
-  return mode === 'hari' ? d.slice(0,10) : d.slice(0,7)
-}
-function groupLabel(d: string, mode: Period) {
+function groupKey(d: string, m: Period) { return m === 'hari' ? d.slice(0,10) : d.slice(0,7) }
+function groupLabel(d: string, m: Period) {
   const dt = new Date(d)
-  return mode === 'hari'
+  return m === 'hari'
     ? dt.toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' })
     : dt.toLocaleDateString('id-ID', { month:'long', year:'numeric' })
 }
 function groupBy<T>(arr: T[], fn: (i: T) => string) {
   const map = new Map<string, T[]>()
-  for (const item of arr) {
-    const k = fn(item); if (!map.has(k)) map.set(k, []); map.get(k)!.push(item)
-  }
+  for (const item of arr) { const k = fn(item); if (!map.has(k)) map.set(k,[]); map.get(k)!.push(item) }
   return Array.from(map.entries()).map(([key, items]) => ({ key, items }))
 }
 
@@ -38,9 +40,8 @@ const METODE_BAYAR = [
 ]
 
 async function generatePONumber() {
-  const today = new Date()
-  const dateStr = today.toISOString().slice(0,10).replace(/-/g,'')
-  const prefix = `PO-${dateStr}-`
+  const ds = new Date().toISOString().slice(0,10).replace(/-/g,'')
+  const prefix = `PO-${ds}-`
   const existing = await db.purchases.filter(p => (p as any).po_number?.startsWith(prefix)).toArray()
   return `${prefix}${String(existing.length + 1).padStart(3,'0')}`
 }
@@ -58,23 +59,16 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
     </div>
   )
 }
+
 function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
   return <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">{children}{required && <span className="text-red-400 ml-0.5">*</span>}</label>
 }
 
-
 function CopyBtn({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
-  function handleCopy() {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    })
-  }
   return (
-    <button onClick={handleCopy}
-      className="inline-flex items-center gap-0.5 text-[10px] text-blue-400 hover:text-blue-600 ml-1 align-middle"
-      title="Copy ID">
+    <button onClick={() => { navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }) }}
+      className="inline-flex items-center gap-0.5 text-[10px] text-blue-400 hover:text-blue-600 ml-1 align-middle">
       {copied ? '✓' : '⧉'}
     </button>
   )
@@ -106,16 +100,20 @@ export default function UnifiedPembelianPage() {
   async function syncData() {
     setSyncing(true)
     try {
+      // Sync sesuai role — kasir hanya pull pembelian toko sendiri
+      const isKasir = user?.role === 'kasir'
       const [p, pi, m, s] = await Promise.all([
-        supabase.from('purchases').select('*').order('created_at', { ascending: false }).limit(200),
+        isKasir
+          ? supabase.from('purchases').select('*').eq('store_id', user?.store_id).order('created_at', { ascending: false }).limit(200)
+          : supabase.from('purchases').select('*').order('created_at', { ascending: false }).limit(200),
         supabase.from('purchase_items').select('*'),
         supabase.from('materials').select('*'),
         supabase.from('suppliers').select('*'),
       ])
-      if (p.data?.length) { await db.purchases.clear(); await db.purchases.bulkPut(p.data) }
+      if (p.data?.length)  { await db.purchases.clear(); await db.purchases.bulkPut(p.data) }
       if (pi.data?.length) { await db.purchase_items.clear(); await db.purchase_items.bulkPut(pi.data) }
-      if (m.data?.length) await db.materials.bulkPut(m.data)
-      if (s.data?.length) await db.suppliers.bulkPut(s.data)
+      if (m.data?.length)  await db.materials.bulkPut(m.data)
+      if (s.data?.length)  await db.suppliers.bulkPut(s.data)
       toast.success('Data diperbarui')
     } catch { toast.error('Gagal sync') }
     finally { setSyncing(false) }
@@ -134,23 +132,24 @@ export default function UnifiedPembelianPage() {
       </div>
       <ToolbarCtx.Provider value={setToolbarActions}>
         <div className="flex-1 overflow-auto bg-gray-50">
-          <PembelianList userId={user!.id} role={user!.role} />
+          <PembelianList userId={user!.id} role={user!.role} storeId={user!.store_id || ''} />
         </div>
       </ToolbarCtx.Provider>
     </div>
   )
 }
 
-function PembelianList({ userId, role }: { userId: string; role: string }) {
+function PembelianList({ userId, role, storeId }: { userId: string; role: string; storeId: string }) {
   const setToolbar = useContext(ToolbarCtx)
-  const [showForm, setShowForm] = useState(false)
-  const [groupMode, setGroupMode] = useState<Period>('hari')
-  const [search, setSearch] = useState('')
+  const [showForm,   setShowForm]   = useState(false)
+  const [groupMode,  setGroupMode]  = useState<Period>('hari')
+  const [search,     setSearch]     = useState('')
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
-    // Auto expand hari ini saja
     const today = new Date().toISOString().slice(0, 10)
     return { [today]: true }
   })
+
+  const isOwnerManager = ['owner','manager','gudang'].includes(role)
 
   useEffect(() => {
     setToolbar(
@@ -170,18 +169,30 @@ function PembelianList({ userId, role }: { userId: string; role: string }) {
   }, [groupMode])
 
   const purchases = useLiveQuery(async () => {
-    const p    = await db.purchases.orderBy('created_at').reverse().toArray()
+    let p = await db.purchases.orderBy('created_at').reverse().toArray()
+
+    // ── Data separation ──
+    // Kasir: hanya lihat pembelian toko sendiri atau yang dia buat
+    if (role === 'kasir') {
+      p = p.filter(x =>
+        (x as any).store_id === storeId ||
+        x.created_by === userId
+      )
+    }
+    // Gudang/owner/manager: lihat semua
+
     const pi   = await db.purchase_items.toArray()
     const mats = await db.materials.toArray()
     const sups = await db.suppliers.toArray()
     const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
     const sMap = Object.fromEntries(sups.map(s => [s.id, s]))
+
     return p.map(pur => ({
       ...pur,
       supplier: sMap[(pur as any).supplier_id || ''],
       items: pi.filter(i => i.purchase_id === pur.id).map(i => ({ ...i, material: mMap[i.material_id] }))
     }))
-  }, [])
+  }, [role, userId, storeId])
 
   const filtered = useMemo(() => {
     if (!purchases) return []
@@ -191,12 +202,12 @@ function PembelianList({ userId, role }: { userId: string; role: string }) {
       p.supplier?.name?.toLowerCase().includes(q) ||
       (p as any).po_number?.toLowerCase().includes(q) ||
       p.items.some(i => i.material?.name?.toLowerCase().includes(q)) ||
-      p.notes?.toLowerCase().includes(q) ||
-      (p as any).payment_method?.toLowerCase().includes(q)
+      p.notes?.toLowerCase().includes(q)
     )
   }, [purchases, search])
 
   const grouped = useMemo(() => groupBy(filtered, p => groupKey(p.created_at, groupMode)), [filtered, groupMode])
+
   const totalBulanIni = useMemo(() => {
     const now2 = new Date()
     return (purchases || []).filter(p => {
@@ -210,6 +221,7 @@ function PembelianList({ userId, role }: { userId: string; role: string }) {
       <div className="bg-white rounded-xl border border-gray-100 p-4">
         <p className="text-xs text-gray-400 mb-1">Total Pembelian Bulan Ini</p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalBulanIni)}</p>
+        {!isOwnerManager && <p className="text-xs text-gray-400 mt-0.5">Data toko ini saja</p>}
       </div>
 
       <input value={search} onChange={e => setSearch(e.target.value)}
@@ -217,8 +229,8 @@ function PembelianList({ userId, role }: { userId: string; role: string }) {
         placeholder="Cari supplier, PO, bahan..." />
 
       {grouped.map(({ key, items: grpItems }) => {
-        const total = grpItems.reduce((s, p) => s + p.total_amount, 0)
-        const today = new Date().toISOString().slice(0,10)
+        const total    = grpItems.reduce((s, p) => s + p.total_amount, 0)
+        const today    = new Date().toISOString().slice(0,10)
         const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : key === today
         return (
           <div key={key}>
@@ -241,10 +253,15 @@ function PembelianList({ userId, role }: { userId: string; role: string }) {
                 <div key={p.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex items-start justify-between mb-1">
                     <div className="flex-1 min-w-0">
-                      {(p as any).po_number && <p className="text-xs font-mono text-blue-600 mb-0.5">{(p as any).po_number}<CopyBtn text={(p as any).po_number} /></p>}
+                      {(p as any).po_number && (
+                        <p className="text-xs font-mono text-blue-600 mb-0.5">
+                          {(p as any).po_number}<CopyBtn text={(p as any).po_number} />
+                        </p>
+                      )}
                       <p className="text-sm font-medium text-gray-900">{p.supplier?.name || 'Tanpa Supplier'}</p>
                       <p className="text-xs text-gray-400 mt-0.5">
-                        {new Date(p.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })}, {new Date(p.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
+                        {new Date(p.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })},{' '}
+                        {new Date(p.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
                         {(p as any).payment_method ? ` · ${(p as any).payment_method}` : ''}
                       </p>
                       {p.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {p.notes}</p>}
@@ -270,28 +287,30 @@ function PembelianList({ userId, role }: { userId: string; role: string }) {
           </div>
         )
       })}
+
       {filtered.length === 0 && (
-        <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">Belum ada pembelian</div>
+        <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">
+          Belum ada pembelian
+        </div>
       )}
 
-      {showForm && <PembelianForm userId={userId} onClose={() => setShowForm(false)} />}
+      {showForm && <PembelianForm userId={userId} storeId={storeId} onClose={() => setShowForm(false)} />}
     </div>
   )
 }
 
-function PembelianForm({ userId, onClose }: { userId: string; onClose: () => void }) {
-  const { user } = useAuthStore()
+function PembelianForm({ userId, storeId, onClose }: { userId: string; storeId: string; onClose: () => void }) {
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
-  const suppliers = useLiveQuery(() => db.suppliers.filter(s => s.is_active).toArray(), [])
+  const suppliers = useLiveQuery(() => db.suppliers.filter(s => s.is_active !== false).toArray(), [])
 
   const [supplierId, setSupp]       = useState('')
-  const [invoiceNo, setInv]         = useState('')
-  const [notes, setNotes]           = useState('')
-  const [payMethod, setPay]         = useState('tunai')
+  const [invoiceNo,  setInv]        = useState('')
+  const [notes,      setNotes]      = useState('')
+  const [payMethod,  setPay]        = useState('tunai')
   const [transferTo, setTransferTo] = useState('')
-  const [dueDate, setDueDate]       = useState('')
-  const [items, setItems]           = useState([{ material_id: '', qty: '', unit_cost: '', pack_mode: false, pack_price: '', pack_qty: '' }])
-  const [saving, setSaving]         = useState(false)
+  const [dueDate,    setDueDate]    = useState('')
+  const [items,      setItems]      = useState([{ material_id:'', qty:'', unit_cost:'', pack_mode:false, pack_price:'', pack_qty:'' }])
+  const [saving,     setSaving]     = useState(false)
 
   function getUnitCost(item: typeof items[0]) {
     if (item.pack_mode && Number(item.pack_qty) > 0 && Number(item.pack_price) > 0)
@@ -311,8 +330,8 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
       }
       if ((f === 'pack_price' || f === 'pack_qty') && updated.pack_mode) {
         const pp = Number(f === 'pack_price' ? v : updated.pack_price)
-        const pq = Number(f === 'pack_qty' ? v : updated.pack_qty)
-        if (pp > 0 && pq > 0) updated.unit_cost = String((pp / pq).toFixed(4))
+        const pq = Number(f === 'pack_qty'   ? v : updated.pack_qty)
+        if (pp > 0 && pq > 0) updated.unit_cost = String((pp/pq).toFixed(4))
       }
       return updated
     }))
@@ -327,11 +346,13 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
       const purchId  = generateId()
       const purch: any = {
         id: purchId, po_number: poNumber,
-        supplier_id: supplierId || undefined,
-        invoice_no: invoiceNo || undefined,
-        total_amount: total, payment_method: payMethod,
+        store_id: storeId,                    // ← tag store_id untuk data separation
+        supplier_id:  supplierId || undefined,
+        invoice_no:   invoiceNo  || undefined,
+        total_amount: total,
+        payment_method: payMethod,
         transfer_to: transferTo || undefined,
-        due_date: dueDate || undefined,
+        due_date:    dueDate    || undefined,
         status: 'received', notes: notes || undefined,
         created_by: userId, created_at: now(),
       }
@@ -340,16 +361,24 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
 
       for (const item of valid) {
         const unitCost = getUnitCost(item)
-        const pi = { id: generateId(), purchase_id: purchId, material_id: item.material_id, qty: Number(item.qty), unit_cost: unitCost, subtotal: Number(item.qty) * unitCost, qty_returned: 0 }
+        const pi = {
+          id: generateId(), purchase_id: purchId, material_id: item.material_id,
+          qty: Number(item.qty), unit_cost: unitCost,
+          subtotal: Number(item.qty) * unitCost, qty_returned: 0,
+        }
         await db.purchase_items.add(pi)
         await supabase.from('purchase_items').insert(pi)
 
-        // Update warehouse stock + moving average
+        // Update warehouse stock
         const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
-        const wsd: WarehouseStock = { id: ws?.id || generateId(), material_id: item.material_id, qty_on_hand: (ws?.qty_on_hand || 0) + Number(item.qty), last_updated: now() }
+        const wsd: WarehouseStock = {
+          id: ws?.id || generateId(), material_id: item.material_id,
+          qty_on_hand: (ws?.qty_on_hand || 0) + Number(item.qty), last_updated: now()
+        }
         await db.warehouse_stock.put(wsd)
         await supabase.from('warehouse_stock').upsert(wsd)
 
+        // Moving average
         if (unitCost > 0) {
           const mat = await db.materials.get(item.material_id)
           if (mat) {
@@ -358,8 +387,14 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
             const newQty   = prevQty  + Number(item.qty)
             const newCost  = prevCost + Number(item.qty) * unitCost
             const avgCost  = newQty > 0 ? newCost / newQty : unitCost
-            await db.materials.update(item.material_id, { unit_cost: avgCost, avg_cost: avgCost, total_qty_purchased: newQty, total_cost_purchased: newCost, updated_at: now() })
-            await supabase.from('materials').update({ unit_cost: avgCost, avg_cost: avgCost, total_qty_purchased: newQty, total_cost_purchased: newCost }).eq('id', item.material_id)
+            await db.materials.update(item.material_id, {
+              unit_cost: avgCost, avg_cost: avgCost,
+              total_qty_purchased: newQty, total_cost_purchased: newCost, updated_at: now()
+            })
+            await supabase.from('materials').update({
+              unit_cost: avgCost, avg_cost: avgCost,
+              total_qty_purchased: newQty, total_cost_purchased: newCost
+            }).eq('id', item.material_id)
           }
         }
       }
@@ -382,16 +417,25 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
           <input className="input" value={invoiceNo} onChange={e => setInv(e.target.value)} placeholder="INV-001" />
         </div>
       </div>
+
       <div><Label required>Metode Bayar</Label>
         <div className="flex gap-2">
           {METODE_BAYAR.map(m => (
             <button key={m.value} onClick={() => setPay(m.value)}
-              className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-colors ${payMethod === m.value ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>{m.label}</button>
+              className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-colors ${payMethod === m.value ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
+              {m.label}
+            </button>
           ))}
         </div>
       </div>
-      {payMethod === 'transfer' && <div><Label>Transfer ke</Label><input className="input" value={transferTo} onChange={e => setTransferTo(e.target.value)} placeholder="BCA 1234567890" /></div>}
-      {payMethod === 'kredit'   && <div><Label>Jatuh Tempo</Label><input className="input" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} /></div>}
+
+      {payMethod === 'transfer' && (
+        <div><Label>Transfer ke</Label><input className="input" value={transferTo} onChange={e => setTransferTo(e.target.value)} placeholder="BCA 1234567890" /></div>
+      )}
+      {payMethod === 'kredit' && (
+        <div><Label>Jatuh Tempo</Label><input className="input" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} /></div>
+      )}
+
       <div><Label required>Item</Label>
         <div className="space-y-2">
           {items.map((item, i) => {
@@ -431,13 +475,18 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
             )
           })}
         </div>
-        <button onClick={() => setItems(p => [...p, { material_id:'', qty:'', unit_cost:'', pack_mode:false, pack_price:'', pack_qty:'' }])} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
+        <button onClick={() => setItems(p => [...p, { material_id:'', qty:'', unit_cost:'', pack_mode:false, pack_price:'', pack_qty:'' }])}
+          className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
       </div>
+
       <div><Label>Catatan</Label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} /></div>
+
       <div className="flex items-center justify-between py-2 border-t border-gray-100">
         <span className="text-sm font-medium text-gray-700">Total</span>
         <span className="text-base font-semibold text-gray-900">{formatRupiah(total)}</span>
       </div>
+      <p className="text-xs text-gray-400">Harga beli otomatis update moving average bahan.</p>
+
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>

@@ -1,4 +1,13 @@
 // src/pages/biaya/UnifiedBiayaPage.tsx
+// CHANGELOG:
+// - Data separation per role:
+//   · owner/manager/gudang: lihat semua biaya
+//   · kasir: hanya biaya yang dia buat (created_by) atau store_id sendiri
+//   · produksi: hanya biaya yang dia buat
+// - Biaya form: tag store_id saat simpan
+// - Auto expand hari ini, collapse hari lain
+// - Sync pull data sesuai role
+
 import { useState, useMemo, useEffect, useContext, createContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now } from '@/lib/db'
@@ -10,6 +19,7 @@ import toast from 'react-hot-toast'
 
 const ToolbarCtx = createContext<(n: React.ReactNode) => void>(() => {})
 type Period = 'hari' | 'bulan'
+
 function groupKey(d: string, m: Period) { return m === 'hari' ? d.slice(0,10) : d.slice(0,7) }
 function groupLabel(d: string, m: Period) {
   const dt = new Date(d)
@@ -24,30 +34,30 @@ function groupBy<T>(arr: T[], fn: (i: T) => string) {
 }
 
 async function generateExpenseNumber() {
-  const today = new Date()
-  const ds = today.toISOString().slice(0,10).replace(/-/g,'')
+  const ds = new Date().toISOString().slice(0,10).replace(/-/g,'')
   const prefix = `BIA-${ds}-`
   const ex = await db.warehouse_expenses.filter(e => (e as any).expense_number?.startsWith(prefix)).toArray()
   return `${prefix}${String(ex.length+1).padStart(3,'0')}`
 }
 
 const KATEGORI_BIAYA = [
-  { value: 'beban_bahan_baku',    label: 'Bahan Baku',     desc: 'Bahan produksi' },
-  { value: 'beban_tenaga_kerja',  label: 'Tenaga Kerja',   desc: 'Gaji, upah' },
-  { value: 'beban_sewa',          label: 'Sewa',           desc: 'Sewa tempat' },
-  { value: 'beban_utilitas',      label: 'Utilitas',       desc: 'Listrik, air, gas' },
-  { value: 'beban_packaging',     label: 'Packaging',      desc: 'Dus, plastik' },
-  { value: 'beban_transport',     label: 'Transport',      desc: 'Pengiriman, bbm' },
-  { value: 'beban_pemasaran',     label: 'Pemasaran',      desc: 'Iklan, promo' },
-  { value: 'beban_lainnya',       label: 'Lainnya',        desc: 'ATK, kebersihan' },
-]
-const METODE_BAYAR = [
-  { value: 'tunai', label: 'Tunai' },
-  { value: 'transfer', label: 'Transfer' },
-  { value: 'kredit', label: 'Kredit' },
+  { value: 'beban_bahan_baku',   label: 'Bahan Baku',   desc: 'Bahan produksi' },
+  { value: 'beban_tenaga_kerja', label: 'Tenaga Kerja', desc: 'Gaji, upah' },
+  { value: 'beban_sewa',         label: 'Sewa',         desc: 'Sewa tempat' },
+  { value: 'beban_utilitas',     label: 'Utilitas',     desc: 'Listrik, air, gas' },
+  { value: 'beban_packaging',    label: 'Packaging',    desc: 'Dus, plastik' },
+  { value: 'beban_transport',    label: 'Transport',    desc: 'Pengiriman, bbm' },
+  { value: 'beban_pemasaran',    label: 'Pemasaran',    desc: 'Iklan, promo' },
+  { value: 'beban_lainnya',      label: 'Lainnya',      desc: 'ATK, kebersihan' },
 ]
 
-function Modal({ title, onClose, children }: any) {
+const METODE_BAYAR = [
+  { value: 'tunai',    label: 'Tunai'   },
+  { value: 'transfer', label: 'Transfer'},
+  { value: 'kredit',   label: 'Kredit'  },
+]
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl w-full max-w-md shadow-lg max-h-[92vh] flex flex-col">
@@ -63,16 +73,9 @@ function Modal({ title, onClose, children }: any) {
 
 function CopyBtn({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
-  function handleCopy() {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    })
-  }
   return (
-    <button onClick={handleCopy}
-      className="inline-flex items-center gap-0.5 text-[10px] text-blue-400 hover:text-blue-600 ml-1 align-middle"
-      title="Copy ID">
+    <button onClick={() => { navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }) }}
+      className="inline-flex items-center gap-0.5 text-[10px] text-blue-400 hover:text-blue-600 ml-1 align-middle">
       {copied ? '✓' : '⧉'}
     </button>
   )
@@ -86,8 +89,27 @@ export default function UnifiedBiayaPage() {
   async function syncData() {
     setSyncing(true)
     try {
-      const { data } = await supabase.from('warehouse_expenses').select('*').order('created_at', { ascending: false }).limit(200)
-      if (data?.length) { await db.warehouse_expenses.clear(); await db.warehouse_expenses.bulkPut(data) }
+      const isOwnerManager = ['owner','manager','gudang'].includes(user?.role || '')
+      const query = isOwnerManager
+        ? supabase.from('warehouse_expenses').select('*').order('created_at', { ascending: false }).limit(300)
+        : supabase.from('warehouse_expenses').select('*')
+            .eq('store_id', user?.store_id)
+            .order('created_at', { ascending: false }).limit(200)
+
+      const { data } = await query
+      if (data?.length) {
+        // Untuk owner: replace all. Untuk kasir: hanya replace data toko sendiri
+        if (isOwnerManager) {
+          await db.warehouse_expenses.clear()
+        } else {
+          // Hapus data toko ini dari lokal, lalu isi ulang
+          const localIds = (await db.warehouse_expenses
+            .filter(e => (e as any).store_id === user?.store_id || e.created_by === user?.id)
+            .primaryKeys())
+          if (localIds.length) await db.warehouse_expenses.bulkDelete(localIds)
+        }
+        await db.warehouse_expenses.bulkPut(data)
+      }
       toast.success('Data diperbarui')
     } catch { toast.error('Gagal sync') }
     finally { setSyncing(false) }
@@ -106,24 +128,25 @@ export default function UnifiedBiayaPage() {
       </div>
       <ToolbarCtx.Provider value={setToolbarActions}>
         <div className="flex-1 overflow-auto bg-gray-50">
-          <BiayaList userId={user!.id} role={user!.role} />
+          <BiayaList userId={user!.id} role={user!.role} storeId={user!.store_id || ''} />
         </div>
       </ToolbarCtx.Provider>
     </div>
   )
 }
 
-function BiayaList({ userId, role }: { userId: string; role: string }) {
+function BiayaList({ userId, role, storeId }: { userId: string; role: string; storeId: string }) {
   const setToolbar = useContext(ToolbarCtx)
-  const [showForm, setShowForm] = useState(false)
-  const [groupMode, setGroupMode] = useState<Period>('hari')
-  const [filterCat, setFilterCat] = useState('semua')
-  const [search, setSearch] = useState('')
+  const [showForm,   setShowForm]   = useState(false)
+  const [groupMode,  setGroupMode]  = useState<Period>('hari')
+  const [filterCat,  setFilterCat]  = useState('semua')
+  const [search,     setSearch]     = useState('')
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
-    // Auto expand hari ini saja
     const today = new Date().toISOString().slice(0, 10)
     return { [today]: true }
   })
+
+  const isOwnerManager = ['owner','manager','gudang'].includes(role)
 
   useEffect(() => {
     setToolbar(
@@ -144,12 +167,22 @@ function BiayaList({ userId, role }: { userId: string; role: string }) {
 
   const expenses = useLiveQuery(async () => {
     let list = await db.warehouse_expenses.orderBy('created_at').reverse().toArray()
-    // Produksi dan kasir hanya lihat biaya yang mereka input sendiri
-    if (role === 'produksi' || role === 'kasir') {
+
+    // ── Data separation ──
+    if (role === 'kasir') {
+      // Kasir: hanya biaya toko sendiri atau yang dia buat
+      list = list.filter(e =>
+        (e as any).store_id === storeId ||
+        e.created_by === userId
+      )
+    } else if (role === 'produksi') {
+      // Produksi: hanya biaya yang dia buat
       list = list.filter(e => e.created_by === userId)
     }
+    // owner/manager/gudang: lihat semua
+
     return list
-  }, [role, userId])
+  }, [role, userId, storeId])
 
   const filtered = useMemo(() => {
     if (!expenses) return []
@@ -160,8 +193,7 @@ function BiayaList({ userId, role }: { userId: string; role: string }) {
       list = list.filter(e =>
         e.name.toLowerCase().includes(q) ||
         (e as any).expense_number?.toLowerCase().includes(q) ||
-        e.notes?.toLowerCase().includes(q) ||
-        (e as any).payment_method?.toLowerCase().includes(q)
+        e.notes?.toLowerCase().includes(q)
       )
     }
     return list
@@ -182,24 +214,30 @@ function BiayaList({ userId, role }: { userId: string; role: string }) {
       <div className="bg-white rounded-xl border border-gray-100 p-4">
         <p className="text-xs text-gray-400 mb-1">Total Biaya Bulan Ini</p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalBulanIni)}</p>
+        {!isOwnerManager && <p className="text-xs text-gray-400 mt-0.5">Data milik Anda saja</p>}
       </div>
 
       <input value={search} onChange={e => setSearch(e.target.value)}
         className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
         placeholder="Cari keterangan biaya..." />
 
-      <div className="flex gap-1.5 overflow-x-auto pb-1">
+      {/* Filter kategori */}
+      <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
         <button onClick={() => setFilterCat('semua')}
-          className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterCat === 'semua' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>Semua</button>
+          className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterCat === 'semua' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
+          Semua
+        </button>
         {KATEGORI_BIAYA.map(k => (
           <button key={k.value} onClick={() => setFilterCat(k.value)}
-            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterCat === k.value ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>{k.label}</button>
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterCat === k.value ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
+            {k.label}
+          </button>
         ))}
       </div>
 
       {grouped.map(({ key, items: grpItems }) => {
-        const total = grpItems.reduce((s, e) => s + e.amount, 0)
-        const today = new Date().toISOString().slice(0,10)
+        const total    = grpItems.reduce((s, e) => s + e.amount, 0)
+        const today    = new Date().toISOString().slice(0,10)
         const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : key === today
         return (
           <div key={key}>
@@ -221,13 +259,17 @@ function BiayaList({ userId, role }: { userId: string; role: string }) {
               {grpItems.map((e, idx) => (
                 <div key={e.id} className={`flex items-start justify-between px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                   <div className="flex-1 min-w-0">
-                    {(e as any).expense_number && <p className="text-xs font-mono text-blue-600 mb-0.5">{(e as any).expense_number}<CopyBtn text={(e as any).expense_number} /></p>}
+                    {(e as any).expense_number && (
+                      <p className="text-xs font-mono text-blue-600 mb-0.5">
+                        {(e as any).expense_number}<CopyBtn text={(e as any).expense_number} />
+                      </p>
+                    )}
                     <p className="text-sm font-medium text-gray-900 truncate">{e.name}</p>
                     <p className="text-xs text-gray-400 mt-0.5">
                       {KATEGORI_BIAYA.find(k => k.value === e.category)?.label || e.category}
-                      {' · '}{new Date(e.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })}, {new Date(e.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
+                      {' · '}{new Date(e.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })},{' '}
+                      {new Date(e.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
                       {(e as any).payment_method ? ` · ${(e as any).payment_method}` : ''}
-                      {(e as any).transfer_to ? ` → ${(e as any).transfer_to}` : ''}
                     </p>
                     {e.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {e.notes}</p>}
                   </div>
@@ -238,32 +280,49 @@ function BiayaList({ userId, role }: { userId: string; role: string }) {
           </div>
         )
       })}
+
       {filtered.length === 0 && (
-        <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">Belum ada catatan biaya</div>
+        <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">
+          Belum ada catatan biaya
+        </div>
       )}
 
-      {showForm && <BiayaForm userId={userId} onClose={() => setShowForm(false)} />}
+      {showForm && <BiayaForm userId={userId} storeId={storeId} onClose={() => setShowForm(false)} />}
     </div>
   )
 }
 
-function BiayaForm({ userId, onClose }: { userId: string; onClose: () => void }) {
-  const [name, setName]             = useState('')
-  const [amount, setAmount]         = useState('')
-  const [category, setCat]          = useState('beban_lainnya')
-  const [payMethod, setPay]         = useState('tunai')
+function BiayaForm({ userId, storeId, onClose }: { userId: string; storeId: string; onClose: () => void }) {
+  const [name,       setName]       = useState('')
+  const [amount,     setAmount]     = useState('')
+  const [category,   setCat]        = useState('beban_lainnya')
+  const [payMethod,  setPay]        = useState('tunai')
   const [transferTo, setTransferTo] = useState('')
-  const [dueDate, setDueDate]       = useState('')
-  const [notes, setNotes]           = useState('')
-  const [saving, setSaving]         = useState(false)
+  const [dueDate,    setDueDate]    = useState('')
+  const [notes,      setNotes]      = useState('')
+  const [saving,     setSaving]     = useState(false)
 
   async function handleSave() {
-    if (!name.trim()) return toast.error('Keterangan wajib diisi')
-    if (!amount || Number(amount) <= 0) return toast.error('Jumlah wajib diisi')
+    if (!name.trim())                      return toast.error('Keterangan wajib diisi')
+    if (!amount || Number(amount) <= 0)    return toast.error('Jumlah wajib diisi')
     setSaving(true)
     try {
       const expNumber = await generateExpenseNumber()
-      const data: any = { id: generateId(), expense_number: expNumber, name: name.trim(), amount: Number(amount), expense_date: now().slice(0,10), category, payment_method: payMethod, transfer_to: transferTo || undefined, due_date: dueDate || undefined, notes: notes || undefined, created_by: userId, created_at: now() }
+      const data: any = {
+        id:             generateId(),
+        expense_number: expNumber,
+        store_id:       storeId,        // ← tag store_id untuk data separation
+        name:           name.trim(),
+        amount:         Number(amount),
+        expense_date:   now().slice(0,10),
+        category,
+        payment_method: payMethod,
+        transfer_to:    transferTo || undefined,
+        due_date:       dueDate    || undefined,
+        notes:          notes      || undefined,
+        created_by:     userId,
+        created_at:     now(),
+      }
       await db.warehouse_expenses.add(data)
       await supabase.from('warehouse_expenses').insert(data)
       toast.success('Biaya dicatat')
@@ -274,13 +333,16 @@ function BiayaForm({ userId, onClose }: { userId: string; onClose: () => void })
 
   return (
     <Modal title="Catat Biaya" onClose={onClose}>
-      <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Keterangan <span className="text-red-400">*</span></label>
+      <div>
+        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Keterangan *</label>
         <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Bayar listrik Mei 2026" autoFocus />
       </div>
-      <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Jumlah (Rp) <span className="text-red-400">*</span></label>
-        <input className="input" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" />
+      <div>
+        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Jumlah (Rp) *</label>
+        <input className="input" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value.replace(/[^0-9]/g,''))} placeholder="0" />
       </div>
-      <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Kategori <span className="text-red-400">*</span></label>
+      <div>
+        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Kategori *</label>
         <div className="grid grid-cols-2 gap-2">
           {KATEGORI_BIAYA.map(c => (
             <button key={c.value} onClick={() => setCat(c.value)}
@@ -291,17 +353,31 @@ function BiayaForm({ userId, onClose }: { userId: string; onClose: () => void })
           ))}
         </div>
       </div>
-      <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Metode Bayar <span className="text-red-400">*</span></label>
+      <div>
+        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Metode Bayar *</label>
         <div className="flex gap-2">
           {METODE_BAYAR.map(m => (
             <button key={m.value} onClick={() => setPay(m.value)}
-              className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-colors ${payMethod === m.value ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>{m.label}</button>
+              className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-colors ${payMethod === m.value ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
+              {m.label}
+            </button>
           ))}
         </div>
       </div>
-      {payMethod === 'transfer' && <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Transfer ke</label><input className="input" value={transferTo} onChange={e => setTransferTo(e.target.value)} placeholder="BCA 1234567890" /></div>}
-      {payMethod === 'kredit'   && <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Jatuh Tempo</label><input className="input" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} /></div>}
-      <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Catatan</label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opsional" /></div>
+      {payMethod === 'transfer' && (
+        <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Transfer ke</label>
+          <input className="input" value={transferTo} onChange={e => setTransferTo(e.target.value)} placeholder="BCA 1234567890" />
+        </div>
+      )}
+      {payMethod === 'kredit' && (
+        <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Jatuh Tempo</label>
+          <input className="input" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+        </div>
+      )}
+      <div>
+        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Catatan</label>
+        <input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opsional" />
+      </div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>

@@ -1,8 +1,8 @@
 // src/pages/settings/SettingsProductPage.tsx
-// Halaman Produk & Kategori di Settings
-// - Tambah/edit/hapus produk
-// - Tambah/edit/hapus kategori (manual, tidak hardcoded)
-// - Produk berlaku semua toko (tidak per toko)
+// CHANGELOG:
+// - Tab Produk: tambah/edit/hapus/toggle aktif produk
+// - Tab Kategori: tambah/edit/hapus kategori manual
+// - Tab Paket: tambah/edit/hapus paket mix rasa
 
 import { useState, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -10,24 +10,40 @@ import { db, generateId, now } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
-import { Plus, X, Trash2, ChevronRight, RefreshCw, Tag } from 'lucide-react'
+import { Plus, X, Trash2, ChevronRight, RefreshCw, Package } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-type Tab = 'produk' | 'kategori'
+type Tab = 'produk' | 'kategori' | 'paket'
+
+interface PaketData {
+  id: string
+  name: string
+  price: number
+  qty_total: number
+  is_mix: boolean
+  store_id: string | null
+  is_active: boolean
+  created_at?: string
+}
 
 export default function SettingsProductPage() {
-  const [tab, setTab] = useState<Tab>('produk')
+  const { user } = useAuthStore()
+  const [tab, setTab]       = useState<Tab>('produk')
   const [syncing, setSyncing] = useState(false)
 
   async function syncData() {
     setSyncing(true)
     try {
-      const [prodRes, catRes] = await Promise.all([
+      const [prodRes, catRes, pakRes] = await Promise.all([
         supabase.from('products').select('*'),
         supabase.from('categories').select('*').order('sort_order'),
+        supabase.from('packages').select('*').order('created_at'),
       ])
-      if (prodRes.data !== null) { await db.products.clear(); if (prodRes.data.length) await db.products.bulkPut(prodRes.data) }
-      if (catRes.data  !== null) { await db.categories.clear(); if (catRes.data.length) await db.categories.bulkPut(catRes.data) }
+      if (prodRes.data !== null) { await db.products.clear();   if (prodRes.data.length) await db.products.bulkPut(prodRes.data)   }
+      if (catRes.data  !== null) { await db.categories.clear(); if (catRes.data.length) await db.categories.bulkPut(catRes.data)   }
+      if (pakRes.data  !== null) {
+        try { await (db as any).packages?.clear(); if (pakRes.data.length) await (db as any).packages?.bulkPut(pakRes.data) } catch {}
+      }
       toast.success('Data diperbarui')
     } catch { toast.error('Gagal sync') }
     finally { setSyncing(false) }
@@ -41,27 +57,28 @@ export default function SettingsProductPage() {
           <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
         </button>
       </div>
-      <div className="px-4 mt-3 flex gap-0 border-b border-gray-100">
-        {(['produk','kategori'] as Tab[]).map(t => (
+      <div className="px-4 mt-3 flex gap-0 border-b border-gray-100 overflow-x-auto scrollbar-hide">
+        {(['produk','kategori','paket'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className={`pb-2.5 mr-6 text-sm font-medium border-b-2 capitalize transition-colors ${tab===t ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
-            {t}
+            className={`pb-2.5 mr-6 text-sm font-medium border-b-2 capitalize whitespace-nowrap transition-colors ${tab===t ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
+            {t === 'paket' ? 'Paket / Bundle' : t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
         ))}
       </div>
       <div className="flex-1 overflow-auto bg-gray-50">
-        {tab === 'produk'   && <ProdukTab />}
+        {tab === 'produk'   && <ProdukTab storeId={user?.store_id || ''} />}
         {tab === 'kategori' && <KategoriTab />}
+        {tab === 'paket'    && <PaketTab storeId={user?.store_id || ''} />}
       </div>
     </div>
   )
 }
 
 // ── PRODUK TAB ────────────────────────────────────────────────
-function ProdukTab() {
-  const [showForm, setShowForm] = useState(false)
-  const [editItem, setEditItem] = useState<any>(null)
-  const [search,   setSearch]   = useState('')
+function ProdukTab({ storeId }: { storeId: string }) {
+  const [showForm,  setShowForm]  = useState(false)
+  const [editItem,  setEditItem]  = useState<any>(null)
+  const [search,    setSearch]    = useState('')
   const [filterCat, setFilterCat] = useState('semua')
 
   const products   = useLiveQuery(() => db.products.toArray(), [])
@@ -73,6 +90,7 @@ function ProdukTab() {
     return products
       .filter(p => filterCat === 'semua' || p.category_id === filterCat)
       .filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name))
   }, [products, filterCat, search])
 
   async function handleDelete(p: any) {
@@ -86,7 +104,7 @@ function ProdukTab() {
 
   async function toggleActive(p: any) {
     const newActive = !p.is_active
-    await db.products.update(p.id, { is_active: newActive })
+    await db.products.update(p.id, { is_active: newActive, updated_at: now() })
     await supabase.from('products').update({ is_active: newActive }).eq('id', p.id)
     toast.success(newActive ? 'Produk diaktifkan' : 'Produk dinonaktifkan')
   }
@@ -105,7 +123,6 @@ function ProdukTab() {
         className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
         placeholder="Cari nama produk..." />
 
-      {/* Filter kategori */}
       <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
         <button onClick={() => setFilterCat('semua')}
           className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterCat==='semua' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
@@ -126,6 +143,7 @@ function ProdukTab() {
               <p className="text-sm font-medium text-gray-900 truncate">{p.name}</p>
               <p className="text-xs text-gray-400">
                 {catMap[p.category_id] || 'Tanpa Kategori'} · {formatRupiah(p.base_price || 0)}
+                {p.unit && p.unit !== 'pcs' ? ` / ${p.unit}` : ''}
               </p>
             </button>
             <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
@@ -142,7 +160,7 @@ function ProdukTab() {
         ))}
         {filtered.length === 0 && (
           <div className="py-12 text-center text-sm text-gray-400">
-            {search ? `Tidak ada hasil "${search}"` : 'Belum ada produk'}
+            {search ? `Tidak ada hasil "${search}"` : 'Belum ada produk — klik Tambah Produk'}
           </div>
         )}
       </div>
@@ -159,11 +177,9 @@ function ProdukTab() {
 function KategoriTab() {
   const [showForm, setShowForm] = useState(false)
   const [editItem, setEditItem] = useState<any>(null)
-
   const categories = useLiveQuery(() => db.categories.orderBy('sort_order').toArray(), [])
 
   async function handleDelete(c: any) {
-    // Cek apakah ada produk yang pakai kategori ini
     const count = await db.products.where('category_id').equals(c.id).count()
     if (count > 0) return toast.error(`Kategori dipakai ${count} produk, tidak bisa dihapus`)
     if (!confirm(`Hapus kategori "${c.name}"?`)) return
@@ -183,10 +199,12 @@ function KategoriTab() {
           <Plus size={14} /> Tambah Kategori
         </button>
       </div>
-
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {categories?.map((c, idx) => (
           <div key={c.id} className={`flex items-center px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
+            <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0 mr-3 text-sm font-bold text-gray-500">
+              {c.sort_order || idx+1}
+            </div>
             <button onClick={() => { setEditItem(c); setShowForm(true) }} className="flex-1 min-w-0 text-left">
               <p className="text-sm font-medium text-gray-900">{c.name}</p>
               {c.description && <p className="text-xs text-gray-400">{c.description}</p>}
@@ -203,7 +221,6 @@ function KategoriTab() {
           <div className="py-12 text-center text-sm text-gray-400">Belum ada kategori</div>
         )}
       </div>
-
       {showForm && (
         <KategoriForm kategori={editItem} currentCount={categories?.length || 0}
           onClose={() => { setShowForm(false); setEditItem(null) }} />
@@ -212,20 +229,127 @@ function KategoriTab() {
   )
 }
 
+// ── PAKET TAB ─────────────────────────────────────────────────
+function PaketTab({ storeId }: { storeId: string }) {
+  const [showForm, setShowForm] = useState(false)
+  const [editItem, setEditItem] = useState<PaketData|null>(null)
+  const [pakets,   setPakets]   = useState<PaketData[]>([])
+  const [loading,  setLoading]  = useState(true)
+
+  async function loadPakets() {
+    setLoading(true)
+    try {
+      const { data } = await supabase.from('packages').select('*').order('created_at')
+      if (data) setPakets(data)
+    } catch {
+      try {
+        const local = await (db as any).packages?.toArray() ?? []
+        setPakets(local)
+      } catch {}
+    }
+    setLoading(false)
+  }
+
+  useMemo(() => { loadPakets() }, [])
+
+  async function toggleActive(p: PaketData) {
+    const updated = { ...p, is_active: !p.is_active }
+    setPakets(prev => prev.map(x => x.id === p.id ? updated : x))
+    await supabase.from('packages').update({ is_active: updated.is_active }).eq('id', p.id)
+    try { await (db as any).packages?.put(updated) } catch {}
+  }
+
+  async function handleDelete(p: PaketData) {
+    if (!confirm(`Hapus paket "${p.name}"?`)) return
+    setPakets(prev => prev.filter(x => x.id !== p.id))
+    await supabase.from('packages').delete().eq('id', p.id)
+    try { await (db as any).packages?.delete(p.id) } catch {}
+    toast.success('Paket dihapus')
+  }
+
+  const all    = pakets
+  const active = pakets.filter(p => p.is_active)
+
+  return (
+    <div className="p-4 space-y-3">
+      {/* Info */}
+      <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
+        <p className="text-xs font-semibold text-blue-700 mb-0.5">Apa itu Paket / Bundle?</p>
+        <p className="text-xs text-blue-600">
+          Paket adalah bundel produk dengan harga spesial. Kasir bisa pilih rasa mix saat checkout.
+          Contoh: "Paket 5 Puff" = 5 pcs mix rasa dengan harga Rp 45.000
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-gray-400">{active.length} aktif · {all.length} total</p>
+        <button onClick={() => { setEditItem(null); setShowForm(true) }}
+          className="flex items-center gap-1.5 text-sm font-medium text-gray-900 bg-white border border-gray-200 px-3 py-1.5 rounded-lg">
+          <Plus size={14} /> Tambah Paket
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="bg-white rounded-xl border border-gray-100 py-8 text-center text-sm text-gray-400">Memuat...</div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          {all.map((p, idx) => (
+            <div key={p.id} className={`flex items-center px-4 py-3 ${idx!==0?'border-t border-gray-50':''} ${!p.is_active?'opacity-50':''}`}>
+              <div className="w-9 h-9 bg-gray-100 rounded-xl flex items-center justify-center flex-shrink-0 mr-3">
+                <Package size={16} className="text-gray-500" />
+              </div>
+              <button onClick={() => { setEditItem(p); setShowForm(true) }} className="flex-1 min-w-0 text-left">
+                <p className="text-sm font-medium text-gray-900">{p.name}</p>
+                <p className="text-xs text-gray-400">
+                  {p.qty_total} pcs · {formatRupiah(p.price)}
+                  {p.is_mix && ' · Mix rasa'}
+                  {p.store_id ? '' : ' · Semua toko'}
+                </p>
+              </button>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <button onClick={() => toggleActive(p)}
+                  className={`w-9 h-5 rounded-full transition-colors relative ${p.is_active ? 'bg-gray-900' : 'bg-gray-200'}`}>
+                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${p.is_active ? 'left-[18px]' : 'left-0.5'}`} />
+                </button>
+                <button onClick={() => { setEditItem(p); setShowForm(true) }}
+                  className="p-1.5 text-gray-400 rounded-lg"><ChevronRight size={14} /></button>
+                <button onClick={() => handleDelete(p)}
+                  className="p-1.5 text-red-400 rounded-lg"><Trash2 size={14} /></button>
+              </div>
+            </div>
+          ))}
+          {all.length === 0 && (
+            <div className="py-12 text-center">
+              <Package size={32} className="mx-auto text-gray-200 mb-2" />
+              <p className="text-sm text-gray-400">Belum ada paket — klik Tambah Paket</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {showForm && (
+        <PaketForm paket={editItem}
+          onClose={() => { setShowForm(false); setEditItem(null) }}
+          onSaved={() => { setShowForm(false); setEditItem(null); loadPakets() }} />
+      )}
+    </div>
+  )
+}
+
 // ── FORM PRODUK ───────────────────────────────────────────────
 function ProdukForm({ product, categories, onClose }: { product: any; categories: any[]; onClose: () => void }) {
-  const [name,       setName]      = useState(product?.name || '')
-  const [categoryId, setCatId]     = useState(product?.category_id || '')
-  const [price,      setPrice]     = useState(String(product?.base_price || ''))
-  const [sku,        setSku]       = useState(product?.sku || '')
-  const [unit,       setUnit]      = useState(product?.unit || 'pcs')
-  const [isActive,   setIsActive]  = useState(product?.is_active ?? true)
-  const [saving,     setSaving]    = useState(false)
+  const [name,       setName]     = useState(product?.name || '')
+  const [categoryId, setCatId]    = useState(product?.category_id || '')
+  const [price,      setPrice]    = useState(String(product?.base_price || ''))
+  const [sku,        setSku]      = useState(product?.sku || '')
+  const [unit,       setUnit]     = useState(product?.unit || 'pcs')
+  const [isActive,   setIsActive] = useState(product?.is_active ?? true)
+  const [saving,     setSaving]   = useState(false)
 
   async function handleSave() {
-    if (!name.trim())  return toast.error('Nama produk wajib diisi')
-    if (!categoryId)   return toast.error('Pilih kategori')
-    if (!price || Number(price) <= 0) return toast.error('Harga wajib diisi')
+    if (!name.trim())                        return toast.error('Nama produk wajib diisi')
+    if (!categoryId)                         return toast.error('Pilih kategori')
+    if (!price || Number(price) <= 0)        return toast.error('Harga wajib diisi')
     setSaving(true)
     try {
       const data: any = {
@@ -278,7 +402,7 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
       </div>
       {product && (
         <div className="flex items-center justify-between py-2 border-t border-gray-100">
-          <p className="text-sm text-gray-700">Aktif</p>
+          <p className="text-sm text-gray-700">Aktif (tampil di kasir)</p>
           <button onClick={() => setIsActive(!isActive)}
             className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
             <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} />
@@ -298,10 +422,10 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
 
 // ── FORM KATEGORI ─────────────────────────────────────────────
 function KategoriForm({ kategori, currentCount, onClose }: { kategori: any; currentCount: number; onClose: () => void }) {
-  const [name,      setName]    = useState(kategori?.name || '')
-  const [desc,      setDesc]    = useState(kategori?.description || '')
-  const [sortOrder, setSort]    = useState(String(kategori?.sort_order ?? currentCount + 1))
-  const [saving,    setSaving]  = useState(false)
+  const [name,      setName]   = useState(kategori?.name || '')
+  const [desc,      setDesc]   = useState(kategori?.description || '')
+  const [sortOrder, setSort]   = useState(String(kategori?.sort_order ?? currentCount + 1))
+  const [saving,    setSaving] = useState(false)
 
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama kategori wajib diisi')
@@ -334,9 +458,9 @@ function KategoriForm({ kategori, currentCount, onClose }: { kategori: any; curr
         <input className="input" value={desc} onChange={e => setDesc(e.target.value)} placeholder="Opsional" />
       </div>
       <div>
-        <Label>Urutan</Label>
-        <input className="input" type="number" value={sortOrder} onChange={e => setSort(e.target.value)} />
-        <p className="text-xs text-gray-400 mt-1">Angka kecil = tampil duluan di kasir</p>
+        <Label>Urutan Tampil</Label>
+        <input className="input" type="number" min="1" value={sortOrder} onChange={e => setSort(e.target.value)} />
+        <p className="text-xs text-gray-400 mt-1">Angka kecil = tampil duluan di filter kasir</p>
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
@@ -349,6 +473,118 @@ function KategoriForm({ kategori, currentCount, onClose }: { kategori: any; curr
   )
 }
 
+// ── FORM PAKET ────────────────────────────────────────────────
+function PaketForm({ paket, onClose, onSaved }: { paket: PaketData|null; onClose: () => void; onSaved: () => void }) {
+  const { user } = useAuthStore()
+  const stores = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
+
+  const [name,      setName]     = useState(paket?.name || '')
+  const [price,     setPrice]    = useState(String(paket?.price || ''))
+  const [qtyTotal,  setQty]      = useState(String(paket?.qty_total || '5'))
+  const [isMix,     setIsMix]    = useState(paket?.is_mix ?? true)
+  const [storeId,   setStoreId]  = useState<string>(paket?.store_id || '')   // '' = semua toko
+  const [isActive,  setIsActive] = useState(paket?.is_active ?? true)
+  const [saving,    setSaving]   = useState(false)
+
+  async function handleSave() {
+    if (!name.trim())                  return toast.error('Nama paket wajib diisi')
+    if (!price || Number(price) <= 0)  return toast.error('Harga wajib diisi')
+    if (Number(qtyTotal) <= 0)         return toast.error('Jumlah pcs wajib diisi')
+    setSaving(true)
+    try {
+      const data: PaketData = {
+        id:        paket?.id || generateId(),
+        name:      name.trim(),
+        price:     Number(price),
+        qty_total: Number(qtyTotal),
+        is_mix:    isMix,
+        store_id:  storeId || null,
+        is_active: isActive,
+        created_at: paket?.created_at || now(),
+      }
+      try { await (db as any).packages?.put(data) } catch {}
+      const { error } = await supabase.from('packages').upsert(data)
+      if (error) throw error
+      toast.success(paket ? 'Paket diupdate' : 'Paket ditambahkan')
+      onSaved()
+    } catch (e) { console.error(e); toast.error('Gagal menyimpan') }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title={paket ? 'Edit Paket' : 'Tambah Paket'} onClose={onClose}>
+      <div>
+        <Label required>Nama Paket</Label>
+        <input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus
+          placeholder="Paket 5 Puff, Bundle Hemat, dll" />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label required>Harga Paket (Rp)</Label>
+          <input className="input" inputMode="decimal" value={price}
+            onChange={e => setPrice(e.target.value.replace(/[^0-9]/g,''))} placeholder="45000" />
+        </div>
+        <div>
+          <Label required>Jumlah (pcs)</Label>
+          <input className="input" type="number" min="1" value={qtyTotal}
+            onChange={e => setQty(e.target.value)} placeholder="5" />
+          <p className="text-[10px] text-gray-400 mt-1">Total pcs dalam 1 paket</p>
+        </div>
+      </div>
+
+      {/* Harga per pcs preview */}
+      {Number(price) > 0 && Number(qtyTotal) > 0 && (
+        <div className="bg-green-50 border border-green-100 rounded-xl px-4 py-2.5">
+          <p className="text-xs text-green-700">
+            Harga per pcs: <strong>{formatRupiah(Math.round(Number(price) / Number(qtyTotal)))}</strong>
+          </p>
+        </div>
+      )}
+
+      {/* Mix rasa */}
+      <div className="flex items-center justify-between py-2 border-t border-gray-100">
+        <div>
+          <p className="text-sm font-medium text-gray-800">Mix Rasa</p>
+          <p className="text-xs text-gray-400">Kasir bisa pilih beberapa produk dalam 1 paket</p>
+        </div>
+        <button onClick={() => setIsMix(!isMix)}
+          className={`w-11 h-6 rounded-full transition-colors relative ${isMix ? 'bg-gray-900' : 'bg-gray-200'}`}>
+          <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isMix ? 'left-[22px]' : 'left-0.5'}`} />
+        </button>
+      </div>
+
+      {/* Toko */}
+      <div>
+        <Label>Berlaku untuk Toko</Label>
+        <select className="input" value={storeId} onChange={e => setStoreId(e.target.value)}>
+          <option value="">Semua Toko</option>
+          {stores?.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <p className="text-xs text-gray-400 mt-1">Kosongkan = berlaku semua toko</p>
+      </div>
+
+      {/* Aktif */}
+      <div className="flex items-center justify-between py-2 border-t border-gray-100">
+        <p className="text-sm text-gray-700">Aktif (tampil di kasir)</p>
+        <button onClick={() => setIsActive(!isActive)}
+          className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
+          <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} />
+        </button>
+      </div>
+
+      <div className="flex gap-3 pt-1 border-t border-gray-100">
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving}
+          className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+          {saving ? 'Menyimpan...' : 'Simpan'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── Shared components ─────────────────────────────────────────
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">

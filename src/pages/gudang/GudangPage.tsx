@@ -290,8 +290,8 @@ function StokTab({ userId }: { userId: string }) {
 
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {items.map((item, idx) => (
-          <button key={item.id} onClick={() => { setEditMat(item as any); setShowForm(true) }}
-            className={`w-full flex items-center px-4 py-3 text-left active:bg-gray-50 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${!item.is_active ? 'opacity-40' : ''}`}>
+          <button key={item.id} onClick={() => isOwnerManager && (setEditMat(item as any), setShowForm(true))}
+            className={`w-full flex items-center px-4 py-3 text-left ${isOwnerManager ? 'active:bg-gray-50 cursor-pointer' : 'cursor-default'} ${idx !== 0 ? 'border-t border-gray-50' : ''} ${!item.is_active ? 'opacity-40' : ''}`}>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
               <p className="text-xs text-gray-400 mt-0.5">
@@ -312,8 +312,8 @@ function StokTab({ userId }: { userId: string }) {
         )}
       </div>
 
-      {showForm    && <MaterialForm material={editMat} onClose={() => { setShowForm(false); setEditMat(null) }} />}
-      {showOpening && <OpeningStockForm onClose={() => setShowOpening(false)} />}
+      {showForm    && isOwnerManager && <MaterialForm material={editMat} onClose={() => { setShowForm(false); setEditMat(null) }} />}
+      {showOpening && isOwnerManager && <OpeningStockForm onClose={() => setShowOpening(false)} />}
     </div>
   )
 }

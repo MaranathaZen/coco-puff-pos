@@ -1,16 +1,13 @@
 // src/pages/owner/OwnerPage.tsx
-// CHANGELOG:
-// - Dashboard: omzet per toko, nilai stok, tanpa avg, tanpa notif stok rendah
-// - Quick Actions: shortcut ke semua halaman input tanpa ganti login
-// - Owner bisa akses kasir, gudang, produksi, biaya langsung dari dashboard
+// CHANGELOG: pakai syncAll dari sync-helpers (replace strategy)
 
 import { useState, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useNavigate } from 'react-router-dom'
 import { db } from '@/lib/db'
-import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
+import { syncAll } from '@/lib/sync-helpers'
 import {
   TrendingUp, Store, Package, RefreshCw, ShoppingBag,
   ShoppingCart, FlaskConical, ArrowRightLeft, Receipt,
@@ -22,23 +19,13 @@ type Period = 'hari' | 'minggu' | 'bulan'
 export default function OwnerPage() {
   const { user }    = useAuthStore()
   const navigate    = useNavigate()
-  const [period, setPeriod]   = useState<Period>('hari')
+  const [period,  setPeriod]  = useState<Period>('hari')
   const [syncing, setSyncing] = useState(false)
 
-  async function syncAll() {
+  async function handleSync() {
     setSyncing(true)
-    try {
-      const [txRes, storesRes, matsRes, stockRes] = await Promise.all([
-        supabase.from('transactions').select('*').eq('status','completed'),
-        supabase.from('stores').select('*').eq('is_active', true),
-        supabase.from('materials').select('*'),
-        supabase.from('warehouse_stock').select('*'),
-      ])
-      if (txRes.data?.length)     await db.transactions.bulkPut(txRes.data)
-      if (storesRes.data?.length) await db.stores.bulkPut(storesRes.data)
-      if (matsRes.data?.length)   await db.materials.bulkPut(matsRes.data)
-      if (stockRes.data?.length)  await db.warehouse_stock.bulkPut(stockRes.data)
-    } finally { setSyncing(false) }
+    await syncAll(user?.store_id || '', true)
+    setSyncing(false)
   }
 
   const dateRange = useMemo(() => {
@@ -51,6 +38,7 @@ export default function OwnerPage() {
     return { start: start.toISOString(), end: end.toISOString() }
   }, [period])
 
+  // stores dari IndexedDB — sudah bersih setelah sync replace
   const stores = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
 
   const transactions = useLiveQuery(async () =>
@@ -78,49 +66,47 @@ export default function OwnerPage() {
     }).sort((a, b) => b.omzet - a.omzet)
   }, [transactions, stores])
 
-  const totalOmzet = storeStats.reduce((s, x) => s + x.omzet, 0)
-  const totalTrx   = storeStats.reduce((s, x) => s + x.count, 0)
+  const totalOmzet  = storeStats.reduce((s, x) => s + x.omzet, 0)
+  const totalTrx    = storeStats.reduce((s, x) => s + x.count, 0)
   const periodLabel = { hari: 'Hari Ini', minggu: '7 Hari', bulan: 'Bulan Ini' }
 
-  // Quick action groups
   const quickActions = [
     {
       group: 'Kasir & Toko',
       items: [
-        { label: 'Kasir',        icon: ShoppingBag,    path: '/kasir',      color: 'bg-blue-50 text-blue-600'   },
-        { label: 'Close Order',  icon: BarChart3,       path: '/tutup-toko', color: 'bg-green-50 text-green-600' },
-        { label: 'Mutasi',       icon: ArrowRightLeft,  path: '/mutasi',     color: 'bg-purple-50 text-purple-600' },
-        { label: 'Biaya',        icon: Receipt,         path: '/biaya',      color: 'bg-orange-50 text-orange-600' },
+        { label: 'Kasir',       icon: ShoppingBag,   path: '/kasir',      color: 'bg-blue-50 text-blue-600'     },
+        { label: 'Close Order', icon: BarChart3,      path: '/tutup-toko', color: 'bg-green-50 text-green-600'   },
+        { label: 'Mutasi',      icon: ArrowRightLeft, path: '/mutasi',     color: 'bg-purple-50 text-purple-600' },
+        { label: 'Biaya',       icon: Receipt,        path: '/biaya',      color: 'bg-orange-50 text-orange-600' },
       ]
     },
     {
       group: 'Gudang',
       items: [
-        { label: 'Pembelian',    icon: ShoppingCart,    path: '/pembelian',  color: 'bg-amber-50 text-amber-600'  },
-        { label: 'Stok',         icon: Package,         path: '/stok',       color: 'bg-gray-100 text-gray-600'   },
+        { label: 'Pembelian',   icon: ShoppingCart,   path: '/pembelian',  color: 'bg-amber-50 text-amber-600'   },
+        { label: 'Stok',        icon: Package,        path: '/stok',       color: 'bg-gray-100 text-gray-600'    },
       ]
     },
     {
       group: 'Produksi & Setting',
       items: [
-        { label: 'Produksi',     icon: FlaskConical,    path: '/produksi',   color: 'bg-cyan-50 text-cyan-600'    },
-        { label: 'Resep',        icon: BookOpen,        path: '/resep',      color: 'bg-pink-50 text-pink-600'    },
-        { label: 'Produk',       icon: Package,         path: '/produk',     color: 'bg-indigo-50 text-indigo-600'},
-        { label: 'Setting',      icon: Settings,        path: '/pengaturan', color: 'bg-gray-100 text-gray-600'   },
+        { label: 'Produksi',    icon: FlaskConical,   path: '/produksi',   color: 'bg-cyan-50 text-cyan-600'     },
+        { label: 'Resep',       icon: BookOpen,       path: '/resep',      color: 'bg-pink-50 text-pink-600'     },
+        { label: 'Produk',      icon: Package,        path: '/produk',     color: 'bg-indigo-50 text-indigo-600' },
+        { label: 'Setting',     icon: Settings,       path: '/pengaturan', color: 'bg-gray-100 text-gray-600'    },
       ]
     },
   ]
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
-      {/* Header */}
       <div className="bg-white px-4 pt-4 pb-3 flex-shrink-0">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h1 className="text-lg font-semibold text-gray-900">Dashboard</h1>
             <p className="text-xs text-gray-400 capitalize">{user?.name} · {user?.role}</p>
           </div>
-          <button onClick={syncAll} disabled={syncing} className="p-2 rounded-full text-gray-400">
+          <button onClick={handleSync} disabled={syncing} className="p-2 rounded-full text-gray-400">
             <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
           </button>
         </div>
@@ -136,7 +122,7 @@ export default function OwnerPage() {
 
       <div className="flex-1 overflow-auto p-4 space-y-4">
 
-        {/* KPI summary */}
+        {/* KPI */}
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-white rounded-xl border border-gray-100 p-4">
             <div className="flex items-center gap-2 mb-1">
@@ -158,7 +144,9 @@ export default function OwnerPage() {
         {/* Per toko */}
         {storeStats.length > 0 && (
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 border-b border-gray-50">Omzet per Toko</p>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 border-b border-gray-50">
+              Omzet per Toko
+            </p>
             {storeStats.map((s, idx) => {
               const pct = totalOmzet > 0 ? (s.omzet / totalOmzet) * 100 : 0
               return (
@@ -186,7 +174,7 @@ export default function OwnerPage() {
           </div>
         )}
 
-        {/* Quick Actions — owner bisa input semua divisi */}
+        {/* Quick Actions */}
         <div className="space-y-3">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Aksi Cepat</p>
           {quickActions.map(group => (
@@ -223,11 +211,11 @@ export default function OwnerPage() {
           <ChevronRight size={18} className="text-gray-400" />
         </button>
 
-        {storeStats.length === 0 && (
+        {stores?.length === 0 && (
           <div className="bg-white rounded-xl border border-gray-100 py-12 text-center">
             <ShoppingBag size={32} className="text-gray-200 mx-auto mb-2" />
-            <p className="text-sm text-gray-400">Belum ada data toko</p>
-            <button onClick={syncAll} className="mt-3 text-xs text-blue-500 underline">Sync data</button>
+            <p className="text-sm text-gray-400">Belum ada data</p>
+            <button onClick={handleSync} className="mt-3 text-xs text-blue-500 underline">Sync data</button>
           </div>
         )}
 

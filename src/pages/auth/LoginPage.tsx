@@ -1,15 +1,14 @@
 // src/pages/auth/LoginPage.tsx
-//
 // CHANGELOG:
-// - Gunakan return value User | null dari login() — tidak perlu getState()
-// - Tidak ada race condition dengan Zustand persist middleware
-// - Semua 5 role ter-cover di redirectMap (owner/manager/gudang/produksi/kasir)
+// - Setelah login berhasil: sync master data (stores, users) dengan replace strategy
+//   Ini memastikan toko duplikat/lama hilang dari IndexedDB
 
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
 import { db } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
+import { syncMasterData } from '@/lib/sync-helpers'
 import toast from 'react-hot-toast'
 
 export default function LoginPage() {
@@ -30,25 +29,16 @@ export default function LoginPage() {
     setError('')
 
     try {
-      // ── Sync Supabase → IndexedDB (silent fail kalau offline) ──
+      // ── Sync master data dengan REPLACE strategy ──────────
+      // Ini hapus toko/user lama dari IndexedDB sebelum login
       try {
-        const { data: users } = await supabase
-          .from('users')
-          .select('*')
-          .eq('is_active', true)
-        if (users?.length) await db.users.bulkPut(users)
+        await syncMasterData()
+      } catch { /* offline — lanjut dengan data lokal */ }
 
-        const { data: stores } = await supabase.from('stores').select('*')
-        if (stores?.length) await db.stores.bulkPut(stores)
-      } catch {
-        // offline — lanjut dengan data lokal di IndexedDB
-      }
-
-      // ── Login — return User | null, tidak perlu getState() ──
+      // ── Login ─────────────────────────────────────────────
       const loggedInUser = await login(username.trim().toLowerCase(), password)
 
       if (!loggedInUser) {
-        // error detail sudah di-set oleh store (username/password salah, dsb)
         const storeError = useAuthStore.getState().error
         setError(storeError || 'Username atau password salah')
         return
@@ -56,7 +46,6 @@ export default function LoginPage() {
 
       toast.success(`Selamat datang, ${loggedInUser.name}!`)
 
-      // Semua role ter-cover — tidak ada fallback ke /kasir yang salah
       const redirectMap: Record<string, string> = {
         owner:    '/owner',
         manager:  '/owner',
@@ -79,7 +68,6 @@ export default function LoginPage() {
     <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-sm space-y-6">
 
-        {/* Logo */}
         <div className="text-center space-y-2">
           <div className="w-16 h-16 bg-gray-900 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <span className="text-white text-2xl font-bold">CP</span>
@@ -88,7 +76,6 @@ export default function LoginPage() {
           <p className="text-sm text-gray-400">Masuk dengan akun Anda</p>
         </div>
 
-        {/* Form */}
         <div className="space-y-3">
           <input
             className="w-full px-4 py-3.5 rounded-2xl border border-gray-200 text-sm outline-none focus:border-gray-400 transition-colors bg-gray-50"
@@ -133,9 +120,9 @@ export default function LoginPage() {
           </button>
         </div>
 
-        <div className="text-center">
-          <p className="text-xs text-gray-300">Belum punya akun? Hubungi admin toko Anda.</p>
-        </div>
+        <p className="text-center text-xs text-gray-300">
+          Belum punya akun? Hubungi admin toko Anda.
+        </p>
 
       </div>
     </div>

@@ -236,15 +236,38 @@ export default function CashierPage() {
         const recipe = recipes.find(r => r.product_id === txItem.product_id)
         if (!recipe) continue
         const riList   = recipeItems.filter(ri => ri.recipe_id === recipe.id)
-        const totalQty = txItem.qty_eceran + (txItem.qty_dus || 0)
+        const totalQty = (txItem.qty_eceran || 0) + (txItem.qty_dus || 0)
+        if (totalQty <= 0) continue
         for (const ri of riList) {
           const qty = ri.qty_used * totalQty
-          if (ri.source === 'warehouse') {
+          const src = (ri as any).source || 'store'
+
+          if (src === 'store') {
+            // Kurangi dari stok toko (tabel stock, kolom ingredient_id)
+            const storeStock = await db.stock
+              .filter(s => s.store_id === storeId && s.ingredient_id === ri.material_id)
+              .first()
+            if (storeStock) {
+              const newQty = Math.max(0, storeStock.qty_on_hand - qty)
+              await db.stock.update(storeStock.id, { qty_on_hand: newQty, last_updated: now() })
+              supabase.from('stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', storeStock.id).then(() => {})
+            }
+          } else if (src === 'warehouse') {
+            // Legacy: kurangi dari stok gudang
             const ws = await db.warehouse_stock.where('material_id').equals(ri.material_id).first()
-            if (ws) { const n = Math.max(0, ws.qty_on_hand - qty); await db.warehouse_stock.update(ws.id, { qty_on_hand: n, last_updated: now() }); supabase.from('warehouse_stock').update({ qty_on_hand: n }).eq('id', ws.id).then(() => {}) }
-          } else {
+            if (ws) {
+              const n = Math.max(0, ws.qty_on_hand - qty)
+              await db.warehouse_stock.update(ws.id, { qty_on_hand: n, last_updated: now() })
+              supabase.from('warehouse_stock').update({ qty_on_hand: n }).eq('id', ws.id).then(() => {})
+            }
+          } else if (src === 'production') {
+            // Legacy: kurangi dari stok produksi
             const ps = await db.production_stock.where('material_id').equals(ri.material_id).first()
-            if (ps) { const n = Math.max(0, ps.qty_on_hand - qty); await db.production_stock.update(ps.id, { qty_on_hand: n, last_updated: now() }); supabase.from('production_stock').update({ qty_on_hand: n }).eq('id', ps.id).then(() => {}) }
+            if (ps) {
+              const n = Math.max(0, ps.qty_on_hand - qty)
+              await db.production_stock.update(ps.id, { qty_on_hand: n, last_updated: now() })
+              supabase.from('production_stock').update({ qty_on_hand: n }).eq('id', ps.id).then(() => {})
+            }
           }
         }
       }

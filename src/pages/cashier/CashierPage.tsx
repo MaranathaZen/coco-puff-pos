@@ -1,12 +1,8 @@
 // src/pages/cashier/CashierPage.tsx
-//
-// CHANGELOG v2:
-// - Tab "Kasir" → "Offline", urutan: Offline · Online · Riwayat
-// - Hapus emoji dari tombol GoFood/GrabFood/ShopeeFood
-// - Modal checkout offline: hanya Tunai / QRIS / Transfer
-// - Modal checkout: tampilkan subtotal, diskon, PPN, total, kembalian (standar POS)
-// - Layout kategori & paket aman untuk banyak item (overflow scroll, flex-shrink-0)
-// - Badge platform di riwayat tetap ada
+// CHANGELOG:
+// - Tambah syncProducts() — pull products + categories dari Supabase saat load
+// - Fix: produk tidak muncul karena belum pernah di-sync ke IndexedDB kasir
+// - Auto sync saat pertama buka halaman kasir
 
 import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -19,12 +15,10 @@ import type { Product, Transaction } from '@/types'
 type PaymentMethod = 'cash' | 'qris' | 'transfer' | 'gopay' | 'grab' | 'shopeefood'
 import {
   ShoppingCart, Plus, Minus, Trash2, X, CheckCircle,
-  Package, History, WifiOff, Bike,
+  Package, History, WifiOff, Bike, RefreshCw,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { cn } from '@/lib/utils'
-
-// ── Constants ──────────────────────────────────────────────────
 
 interface PaketItem {
   id: string; name: string; qty_total: number; price: number; is_mix: boolean
@@ -37,35 +31,23 @@ type MainTab = 'offline' | 'online' | 'riwayat'
 type OnlinePlatform = 'gofood' | 'grabfood' | 'shopeefood'
 
 const PLATFORM_PAYMENT: Record<OnlinePlatform, PaymentMethod> = {
-  gofood:     'gopay',
-  grabfood:   'grab',
-  shopeefood: 'shopeefood',
+  gofood: 'gopay', grabfood: 'grab', shopeefood: 'shopeefood',
 }
-
 const PAYMENT_LABELS: Record<PaymentMethod, string> = {
-  cash:       'Tunai',
-  qris:       'QRIS',
-  transfer:   'Transfer',
-  gopay:      'GoPay',
-  grab:       'GrabPay',
-  shopeefood: 'ShopeePay',
+  cash: 'Tunai', qris: 'QRIS', transfer: 'Transfer',
+  gopay: 'GoPay', grab: 'GrabPay', shopeefood: 'ShopeePay',
 }
-
-// Metode bayar untuk tab Offline (kasir langsung) — hanya 3
 const OFFLINE_METHODS: { id: PaymentMethod; label: string }[] = [
   { id: 'cash',     label: 'Tunai'    },
   { id: 'qris',     label: 'QRIS'     },
   { id: 'transfer', label: 'Transfer' },
 ]
 
-// ── Component ──────────────────────────────────────────────────
-
 export default function CashierPage() {
   const { user, activeShift } = useAuthStore()
   const STORE_ID = user?.store_id || ''
   const { items, addItem, removeItem, updateQty, clearCart, total, subtotal, totalDiscount } = useCartStore()
 
-  // PPN dari settings (default 0)
   const ppnSetting = useLiveQuery(async () => {
     try {
       const s = await (db as any).settings?.get('ppn_percent')
@@ -74,33 +56,59 @@ export default function CashierPage() {
   }, [])
   const ppnPct = ppnSetting ?? 0
 
-  // UI State
-  const [mainTab,      setMainTab]      = useState<MainTab>('offline')
-  const [selectedCat,  setSelectedCat]  = useState<string>('all')
-  const [showCheckout, setShowCheckout] = useState(false)
-  const [payMethod,    setPayMethod]    = useState<PaymentMethod>('cash')
-  const [cashPaid,     setCashPaid]     = useState('')
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [isOffline,    setIsOffline]    = useState(!navigator.onLine)
+  const [mainTab,       setMainTab]       = useState<MainTab>('offline')
+  const [selectedCat,   setSelectedCat]   = useState<string>('all')
+  const [showCheckout,  setShowCheckout]  = useState(false)
+  const [payMethod,     setPayMethod]     = useState<PaymentMethod>('cash')
+  const [cashPaid,      setCashPaid]      = useState('')
+  const [isProcessing,  setIsProcessing]  = useState(false)
+  const [isOffline,     setIsOffline]     = useState(!navigator.onLine)
+  const [isSyncing,     setIsSyncing]     = useState(false)
 
-  // Online order state
   const [onlinePlatform, setOnlinePlatform] = useState<OnlinePlatform>('gofood')
   const [onlineOrderNo,  setOnlineOrderNo]  = useState('')
   const [onlineBuyer,    setOnlineBuyer]    = useState('')
 
-  // Paket state
   const [showPaketModal, setShowPaketModal] = useState(false)
   const [selectedPaket,  setSelectedPaket]  = useState<PaketItem | null>(null)
   const [paketPilihan,   setPaketPilihan]   = useState<{ product: Product; qty: number }[]>([])
   const [cartPakets,     setCartPakets]     = useState<CartPaketItem[]>([])
 
-  // Void state
   const [showVoidModal, setShowVoidModal] = useState(false)
   const [voidTx,        setVoidTx]        = useState<Transaction | null>(null)
   const [voidReason,    setVoidReason]    = useState('')
   const [isVoiding,     setIsVoiding]     = useState(false)
 
-  // Offline detector
+  // ── Sync products + categories saat load ─────────────────
+  useEffect(() => {
+    syncProducts()
+  }, [])
+
+  async function syncProducts(showMsg = false) {
+    setIsSyncing(true)
+    try {
+      const [prodsRes, catsRes] = await Promise.all([
+        supabase.from('products').select('*').eq('is_active', true),
+        supabase.from('categories').select('*').order('sort_order'),
+      ])
+      // REPLACE strategy — hapus lokal dulu
+      if (prodsRes.data !== null) {
+        await db.products.clear()
+        if (prodsRes.data.length) await db.products.bulkPut(prodsRes.data)
+      }
+      if (catsRes.data !== null) {
+        await db.categories.clear()
+        if (catsRes.data.length) await db.categories.bulkPut(catsRes.data)
+      }
+      if (showMsg) toast.success('Produk diperbarui')
+    } catch (e) {
+      console.warn('[SYNC PRODUCTS]', e)
+      if (showMsg) toast.error('Gagal sync produk')
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
   useEffect(() => {
     const onOnline  = () => { setIsOffline(false); toast.success('Kembali online') }
     const onOffline = () => { setIsOffline(true);  toast.error('Koneksi terputus — mode offline') }
@@ -112,8 +120,10 @@ export default function CashierPage() {
     }
   }, [])
 
-  // Data
-  const categories = useLiveQuery(() => db.categories.orderBy('sort_order').toArray(), [])
+  // ── Data queries ──────────────────────────────────────────
+  const categories = useLiveQuery(() =>
+    db.categories.orderBy('sort_order').toArray()
+  , [])
 
   const products = useLiveQuery(async () => {
     const prods = await db.products
@@ -129,9 +139,9 @@ export default function CashierPage() {
       .toArray()
     const promoMap = Object.fromEntries(promos.map(p => [p.product_id, p]))
     return prods.map(p => {
-      const basePrice = overrideMap[p.id] ?? p.base_price
-      const promo     = promoMap[p.id]
-      let effectivePrice = basePrice
+      const basePrice      = overrideMap[p.id] ?? p.base_price
+      const promo          = promoMap[p.id]
+      let effectivePrice   = basePrice
       if (promo) {
         effectivePrice = promo.promo_type === 'percent'
           ? basePrice * (1 - promo.value / 100)
@@ -150,8 +160,8 @@ export default function CashierPage() {
   }, [STORE_ID])
 
   const transactions = useLiveQuery(async () => {
-    const today = new Date().toISOString().slice(0, 10)
-    const txs = await db.transactions
+    const today   = new Date().toISOString().slice(0, 10)
+    const txs     = await db.transactions
       .where('store_id').equals(STORE_ID)
       .filter(t => t.created_at.startsWith(today))
       .reverse().sortBy('created_at')
@@ -159,7 +169,7 @@ export default function CashierPage() {
     return txs.map(t => ({ ...t, items: txItems.filter(i => i.transaction_id === t.id) }))
   }, [mainTab, STORE_ID])
 
-  // Derived
+  // ── Derived ───────────────────────────────────────────────
   const totalPakets   = cartPakets.reduce((s, p) => s + p.subtotal, 0)
   const rawSubtotal   = subtotal() + totalPakets
   const rawDiscount   = totalDiscount()
@@ -251,22 +261,22 @@ export default function CashierPage() {
       const txId      = generateId()
       const receiptNo = generateReceiptNo(STORE_ID)
       const finalPay: PaymentMethod = isOnlineTab ? PLATFORM_PAYMENT[onlinePlatform] : payMethod
-      const paidAmt  = finalPay === 'cash' ? Number(cashPaid) : grandTotal
+      const paidAmt   = finalPay === 'cash' ? Number(cashPaid) : grandTotal
       const tx = {
         id: txId, store_id: STORE_ID, shift_id: activeShift.id, cashier_id: user!.id, receipt_no: receiptNo,
         subtotal: rawSubtotal, discount: rawDiscount, ppn_amount: ppnAmount, ppn_percent: ppnPct,
         total: grandTotal, payment_method: finalPay, cash_paid: paidAmt, change_given: paidAmt - grandTotal,
         status: 'completed' as const,
-        order_source: isOnlineTab ? onlinePlatform : 'pos',
-        online_order_no: isOnlineTab ? onlineOrderNo.trim() : null,
-        online_buyer:    isOnlineTab ? (onlineBuyer.trim() || null) : null,
+        order_source:    isOnlineTab ? onlinePlatform : 'pos',
+        online_order_no: isOnlineTab ? onlineOrderNo.trim()    : null,
+        online_buyer:    isOnlineTab ? (onlineBuyer.trim()||null) : null,
         created_at: now(),
       }
       const txItems = items.map(item => {
         const pkg = item.product.auto_package ? calcPackaging(item.qty, item.product.pkg_qty) : { dus: 0, eceran: item.qty }
         return { id: generateId(), transaction_id: txId, product_id: item.product.id, product_name: item.product.name, qty_eceran: pkg.eceran, qty_dus: pkg.dus, unit_price: item.unit_price, discount: item.discount, subtotal: item.subtotal, item_type: 'unit' }
       })
-      const txPakets = cartPakets.flatMap(cp => cp.pilihan.map(p => ({ id: generateId(), transaction_id: txId, product_id: p.product.id, product_name: p.product.name, qty_eceran: p.qty, qty_dus: 0, unit_price: cp.paket.price / cp.paket.qty_total, discount: 0, subtotal: (cp.paket.price / cp.paket.qty_total) * p.qty, item_type: 'package', package_id: cp.paket.id })))
+      const txPakets = cartPakets.flatMap(cp => cp.pilihan.map(p => ({ id: generateId(), transaction_id: txId, product_id: p.product.id, product_name: p.product.name, qty_eceran: p.qty, qty_dus: 0, unit_price: cp.paket.price/cp.paket.qty_total, discount: 0, subtotal: (cp.paket.price/cp.paket.qty_total)*p.qty, item_type: 'package', package_id: cp.paket.id })))
       await db.transactions.add(tx)
       await db.transaction_items.bulkAdd([...txItems, ...txPakets])
       await addToSyncQueue('transactions', txId, 'insert', tx, STORE_ID)
@@ -280,14 +290,13 @@ export default function CashierPage() {
 
   return (
     <div className="flex flex-col h-full">
-
       {isOffline && (
         <div className="bg-amber-500 text-white text-xs font-medium px-4 py-2 flex items-center gap-2 flex-shrink-0">
           <WifiOff size={13} />Mode offline — transaksi tersimpan lokal
         </div>
       )}
 
-      {/* Tab: Offline · Online · Riwayat */}
+      {/* Tab */}
       <div className="bg-white border-b border-gray-100 flex flex-shrink-0">
         {([
           { id: 'offline', label: 'Offline' },
@@ -295,7 +304,7 @@ export default function CashierPage() {
           { id: 'riwayat', label: 'Riwayat', icon: <History size={13} /> },
         ] as { id: MainTab; label: string; icon?: React.ReactNode }[]).map(tab => (
           <button key={tab.id} onClick={() => setMainTab(tab.id)}
-            className={`flex-1 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center justify-center gap-1 ${mainTab === tab.id ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-400'}`}>
+            className={`flex-1 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center justify-center gap-1 ${mainTab===tab.id ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-400'}`}>
             {tab.icon}{tab.label}
           </button>
         ))}
@@ -307,37 +316,37 @@ export default function CashierPage() {
           <p className="text-xs text-gray-400">Transaksi hari ini</p>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             {transactions?.map((tx, idx) => (
-              <div key={tx.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${tx.status === 'voided' ? 'opacity-50' : ''}`}>
+              <div key={tx.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''} ${tx.status==='voided'?'opacity-50':''}`}>
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <p className="text-sm font-medium text-gray-900 font-mono">{tx.receipt_no}</p>
-                      {tx.status === 'voided' && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">VOID</span>}
-                      {tx.order_source && tx.order_source !== 'pos' && (
+                      {tx.status==='voided' && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">VOID</span>}
+                      {tx.order_source && tx.order_source!=='pos' && (
                         <span className={cn('text-xs px-1.5 py-0.5 rounded-full font-medium',
-                          tx.order_source === 'gofood' && 'bg-green-100 text-green-700',
-                          tx.order_source === 'grabfood' && 'bg-emerald-100 text-emerald-700',
-                          tx.order_source === 'shopeefood' && 'bg-orange-100 text-orange-700',
+                          tx.order_source==='gofood'&&'bg-green-100 text-green-700',
+                          tx.order_source==='grabfood'&&'bg-emerald-100 text-emerald-700',
+                          tx.order_source==='shopeefood'&&'bg-orange-100 text-orange-700',
                         )}>
-                          {tx.order_source === 'gofood' ? 'GoFood' : tx.order_source === 'grabfood' ? 'GrabFood' : 'ShopeeFood'}
+                          {tx.order_source==='gofood'?'GoFood':tx.order_source==='grabfood'?'GrabFood':'ShopeeFood'}
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-400 mt-0.5">{formatDate(tx.created_at)} · {PAYMENT_LABELS[tx.payment_method as PaymentMethod] ?? tx.payment_method}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{formatDate(tx.created_at)} · {PAYMENT_LABELS[tx.payment_method as PaymentMethod]??tx.payment_method}</p>
                     {tx.online_order_no && <p className="text-xs text-gray-500 font-mono">#{tx.online_order_no}</p>}
                     {tx.void_reason     && <p className="text-xs text-red-400">Alasan: {tx.void_reason}</p>}
                   </div>
                   <div className="flex items-center gap-2 ml-2">
-                    <p className={`text-sm font-semibold ${tx.status === 'voided' ? 'line-through text-gray-400' : 'text-gray-900'}`}>{formatRupiah(tx.total)}</p>
-                    {canVoid && tx.status === 'completed' && (
-                      <button onClick={() => { setVoidTx(tx as any); setVoidReason(''); setShowVoidModal(true) }}
+                    <p className={`text-sm font-semibold ${tx.status==='voided'?'line-through text-gray-400':'text-gray-900'}`}>{formatRupiah(tx.total)}</p>
+                    {canVoid && tx.status==='completed' && (
+                      <button onClick={()=>{setVoidTx(tx as any);setVoidReason('');setShowVoidModal(true)}}
                         className="text-xs text-red-400 border border-red-200 px-2 py-0.5 rounded-lg">Void</button>
                     )}
                   </div>
                 </div>
               </div>
             ))}
-            {transactions?.length === 0 && <div className="py-12 text-center text-sm text-gray-400">Belum ada transaksi hari ini</div>}
+            {transactions?.length===0 && <div className="py-12 text-center text-sm text-gray-400">Belum ada transaksi hari ini</div>}
           </div>
         </div>
       )}
@@ -347,15 +356,14 @@ export default function CashierPage() {
         <div className="flex flex-1 min-h-0">
           <div className="flex-1 flex flex-col min-w-0">
 
-            {/* Online: platform + form */}
-            {mainTab === 'online' && (
+            {mainTab==='online' && (
               <div className="bg-white border-b border-gray-100 px-4 py-3 space-y-2 flex-shrink-0">
                 <div className="flex gap-2 overflow-x-auto scrollbar-hide">
                   {(['gofood','grabfood','shopeefood'] as OnlinePlatform[]).map(p => (
                     <button key={p} onClick={() => setOnlinePlatform(p)}
                       className={cn('px-3 py-1.5 rounded-full text-sm font-medium border whitespace-nowrap flex-shrink-0',
-                        onlinePlatform === p ? 'bg-brand-600 text-white border-brand-600' : 'border-gray-200 text-gray-600')}>
-                      {p === 'gofood' ? 'GoFood' : p === 'grabfood' ? 'GrabFood' : 'ShopeeFood'}
+                        onlinePlatform===p?'bg-brand-600 text-white border-brand-600':'border-gray-200 text-gray-600')}>
+                      {p==='gofood'?'GoFood':p==='grabfood'?'GrabFood':'ShopeeFood'}
                     </button>
                   ))}
                 </div>
@@ -363,26 +371,30 @@ export default function CashierPage() {
                   <input className="input flex-1 text-sm" placeholder="Nomor Order *" value={onlineOrderNo} onChange={e => setOnlineOrderNo(e.target.value)} />
                   <input className="input flex-1 text-sm" placeholder="Nama Pembeli (opsional)" value={onlineBuyer} onChange={e => setOnlineBuyer(e.target.value)} />
                 </div>
-                {!onlineOrderNo.trim() && <p className="text-xs text-amber-600">⚠ Isi nomor order sebelum checkout</p>}
               </div>
             )}
 
-            {/* Kategori */}
-            <div className="bg-white border-b border-gray-100 px-3 py-2 flex gap-2 overflow-x-auto scrollbar-hide flex-shrink-0">
+            {/* Kategori + tombol refresh */}
+            <div className="bg-white border-b border-gray-100 px-3 py-2 flex gap-2 overflow-x-auto scrollbar-hide flex-shrink-0 items-center">
               <button onClick={() => setSelectedCat('all')}
-                className={cn('px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap flex-shrink-0', selectedCat === 'all' ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-600')}>
+                className={cn('px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap flex-shrink-0',selectedCat==='all'?'bg-brand-600 text-white':'bg-gray-100 text-gray-600')}>
                 Semua
               </button>
               {categories?.map(cat => (
                 <button key={cat.id} onClick={() => setSelectedCat(cat.id)}
-                  className={cn('px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap flex-shrink-0', selectedCat === cat.id ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-600')}>
+                  className={cn('px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap flex-shrink-0',selectedCat===cat.id?'bg-brand-600 text-white':'bg-gray-100 text-gray-600')}>
                   {cat.name}
                 </button>
               ))}
+              {/* Tombol refresh produk */}
+              <button onClick={() => syncProducts(true)} disabled={isSyncing}
+                className="flex-shrink-0 ml-auto p-1.5 text-gray-400 rounded-full">
+                <RefreshCw size={14} className={isSyncing?'animate-spin text-blue-500':''} />
+              </button>
             </div>
 
-            {/* Paket — offline only */}
-            {mainTab === 'offline' && pakets.length > 0 && (
+            {/* Paket */}
+            {mainTab==='offline' && pakets.length>0 && (
               <div className="bg-brand-50 border-b border-brand-100 px-3 py-2 flex gap-2 overflow-x-auto scrollbar-hide flex-shrink-0">
                 <span className="text-xs font-medium text-brand-700 self-center mr-1 flex-shrink-0">Paket:</span>
                 {pakets.map(p => (
@@ -396,9 +408,19 @@ export default function CashierPage() {
 
             {/* Grid produk */}
             <div className="flex-1 overflow-auto p-3">
-              {mainTab === 'online' && (
-                <div className="bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 mb-3 text-xs text-amber-700">
-                  Harga normal ditampilkan. Sesuaikan markup platform secara manual jika perlu.
+              {products && products.length === 0 && !isSyncing && (
+                <div className="text-center py-16">
+                  <p className="text-sm text-gray-400 mb-3">Belum ada produk</p>
+                  <button onClick={() => syncProducts(true)}
+                    className="text-xs text-blue-500 border border-blue-200 px-3 py-1.5 rounded-lg">
+                    Sync Produk
+                  </button>
+                </div>
+              )}
+              {isSyncing && products?.length === 0 && (
+                <div className="text-center py-16 text-sm text-gray-400">
+                  <div className="animate-spin w-6 h-6 border-2 border-gray-300 border-t-brand-600 rounded-full mx-auto mb-2" />
+                  Memuat produk...
                 </div>
               )}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -412,34 +434,34 @@ export default function CashierPage() {
             <div className="p-4 border-b border-gray-100">
               <h2 className="font-semibold text-gray-800 flex items-center gap-2">
                 <ShoppingCart size={18} /> Keranjang
-                {(items.length + cartPakets.length) > 0 && (
-                  <span className="ml-auto bg-brand-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">{items.length + cartPakets.length}</span>
+                {(items.length+cartPakets.length)>0 && (
+                  <span className="ml-auto bg-brand-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">{items.length+cartPakets.length}</span>
                 )}
               </h2>
             </div>
             <div className="flex-1 overflow-auto p-3 space-y-2">
-              {items.length === 0 && cartPakets.length === 0 ? (
+              {items.length===0 && cartPakets.length===0 ? (
                 <div className="text-center text-gray-400 py-12 text-sm"><ShoppingCart size={32} className="mx-auto mb-2 opacity-30" />Keranjang kosong</div>
               ) : (
                 <>
-                  {items.map(item => <CartItemRow key={item.product.id} item={item} onQtyChange={q => updateQty(item.product.id, q)} onRemove={() => removeItem(item.product.id)} />)}
-                  {cartPakets.map((cp, i) => (
+                  {items.map(item => <CartItemRow key={item.product.id} item={item} onQtyChange={q=>updateQty(item.product.id,q)} onRemove={()=>removeItem(item.product.id)} />)}
+                  {cartPakets.map((cp,i) => (
                     <div key={i} className="bg-brand-50 rounded-xl p-2 border border-brand-100">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium text-brand-800 flex items-center gap-1"><Package size={12} />{cp.paket.name}</span>
-                        <div className="flex items-center gap-2"><span className="text-sm font-semibold">{formatRupiah(cp.subtotal)}</span><button onClick={() => hapusPaketCart(i)} className="text-red-400"><Trash2 size={12} /></button></div>
+                        <span className="text-sm font-medium text-brand-800 flex items-center gap-1"><Package size={12}/>{cp.paket.name}</span>
+                        <div className="flex items-center gap-2"><span className="text-sm font-semibold">{formatRupiah(cp.subtotal)}</span><button onClick={()=>hapusPaketCart(i)} className="text-red-400"><Trash2 size={12}/></button></div>
                       </div>
-                      <p className="text-xs text-gray-500">{cp.pilihan.map(p => `${p.product.name} x${p.qty}`).join(', ')}</p>
+                      <p className="text-xs text-gray-500">{cp.pilihan.map(p=>`${p.product.name} x${p.qty}`).join(', ')}</p>
                     </div>
                   ))}
                 </>
               )}
             </div>
-            {(items.length > 0 || cartPakets.length > 0) && (
+            {(items.length>0||cartPakets.length>0) && (
               <div className="p-4 border-t border-gray-100 space-y-2">
                 <div className="flex justify-between text-sm text-gray-600"><span>Subtotal</span><span>{formatRupiah(rawSubtotal)}</span></div>
-                {rawDiscount > 0 && <div className="flex justify-between text-sm text-green-600"><span>Diskon</span><span>-{formatRupiah(rawDiscount)}</span></div>}
-                {ppnAmount > 0 && <div className="flex justify-between text-sm text-gray-600"><span>PPN {ppnPct}%</span><span>+{formatRupiah(ppnAmount)}</span></div>}
+                {rawDiscount>0 && <div className="flex justify-between text-sm text-green-600"><span>Diskon</span><span>-{formatRupiah(rawDiscount)}</span></div>}
+                {ppnAmount>0 && <div className="flex justify-between text-sm text-gray-600"><span>PPN {ppnPct}%</span><span>+{formatRupiah(ppnAmount)}</span></div>}
                 <div className="flex justify-between font-semibold text-gray-900 text-base border-t border-gray-100 pt-2"><span>Total</span><span>{formatRupiah(grandTotal)}</span></div>
                 <button onClick={() => setShowCheckout(true)} className="btn-primary w-full">Bayar</button>
               </div>
@@ -449,10 +471,10 @@ export default function CashierPage() {
       )}
 
       {/* Mobile bayar */}
-      {showCart && (items.length > 0 || cartPakets.length > 0) && (
+      {showCart && (items.length>0||cartPakets.length>0) && (
         <div className="md:hidden bg-white border-t border-gray-100 px-4 py-3 flex-shrink-0">
           <button onClick={() => setShowCheckout(true)} className="btn-primary w-full flex items-center justify-between">
-            <span className="flex items-center gap-2"><ShoppingCart size={18} />{items.length + cartPakets.length} item</span>
+            <span className="flex items-center gap-2"><ShoppingCart size={18}/>{items.length+cartPakets.length} item</span>
             <span>{formatRupiah(grandTotal)}</span>
           </button>
         </div>
@@ -466,8 +488,6 @@ export default function CashierPage() {
               <h3 className="font-semibold text-lg">Konfirmasi Bayar</h3>
               <button onClick={() => setShowCheckout(false)}><X size={20} className="text-gray-400" /></button>
             </div>
-
-            {/* Item list */}
             <div className="bg-gray-50 rounded-2xl p-4 space-y-1 max-h-36 overflow-auto">
               {items.map(i => (
                 <div key={i.product.id} className="flex justify-between text-sm">
@@ -475,68 +495,60 @@ export default function CashierPage() {
                   <span>{formatRupiah(i.subtotal)}</span>
                 </div>
               ))}
-              {cartPakets.map((cp, i) => (
+              {cartPakets.map((cp,i) => (
                 <div key={i} className="flex justify-between text-sm">
-                  <span className="text-brand-700"><Package size={12} className="inline mr-1" />{cp.paket.name}</span>
+                  <span className="text-brand-700"><Package size={12} className="inline mr-1"/>{cp.paket.name}</span>
                   <span>{formatRupiah(cp.subtotal)}</span>
                 </div>
               ))}
             </div>
-
-            {/* Rincian harga standar POS */}
             <div className="space-y-1.5 border border-gray-100 rounded-xl p-3">
               <div className="flex justify-between text-sm text-gray-600"><span>Subtotal</span><span>{formatRupiah(rawSubtotal)}</span></div>
-              {rawDiscount > 0 && <div className="flex justify-between text-sm text-green-600"><span>Diskon</span><span>-{formatRupiah(rawDiscount)}</span></div>}
-              {ppnAmount > 0 && <div className="flex justify-between text-sm text-gray-600"><span>PPN {ppnPct}%</span><span>+{formatRupiah(ppnAmount)}</span></div>}
+              {rawDiscount>0 && <div className="flex justify-between text-sm text-green-600"><span>Diskon</span><span>-{formatRupiah(rawDiscount)}</span></div>}
+              {ppnAmount>0 && <div className="flex justify-between text-sm text-gray-600"><span>PPN {ppnPct}%</span><span>+{formatRupiah(ppnAmount)}</span></div>}
               <div className="flex justify-between font-bold text-gray-900 border-t border-gray-100 pt-1.5"><span>Total</span><span className="text-brand-600">{formatRupiah(grandTotal)}</span></div>
             </div>
-
-            {/* Online: info platform */}
             {isOnlineTab ? (
               <div className={cn('rounded-xl px-4 py-2.5 text-sm space-y-0.5 border',
-                onlinePlatform === 'gofood' && 'bg-green-50 border-green-100',
-                onlinePlatform === 'grabfood' && 'bg-emerald-50 border-emerald-100',
-                onlinePlatform === 'shopeefood' && 'bg-orange-50 border-orange-100',
+                onlinePlatform==='gofood'&&'bg-green-50 border-green-100',
+                onlinePlatform==='grabfood'&&'bg-emerald-50 border-emerald-100',
+                onlinePlatform==='shopeefood'&&'bg-orange-50 border-orange-100',
               )}>
-                <p className="font-medium text-gray-800">{onlinePlatform === 'gofood' ? 'GoFood' : onlinePlatform === 'grabfood' ? 'GrabFood' : 'ShopeeFood'}</p>
+                <p className="font-medium text-gray-800">{onlinePlatform==='gofood'?'GoFood':onlinePlatform==='grabfood'?'GrabFood':'ShopeeFood'}</p>
                 <p className="text-gray-600 font-mono text-xs">#{onlineOrderNo}</p>
                 {onlineBuyer && <p className="text-gray-500 text-xs">{onlineBuyer}</p>}
                 <p className="text-xs text-gray-400">Pembayaran via {PAYMENT_LABELS[PLATFORM_PAYMENT[onlinePlatform]]} (otomatis)</p>
               </div>
             ) : (
-              /* Offline: hanya 3 metode */
               <div>
                 <p className="text-sm font-medium text-gray-700 mb-2">Metode Pembayaran</p>
                 <div className="grid grid-cols-3 gap-2">
                   {OFFLINE_METHODS.map(m => (
                     <button key={m.id} onClick={() => handleSetPayMethod(m.id)}
                       className={cn('py-2.5 rounded-xl text-sm font-medium border transition-colors',
-                        payMethod === m.id ? 'bg-brand-600 text-white border-brand-600' : 'border-gray-200 text-gray-700')}>
+                        payMethod===m.id?'bg-brand-600 text-white border-brand-600':'border-gray-200 text-gray-700')}>
                       {m.label}
                     </button>
                   ))}
                 </div>
               </div>
             )}
-
-            {/* Input tunai */}
-            {!isOnlineTab && payMethod === 'cash' && (
+            {!isOnlineTab && payMethod==='cash' && (
               <div>
                 <label className="text-sm font-medium text-gray-700 mb-1 block">Uang Diterima</label>
                 <input className="input text-lg font-semibold" inputMode="decimal" placeholder="0"
-                  value={cashPaid} onChange={e => setCashPaid(e.target.value.replace(/[^0-9]/g, ''))} autoFocus />
-                {Number(cashPaid) > 0 && Number(cashPaid) < grandTotal && (
-                  <p className="text-sm text-red-500 mt-1">Kurang {formatRupiah(grandTotal - Number(cashPaid))}</p>
+                  value={cashPaid} onChange={e => setCashPaid(e.target.value.replace(/[^0-9]/g,''))} autoFocus />
+                {Number(cashPaid)>0 && Number(cashPaid)<grandTotal && (
+                  <p className="text-sm text-red-500 mt-1">Kurang {formatRupiah(grandTotal-Number(cashPaid))}</p>
                 )}
-                {Number(cashPaid) >= grandTotal && (
+                {Number(cashPaid)>=grandTotal && (
                   <p className="text-sm text-green-600 mt-1">Kembalian: <strong>{formatRupiah(change)}</strong></p>
                 )}
               </div>
             )}
-
             <button onClick={handleCheckout} disabled={isProcessing}
               className="btn-primary w-full flex items-center justify-center gap-2">
-              {isProcessing ? <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" /> : <CheckCircle size={18} />}
+              {isProcessing ? <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"/> : <CheckCircle size={18}/>}
               {isProcessing ? 'Memproses...' : 'Konfirmasi Bayar'}
             </button>
           </div>
@@ -549,7 +561,7 @@ export default function CashierPage() {
           <div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-gray-900">Void Transaksi</h3>
-              <button onClick={() => setShowVoidModal(false)}><X size={18} className="text-gray-400" /></button>
+              <button onClick={() => setShowVoidModal(false)}><X size={18} className="text-gray-400"/></button>
             </div>
             <div className="bg-red-50 border border-red-100 rounded-xl p-3">
               <p className="text-sm font-medium text-red-800 font-mono">{voidTx.receipt_no}</p>
@@ -559,8 +571,8 @@ export default function CashierPage() {
             <input className="input" value={voidReason} onChange={e => setVoidReason(e.target.value)} placeholder="Alasan void" autoFocus />
             <div className="flex gap-3">
               <button onClick={() => setShowVoidModal(false)} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-              <button onClick={handleVoid} disabled={isVoiding || !voidReason.trim()} className="flex-1 py-3 rounded-xl bg-red-600 text-white text-sm font-medium disabled:opacity-50">
-                {isVoiding ? 'Memproses...' : 'Void'}
+              <button onClick={handleVoid} disabled={isVoiding||!voidReason.trim()} className="flex-1 py-3 rounded-xl bg-red-600 text-white text-sm font-medium disabled:opacity-50">
+                {isVoiding?'Memproses...':'Void'}
               </button>
             </div>
           </div>
@@ -576,10 +588,10 @@ export default function CashierPage() {
                 <h3 className="font-semibold text-lg">{selectedPaket.name}</h3>
                 <p className="text-sm text-gray-500">Pilih {selectedPaket.qty_total} pcs — bisa mix rasa</p>
               </div>
-              <button onClick={() => setShowPaketModal(false)}><X size={20} className="text-gray-400" /></button>
+              <button onClick={() => setShowPaketModal(false)}><X size={20} className="text-gray-400"/></button>
             </div>
             <div className="bg-gray-100 rounded-full h-2">
-              <div className="bg-brand-600 h-2 rounded-full transition-all" style={{ width: `${Math.min(100,(totalQtyPilih/selectedPaket.qty_total)*100)}%` }} />
+              <div className="bg-brand-600 h-2 rounded-full transition-all" style={{width:`${Math.min(100,(totalQtyPilih/selectedPaket.qty_total)*100)}%`}} />
             </div>
             <p className="text-center text-sm text-gray-600">{totalQtyPilih} / {selectedPaket.qty_total} dipilih</p>
             <div className="space-y-2 max-h-52 overflow-auto">
@@ -589,9 +601,9 @@ export default function CashierPage() {
                   <div key={prod.id} className="flex items-center justify-between bg-gray-50 rounded-xl p-3">
                     <span className="text-sm font-medium text-gray-800">{prod.name}</span>
                     <div className="flex items-center gap-2">
-                      {pilihan && <button onClick={() => kurangiPilihanRasa(prod.id)} className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center"><Minus size={12} /></button>}
+                      {pilihan && <button onClick={() => kurangiPilihanRasa(prod.id)} className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center"><Minus size={12}/></button>}
                       {pilihan && <span className="w-5 text-center text-sm font-semibold">{pilihan.qty}</span>}
-                      <button onClick={() => tambahPilihanRasa(prod)} className="w-7 h-7 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center"><Plus size={12} /></button>
+                      <button onClick={() => tambahPilihanRasa(prod)} className="w-7 h-7 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center"><Plus size={12}/></button>
                     </div>
                   </div>
                 )
@@ -599,7 +611,7 @@ export default function CashierPage() {
             </div>
             <div className="flex gap-3">
               <button onClick={() => setShowPaketModal(false)} className="btn-secondary flex-1">Batal</button>
-              <button onClick={konfirmasiPaket} disabled={totalQtyPilih !== selectedPaket.qty_total} className="btn-primary flex-1 disabled:opacity-50">
+              <button onClick={konfirmasiPaket} disabled={totalQtyPilih!==selectedPaket.qty_total} className="btn-primary flex-1 disabled:opacity-50">
                 Tambah — {formatRupiah(selectedPaket.price)}
               </button>
             </div>
@@ -631,10 +643,10 @@ function CartItemRow({ item, onQtyChange, onRemove }: {
         <p className="text-xs text-gray-500">{formatRupiah(item.subtotal)}</p>
       </div>
       <div className="flex items-center gap-1">
-        <button onClick={() => onQtyChange(item.qty - 1)} className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center"><Minus size={12} /></button>
+        <button onClick={() => onQtyChange(item.qty-1)} className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center"><Minus size={12}/></button>
         <span className="w-6 text-center text-sm font-medium">{item.qty}</span>
-        <button onClick={() => onQtyChange(item.qty + 1)} className="w-7 h-7 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center"><Plus size={12} /></button>
-        <button onClick={onRemove} className="w-7 h-7 rounded-full text-red-400 flex items-center justify-center ml-1"><Trash2 size={12} /></button>
+        <button onClick={() => onQtyChange(item.qty+1)} className="w-7 h-7 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center"><Plus size={12}/></button>
+        <button onClick={onRemove} className="w-7 h-7 rounded-full text-red-400 flex items-center justify-center ml-1"><Trash2 size={12}/></button>
       </div>
     </div>
   )

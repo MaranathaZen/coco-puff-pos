@@ -338,30 +338,38 @@ function PaketTab({ storeId }: { storeId: string }) {
 
 // ── FORM PRODUK ───────────────────────────────────────────────
 function ProdukForm({ product, categories, onClose }: { product: any; categories: any[]; onClose: () => void }) {
-  const [name,       setName]     = useState(product?.name || '')
-  const [categoryId, setCatId]    = useState(product?.category_id || '')
-  const [price,      setPrice]    = useState(String(product?.base_price || ''))
-  const [sku,        setSku]      = useState(product?.sku || '')
-  const [unit,       setUnit]     = useState(product?.unit || 'pcs')
-  const [isActive,   setIsActive] = useState(product?.is_active ?? true)
-  const [saving,     setSaving]   = useState(false)
+  const [name,        setName]       = useState(product?.name || '')
+  const [categoryId,  setCatId]      = useState(product?.category_id || '')
+  const [price,       setPrice]      = useState(String(product?.base_price || ''))
+  const [sku,         setSku]        = useState(product?.sku || '')
+  const [unit,        setUnit]       = useState(product?.unit || 'pcs')
+  const [isActive,    setIsActive]   = useState(product?.is_active ?? true)
+  // Packaging otomatis
+  const [autoPkg,     setAutoPkg]    = useState(product?.auto_package ?? false)
+  const [pkgQty,      setPkgQty]     = useState(String(product?.pkg_qty || ''))
+  const [pkgUnit,     setPkgUnit]    = useState(product?.pkg_unit || 'dus')
+  const [saving,      setSaving]     = useState(false)
 
   async function handleSave() {
-    if (!name.trim())                        return toast.error('Nama produk wajib diisi')
-    if (!categoryId)                         return toast.error('Pilih kategori')
-    if (!price || Number(price) <= 0)        return toast.error('Harga wajib diisi')
+    if (!name.trim())                 return toast.error('Nama produk wajib diisi')
+    if (!categoryId)                  return toast.error('Pilih kategori')
+    if (!price || Number(price) <= 0) return toast.error('Harga wajib diisi')
+    if (autoPkg && (!pkgQty || Number(pkgQty) <= 0)) return toast.error('Isi jumlah pcs per kemasan')
     setSaving(true)
     try {
       const data: any = {
-        id:          product?.id || generateId(),
-        category_id: categoryId,
-        name:        name.trim(),
-        sku:         sku || undefined,
-        base_price:  Number(price),
-        unit:        unit || 'pcs',
-        is_active:   isActive,
-        created_at:  product?.created_at || now(),
-        updated_at:  now(),
+        id:           product?.id || generateId(),
+        category_id:  categoryId,
+        name:         name.trim(),
+        sku:          sku || undefined,
+        base_price:   Number(price),
+        unit:         unit || 'pcs',
+        auto_package: autoPkg,
+        pkg_qty:      autoPkg ? Number(pkgQty) : null,
+        pkg_unit:     autoPkg ? (pkgUnit || 'dus') : null,
+        is_active:    isActive,
+        created_at:   product?.created_at || now(),
+        updated_at:   now(),
       }
       await db.products.put(data)
       const { error } = await supabase.from('products').upsert(data)
@@ -400,6 +408,59 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
         <Label>SKU / Kode</Label>
         <input className="input" value={sku} onChange={e => setSku(e.target.value)} placeholder="Opsional" />
       </div>
+
+      {/* Packaging otomatis */}
+      <div className="border border-gray-100 rounded-xl overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3">
+          <div>
+            <p className="text-sm font-medium text-gray-800">Packaging Otomatis</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Sistem hitung dus otomatis saat kasir jual
+            </p>
+          </div>
+          <button onClick={() => setAutoPkg(!autoPkg)}
+            className={`w-11 h-6 rounded-full transition-colors relative flex-shrink-0 ${autoPkg ? 'bg-gray-900' : 'bg-gray-200'}`}>
+            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${autoPkg ? 'left-[22px]' : 'left-0.5'}`} />
+          </button>
+        </div>
+        {autoPkg && (
+          <div className="px-4 pb-3 space-y-3 border-t border-gray-50">
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <div>
+                <Label required>Isi per Kemasan (pcs)</Label>
+                <input className="input" inputMode="decimal" value={pkgQty}
+                  onChange={e => setPkgQty(e.target.value.replace(/[^0-9]/g,''))}
+                  placeholder="5" />
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Contoh: 1 dus = {pkgQty || '5'} pcs
+                </p>
+              </div>
+              <div>
+                <Label>Nama Kemasan</Label>
+                <input className="input" value={pkgUnit}
+                  onChange={e => setPkgUnit(e.target.value)}
+                  placeholder="dus" />
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Contoh: dus, box, bungkus
+                </p>
+              </div>
+            </div>
+            {/* Preview kalkulasi */}
+            {pkgQty && Number(pkgQty) > 0 && (
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 space-y-1">
+                <p className="text-xs font-semibold text-blue-700">Contoh kalkulasi:</p>
+                <p className="text-xs text-blue-600">Jual 3 pcs → 0 {pkgUnit||'dus'} + 3 eceran</p>
+                <p className="text-xs text-blue-600">Jual {pkgQty} pcs → 1 {pkgUnit||'dus'} + 0 eceran</p>
+                <p className="text-xs text-blue-600">Jual {Number(pkgQty)+2} pcs → 1 {pkgUnit||'dus'} + 2 eceran</p>
+                <p className="text-xs text-blue-500 mt-1">
+                  Stok toko berkurang sesuai resep toko yang di-set.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {product && (
         <div className="flex items-center justify-between py-2 border-t border-gray-100">
           <p className="text-sm text-gray-700">Aktif (tampil di kasir)</p>

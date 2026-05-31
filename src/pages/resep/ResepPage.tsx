@@ -68,6 +68,7 @@ export default function ResepPage() {
 // ── RESEP PRODUKSI ─────────────────────────────────────────────
 function ResepProduksiTab() {
   const { user } = useAuthStore()
+  const isOwner        = user?.role === 'owner'
   const isOwnerManager = ['owner','manager'].includes(user?.role || '')
   const [showForm, setShowForm]     = useState(false)
   const [editRecipe, setEditRecipe] = useState<any>(null)
@@ -87,23 +88,6 @@ function ResepProduksiTab() {
 
   return (
     <div className="p-4 space-y-3">
-      {/* Store selector — hanya owner */}
-      {isOwner && stores && stores.length > 1 && (
-        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-gray-50">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Pilih Toko</p>
-          </div>
-          <div className="flex gap-1.5 p-3 overflow-x-auto scrollbar-hide">
-            {stores.map(s => (
-              <button key={s.id} onClick={() => setActiveStoreId(s.id)}
-                className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${activeStoreId===s.id?'bg-gray-900 text-white':'bg-gray-100 text-gray-600'}`}>
-                {s.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       {isOwnerManager && (
         <div className="flex justify-end">
           <button onClick={() => { setEditRecipe(null); setShowForm(true) }}
@@ -296,6 +280,23 @@ function ResepTokoTab({ storeId }: { storeId: string }) {
           Flow: Gudang → Mutasi ke Toko → Stok Toko → Kasir jual → berkurang
         </p>
       </div>
+
+      {/* Store selector — hanya owner */}
+      {isOwner && stores && stores.length > 1 && (
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-gray-50">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Pilih Toko</p>
+          </div>
+          <div className="flex gap-1.5 p-3 overflow-x-auto scrollbar-hide">
+            {stores.map(s => (
+              <button key={s.id} onClick={() => setActiveStoreId(s.id)}
+                className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${activeStoreId===s.id?'bg-gray-900 text-white':'bg-gray-100 text-gray-600'}`}>
+                {s.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {isOwnerManager && (
         <div className="flex justify-end">

@@ -1,10 +1,9 @@
 // src/pages/settings/SettingsPage.tsx
 // CHANGELOG:
-// - Tambah tombol Hapus di supplier, mitra, user (kecuali menu, password, reset)
-// - User form: pilih toko jika role kasir/gudang/produksi
-// - PPN & Promo sudah per toko (storeId dipass dari user)
-// - Tab toko: hapus kode toko, tidak dipakai
-// - Accounting dihapus dari kasir (sudah di Layout)
+// - UsersTab: owner lihat semua user semua toko + filter per toko
+// - PPNTab: owner bisa pilih toko (store selector)
+// - PromoTab: owner bisa pilih toko (store selector)
+// - Tambah tombol "Bersihkan Data Lokal" di ResetDataTab
 
 import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -12,7 +11,8 @@ import { db, generateId, now, addToSyncQueue } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { hashPassword } from '@/lib/utils'
-import { X, ChevronRight, Plus, Check, Trash2, Tag } from 'lucide-react'
+import { hardResetLocal } from '@/lib/sync-helpers'
+import { X, ChevronRight, Plus, Check, Trash2, Tag, Store } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { User, Role } from '@/types'
 import type { Supplier, Partner, MenuRoleConfig } from '@/lib/db'
@@ -37,6 +37,7 @@ const ROLES = ['owner','manager','kasir','gudang','produksi']
 export default function SettingsPage() {
   const { user } = useAuthStore()
   const [tab, setTab] = useState<Tab>('users')
+  const isOwner        = user?.role === 'owner'
   const isOwnerManager = user?.role === 'owner' || user?.role === 'manager'
 
   const tabs: { id: Tab; label: string; ownerOnly?: boolean }[] = [
@@ -71,8 +72,8 @@ export default function SettingsPage() {
         {tab === 'menu'     && <MenuConfigTab />}
         {tab === 'toko'     && <TokoTab />}
         {tab === 'password' && <ChangePasswordTab userId={user!.id} storeId={user!.store_id} />}
-        {tab === 'ppn'      && <PPNTab storeId={user!.store_id} />}
-        {tab === 'promo'    && <PromoTab storeId={user!.store_id} />}
+        {tab === 'ppn'      && <PPNTab currentUser={user!} />}
+        {tab === 'promo'    && <PromoTab currentUser={user!} />}
         {tab === 'reset'    && <ResetDataTab />}
       </div>
     </div>
@@ -81,13 +82,27 @@ export default function SettingsPage() {
 
 // ── USERS TAB ─────────────────────────────────────────────────
 function UsersTab({ currentUser }: { currentUser: User }) {
-  const { store } = useAuthStore()
-  const [showForm, setShowForm] = useState(false)
-  const [editUser, setEdit]     = useState<User | null>(null)
+  const isOwner = currentUser.role === 'owner'
+  const [showForm,     setShowForm]     = useState(false)
+  const [editUser,     setEdit]         = useState<User | null>(null)
+  const [filterStore,  setFilterStore]  = useState('semua')
 
-  const users = useLiveQuery(() =>
-    db.users.where('store_id').equals(currentUser.store_id).toArray()
-  , [currentUser.store_id])
+  const stores = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
+
+  // Owner lihat semua user, manager/lain lihat user toko sendiri saja
+  const users = useLiveQuery(async () => {
+    if (isOwner) {
+      const all = await db.users.toArray()
+      return all.sort((a, b) => a.name.localeCompare(b.name))
+    }
+    return db.users.where('store_id').equals(currentUser.store_id).toArray()
+  }, [isOwner, currentUser.store_id])
+
+  const storeMap = Object.fromEntries((stores||[]).map(s => [s.id, s.name]))
+
+  const filtered = users?.filter(u =>
+    filterStore === 'semua' || u.store_id === filterStore
+  ) ?? []
 
   async function handleDelete(u: User) {
     if (u.id === currentUser.id) return toast.error('Tidak bisa hapus akun sendiri')
@@ -102,42 +117,64 @@ function UsersTab({ currentUser }: { currentUser: User }) {
   return (
     <div className="p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-gray-400">{store?.name || ''}</p>
-        {currentUser.role === 'owner' && (
+        <p className="text-xs text-gray-400">{filtered.length} user</p>
+        {isOwner && (
           <button onClick={() => { setEdit(null); setShowForm(true) }}
             className="flex items-center gap-1.5 text-sm font-medium text-gray-900 bg-white border border-gray-200 px-3 py-1.5 rounded-lg">
             <Plus size={14} /> Tambah User
           </button>
         )}
       </div>
+
+      {/* Filter toko — hanya owner */}
+      {isOwner && stores && stores.length > 1 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+          <button onClick={() => setFilterStore('semua')}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore==='semua' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
+            Semua Toko
+          </button>
+          {stores.map(s => (
+            <button key={s.id} onClick={() => setFilterStore(s.id)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore===s.id ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        {users?.map((u, idx) => (
+        {filtered.map((u, idx) => (
           <div key={u.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
             <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center text-sm font-semibold text-gray-600 mr-3 flex-shrink-0">
               {u.name[0].toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900 truncate">{u.name}</p>
-              <p className="text-xs text-gray-400">@{u.username} · {u.role}</p>
+              <p className="text-xs text-gray-400">
+                @{u.username} · {u.role}
+                {isOwner && storeMap[u.store_id] && (
+                  <span className="ml-1 text-gray-300">· {storeMap[u.store_id]}</span>
+                )}
+              </p>
             </div>
             {!u.is_active && <span className="text-xs text-gray-400 mr-2">nonaktif</span>}
-            {currentUser.role === 'owner' && u.id !== currentUser.id && (
+            {isOwner && u.id !== currentUser.id && (
               <div className="flex items-center gap-1.5 flex-shrink-0">
                 <button onClick={() => { setEdit(u); setShowForm(true) }}
-                  className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg">
-                  <ChevronRight size={14} />
-                </button>
+                  className="p-1.5 text-gray-400 rounded-lg"><ChevronRight size={14} /></button>
                 <button onClick={() => handleDelete(u)}
-                  className="p-1.5 text-red-400 hover:text-red-600 rounded-lg">
-                  <Trash2 size={14} />
-                </button>
+                  className="p-1.5 text-red-400 rounded-lg"><Trash2 size={14} /></button>
               </div>
             )}
           </div>
         ))}
-        {users?.length === 0 && <div className="py-8 text-center text-sm text-gray-400">Belum ada user</div>}
+        {filtered.length === 0 && <div className="py-8 text-center text-sm text-gray-400">Belum ada user</div>}
       </div>
-      {showForm && <UserForm user={editUser} currentStoreId={currentUser.store_id} onClose={() => { setShowForm(false); setEdit(null) }} />}
+
+      {showForm && (
+        <UserForm user={editUser} currentStoreId={currentUser.store_id}
+          onClose={() => { setShowForm(false); setEdit(null) }} />
+      )}
     </div>
   )
 }
@@ -233,9 +270,9 @@ function MitraTab() {
 // ── MENU CONFIG TAB ───────────────────────────────────────────
 function MenuConfigTab() {
   const [selectedRole, setSelectedRole] = useState('kasir')
-  const [saving, setSaving] = useState(false)
+  const [saving, setSaving]             = useState(false)
   const [visibilityMap, setVisibilityMap] = useState<Record<string, boolean>>({})
-  const [loaded, setLoaded] = useState(false)
+  const [loaded, setLoaded]             = useState(false)
 
   async function loadConfigs(role: string) {
     setLoaded(false)
@@ -305,10 +342,10 @@ function MenuConfigTab() {
 
 // ── TOKO TAB ──────────────────────────────────────────────────
 function TokoTab() {
-  const [stores, setStores]  = useState<any[]>([])
-  const [editStore, setEdit] = useState<any|null>(null)
-  const [showForm, setForm]  = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [stores,    setStores]  = useState<any[]>([])
+  const [editStore, setEdit]    = useState<any|null>(null)
+  const [showForm,  setForm]    = useState(false)
+  const [loading,   setLoading] = useState(true)
 
   useEffect(() => {
     async function load() {
@@ -344,20 +381,20 @@ function TokoTab() {
 }
 
 function TokoForm({ store, onClose, onSaved }: { store: any; onClose: () => void; onSaved: (s: any) => void }) {
-  const [name, setName]     = useState(store.name || '')
-  const [city, setCity]     = useState(store.city || '')
-  const [phone, setPhone]   = useState(store.phone || '')
-  const [address, setAddr]  = useState(store.address || '')
-  const [isActive, setAct]  = useState(store.is_active ?? true)
-  const [saving, setSaving] = useState(false)
+  const [name,     setName]    = useState(store.name || '')
+  const [city,     setCity]    = useState(store.city || '')
+  const [phone,    setPhone]   = useState(store.phone || '')
+  const [address,  setAddr]    = useState(store.address || '')
+  const [isActive, setAct]     = useState(store.is_active ?? true)
+  const [saving,   setSaving]  = useState(false)
 
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama toko wajib diisi')
     setSaving(true)
     try {
-      const updated = { ...store, name: name.trim(), city, phone: phone || null, address: address || null, is_active: isActive }
+      const updated = { ...store, name: name.trim(), city, phone: phone||null, address: address||null, is_active: isActive }
       await db.stores.put(updated)
-      await supabase.from('stores').update({ name: updated.name, city, phone: updated.phone, address: updated.address, is_active: isActive }).eq('id', store.id)
+      await supabase.from('stores').update({ name:updated.name, city, phone:updated.phone, address:updated.address, is_active:isActive }).eq('id', store.id)
       toast.success('Toko diupdate')
       onSaved(updated)
     } finally { setSaving(false) }
@@ -371,13 +408,13 @@ function TokoForm({ store, onClose, onSaved }: { store: any; onClose: () => void
       <div><Label>Alamat</Label><input className="input" value={address} onChange={e => setAddr(e.target.value)} placeholder="Opsional" /></div>
       <div className="flex items-center justify-between py-2 border-t border-gray-100">
         <p className="text-sm text-gray-700">Aktif</p>
-        <button onClick={() => setAct(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
-          <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} />
+        <button onClick={() => setAct(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive?'bg-gray-900':'bg-gray-200'}`}>
+          <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive?'left-[22px]':'left-0.5'}`} />
         </button>
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
       </div>
     </Modal>
   )
@@ -386,7 +423,9 @@ function TokoForm({ store, onClose, onSaved }: { store: any; onClose: () => void
 // ── PASSWORD TAB ──────────────────────────────────────────────
 function ChangePasswordTab({ userId, storeId }: { userId: string; storeId: string }) {
   const { forceLogout } = useAuthStore()
-  const [oldPass, setOld] = useState(''); const [newPass, setNew] = useState(''); const [saving, setSaving] = useState(false)
+  const [oldPass, setOld] = useState('')
+  const [newPass, setNew] = useState('')
+  const [saving,  setSaving] = useState(false)
 
   async function handleChange() {
     if (!oldPass || !newPass) return toast.error('Semua field wajib diisi')
@@ -417,80 +456,127 @@ function ChangePasswordTab({ userId, storeId }: { userId: string; storeId: strin
           <input className="w-full text-sm text-gray-900 outline-none bg-transparent" type="password" value={newPass} onChange={e => setNew(e.target.value)} placeholder="Min. 4 karakter" />
         </div>
       </div>
-      <button onClick={handleChange} disabled={saving} className="w-full mt-3 py-3 bg-gray-900 text-white rounded-xl text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Ganti Password'}</button>
+      <button onClick={handleChange} disabled={saving} className="w-full mt-3 py-3 bg-gray-900 text-white rounded-xl text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Ganti Password'}</button>
       <p className="text-xs text-gray-400 text-center mt-2">Setelah disimpan, Anda akan logout otomatis</p>
     </div>
   )
 }
 
-// ── PPN TAB ───────────────────────────────────────────────────
-// PPN per toko: storeId sudah di-pass dari user.store_id
-function PPNTab({ storeId }: { storeId: string }) {
-  const [enabled, setEnabled] = useState(false); const [rate, setRate] = useState('11'); const [mode, setMode] = useState<'include'|'exclude'>('include'); const [saving, setSaving] = useState(false); const [loaded, setLoaded] = useState(false)
+// ── PPN TAB — owner bisa pilih toko ──────────────────────────
+function PPNTab({ currentUser }: { currentUser: User }) {
+  const isOwner = currentUser.role === 'owner'
+  const stores  = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
+  const [selectedStoreId, setSelectedStoreId] = useState(currentUser.store_id)
+  const [enabled, setEnabled] = useState(false)
+  const [rate,    setRate]    = useState('11')
+  const [mode,    setMode]    = useState<'include'|'exclude'>('include')
+  const [saving,  setSaving]  = useState(false)
+  const [loaded,  setLoaded]  = useState(false)
+
   useEffect(() => {
-    const saved = localStorage.getItem(`ppn_config_${storeId}`)
-    if (saved) { try { const cfg = JSON.parse(saved); setEnabled(cfg.enabled ?? false); setRate(String(cfg.rate ?? 11)); setMode(cfg.mode ?? 'include') } catch {} }
+    setLoaded(false)
+    const saved = localStorage.getItem(`ppn_config_${selectedStoreId}`)
+    if (saved) {
+      try {
+        const cfg = JSON.parse(saved)
+        setEnabled(cfg.enabled ?? false)
+        setRate(String(cfg.rate ?? 11))
+        setMode(cfg.mode ?? 'include')
+      } catch {}
+    } else {
+      setEnabled(false); setRate('11'); setMode('include')
+    }
     setLoaded(true)
-  }, [storeId])
+  }, [selectedStoreId])
+
   async function handleSave() {
     setSaving(true)
     try {
       const cfg = { enabled, rate: Number(rate), mode }
-      localStorage.setItem(`ppn_config_${storeId}`, JSON.stringify(cfg))
-      await supabase.from('stores').update({ ppn_enabled: enabled, ppn_rate: Number(rate), ppn_mode: mode }).eq('id', storeId)
-      toast.success('Setting PPN disimpan')
+      localStorage.setItem(`ppn_config_${selectedStoreId}`, JSON.stringify(cfg))
+      await supabase.from('stores').update({ ppn_enabled: enabled, ppn_rate: Number(rate), ppn_mode: mode }).eq('id', selectedStoreId)
+      const storeName = stores?.find(s => s.id === selectedStoreId)?.name || ''
+      toast.success(`Setting PPN ${storeName} disimpan`)
     } catch { toast.success('Setting PPN disimpan (lokal)') }
     finally { setSaving(false) }
   }
-  if (!loaded) return <div className="p-4 text-sm text-gray-400">Memuat...</div>
+
   return (
     <div className="p-4 space-y-4">
-      <p className="text-xs text-gray-400">Setting PPN berlaku untuk toko ini saja.</p>
-      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-4">
-          <div><p className="text-sm font-medium text-gray-900">Aktifkan PPN</p><p className="text-xs text-gray-400 mt-0.5">PPN ditampilkan di struk</p></div>
-          <button onClick={() => setEnabled(!enabled)} className={`w-11 h-6 rounded-full transition-colors relative ${enabled ? 'bg-gray-900' : 'bg-gray-200'}`}><div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${enabled ? 'left-[22px]' : 'left-0.5'}`} /></button>
-        </div>
-      </div>
-      {enabled && (
+      {/* Pilih toko — hanya owner */}
+      {isOwner && stores && stores.length > 1 && (
         <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-50">
-            <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-1.5">Tarif PPN (%)</p>
-            <input className="input w-24 text-lg font-semibold text-center" type="number" min="0" max="100" step="0.5" value={rate} onChange={e => setRate(e.target.value)} />
+          <div className="px-4 py-3 border-b border-gray-50 flex items-center gap-2">
+            <Store size={14} className="text-gray-400" />
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Pilih Toko</p>
           </div>
-          <div className="px-4 py-3 space-y-2">
-            {(['include','exclude'] as const).map(m => (
-              <button key={m} onClick={() => setMode(m)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left ${mode === m ? 'border-gray-900 bg-gray-50' : 'border-gray-100'}`}>
-                <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${mode === m ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`} />
-                <div>
-                  <p className="text-sm font-medium text-gray-800">{m === 'include' ? 'Include (sudah termasuk)' : 'Exclude (ditambahkan)'}</p>
-                  <p className="text-xs text-gray-400">{m === 'include' ? 'Harga sudah include PPN' : 'PPN ditambahkan di atas harga'}</p>
-                </div>
+          <div className="flex gap-1.5 p-3 overflow-x-auto scrollbar-hide">
+            {stores.map(s => (
+              <button key={s.id} onClick={() => setSelectedStoreId(s.id)}
+                className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${selectedStoreId===s.id ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                {s.name}
               </button>
             ))}
           </div>
         </div>
       )}
-      <button onClick={handleSave} disabled={saving} className="w-full py-3 bg-gray-900 text-white rounded-xl text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan Setting PPN'}</button>
+
+      {!loaded ? <div className="text-sm text-gray-400 text-center py-4">Memuat...</div> : (
+        <>
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-4">
+              <div>
+                <p className="text-sm font-medium text-gray-900">Aktifkan PPN</p>
+                <p className="text-xs text-gray-400 mt-0.5">PPN ditampilkan di struk</p>
+              </div>
+              <button onClick={() => setEnabled(!enabled)} className={`w-11 h-6 rounded-full transition-colors relative ${enabled?'bg-gray-900':'bg-gray-200'}`}>
+                <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${enabled?'left-[22px]':'left-0.5'}`} />
+              </button>
+            </div>
+          </div>
+          {enabled && (
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-50">
+                <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-1.5">Tarif PPN (%)</p>
+                <input className="input w-24 text-lg font-semibold text-center" type="number" min="0" max="100" step="0.5" value={rate} onChange={e => setRate(e.target.value)} />
+              </div>
+              <div className="px-4 py-3 space-y-2">
+                {(['include','exclude'] as const).map(m => (
+                  <button key={m} onClick={() => setMode(m)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left ${mode===m?'border-gray-900 bg-gray-50':'border-gray-100'}`}>
+                    <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${mode===m?'bg-gray-900 border-gray-900':'border-gray-300'}`} />
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">{m==='include'?'Include (sudah termasuk)':'Exclude (ditambahkan)'}</p>
+                      <p className="text-xs text-gray-400">{m==='include'?'Harga sudah include PPN':'PPN ditambahkan di atas harga'}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <button onClick={handleSave} disabled={saving} className="w-full py-3 bg-gray-900 text-white rounded-xl text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan Setting PPN'}</button>
+        </>
+      )}
     </div>
   )
 }
 
-// ── PROMO TAB ─────────────────────────────────────────────────
-// Promo per toko: storeId sudah di-pass dari user.store_id
+// ── PROMO TAB — owner bisa pilih toko ─────────────────────────
 interface PromoItem {
   id: string; store_id: string; product_id: string; name: string
   promo_type: 'percent'|'fixed'|'buy1get1'; value: number; min_qty: number
   valid_from: string; valid_until: string; is_active: boolean; created_at: string
 }
 
-function PromoTab({ storeId }: { storeId: string }) {
-  const [promos, setPromos]     = useState<PromoItem[]>([])
-  const [loading, setLoading]   = useState(true)
-  const [showForm, setShowForm] = useState(false)
-  const [editPromo, setEdit]    = useState<PromoItem|null>(null)
+function PromoTab({ currentUser }: { currentUser: User }) {
+  const isOwner = currentUser.role === 'owner'
+  const stores  = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
+  const [selectedStoreId, setSelectedStoreId] = useState(currentUser.store_id)
+  const [promos,    setPromos]    = useState<PromoItem[]>([])
+  const [loading,   setLoading]   = useState(true)
+  const [showForm,  setShowForm]  = useState(false)
+  const [editPromo, setEdit]      = useState<PromoItem|null>(null)
 
-  async function loadPromos() {
+  async function loadPromos(storeId: string) {
     setLoading(true)
     try {
       const { data } = await supabase.from('promotions').select('*').eq('store_id', storeId).order('created_at', { ascending: false })
@@ -500,7 +586,7 @@ function PromoTab({ storeId }: { storeId: string }) {
     setLoading(false)
   }
 
-  useEffect(() => { loadPromos() }, [storeId])
+  useEffect(() => { loadPromos(selectedStoreId) }, [selectedStoreId])
 
   async function toggleActive(p: PromoItem) {
     const upd = { ...p, is_active: !p.is_active }
@@ -517,24 +603,49 @@ function PromoTab({ storeId }: { storeId: string }) {
     toast.success('Promo dihapus')
   }
 
-  const typeLabel = (t: string) => t === 'percent' ? 'Diskon %' : t === 'fixed' ? 'Diskon Nominal' : 'Buy 1 Get 1'
-  const now_ = new Date().toISOString()
+  const typeLabel = (t: string) => t==='percent'?'Diskon %':t==='fixed'?'Diskon Nominal':'Buy 1 Get 1'
+  const now_     = new Date().toISOString()
   const active   = promos.filter(p => p.is_active && p.valid_from <= now_ && p.valid_until >= now_)
   const inactive = promos.filter(p => !p.is_active || p.valid_from > now_ || p.valid_until < now_)
 
   return (
     <div className="p-4 space-y-3">
+      {/* Pilih toko — hanya owner */}
+      {isOwner && stores && stores.length > 1 && (
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-50 flex items-center gap-2">
+            <Store size={14} className="text-gray-400" />
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Pilih Toko</p>
+          </div>
+          <div className="flex gap-1.5 p-3 overflow-x-auto scrollbar-hide">
+            {stores.map(s => (
+              <button key={s.id} onClick={() => setSelectedStoreId(s.id)}
+                className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${selectedStoreId===s.id?'bg-gray-900 text-white':'bg-gray-100 text-gray-600'}`}>
+                {s.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
-        <div><p className="text-sm font-medium text-gray-900">Promo & Diskon</p><p className="text-xs text-gray-400">{active.length} aktif · toko ini</p></div>
-        <button onClick={() => { setEdit(null); setShowForm(true) }} className="flex items-center gap-1.5 text-sm font-medium text-gray-900 bg-white border border-gray-200 px-3 py-1.5 rounded-lg"><Plus size={14} /> Tambah</button>
+        <div>
+          <p className="text-sm font-medium text-gray-900">Promo & Diskon</p>
+          <p className="text-xs text-gray-400">{active.length} aktif · {stores?.find(s=>s.id===selectedStoreId)?.name || 'toko ini'}</p>
+        </div>
+        <button onClick={() => { setEdit(null); setShowForm(true) }}
+          className="flex items-center gap-1.5 text-sm font-medium text-gray-900 bg-white border border-gray-200 px-3 py-1.5 rounded-lg">
+          <Plus size={14} /> Tambah
+        </button>
       </div>
+
       {loading ? <div className="bg-white rounded-xl border border-gray-100 py-8 text-center text-sm text-gray-400">Memuat...</div> : (
         <>
           {active.length > 0 && (
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Aktif Sekarang</p>
               <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                {active.map((p, idx) => <PromoRow key={p.id} promo={p} idx={idx} onToggle={toggleActive} onEdit={pr => { setEdit(pr); setShowForm(true) }} onDelete={handleDelete} typeLabel={typeLabel} />)}
+                {active.map((p,idx) => <PromoRow key={p.id} promo={p} idx={idx} onToggle={toggleActive} onEdit={pr=>{setEdit(pr);setShowForm(true)}} onDelete={handleDelete} typeLabel={typeLabel} />)}
               </div>
             </div>
           )}
@@ -542,29 +653,40 @@ function PromoTab({ storeId }: { storeId: string }) {
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Nonaktif</p>
               <div className="bg-white rounded-xl border border-gray-100 overflow-hidden opacity-60">
-                {inactive.map((p, idx) => <PromoRow key={p.id} promo={p} idx={idx} onToggle={toggleActive} onEdit={pr => { setEdit(pr); setShowForm(true) }} onDelete={handleDelete} typeLabel={typeLabel} />)}
+                {inactive.map((p,idx) => <PromoRow key={p.id} promo={p} idx={idx} onToggle={toggleActive} onEdit={pr=>{setEdit(pr);setShowForm(true)}} onDelete={handleDelete} typeLabel={typeLabel} />)}
               </div>
             </div>
           )}
-          {promos.length === 0 && <div className="bg-white rounded-xl border border-gray-100 py-12 text-center"><Tag size={32} className="mx-auto text-gray-300 mb-2" /><p className="text-sm text-gray-400">Belum ada promo</p></div>}
+          {promos.length === 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 py-12 text-center">
+              <Tag size={32} className="mx-auto text-gray-300 mb-2" />
+              <p className="text-sm text-gray-400">Belum ada promo untuk toko ini</p>
+            </div>
+          )}
         </>
       )}
-      {showForm && <PromoForm storeId={storeId} promo={editPromo} onClose={() => { setShowForm(false); setEdit(null) }} onSaved={() => { setShowForm(false); setEdit(null); loadPromos() }} />}
+      {showForm && (
+        <PromoForm storeId={selectedStoreId} promo={editPromo}
+          onClose={() => { setShowForm(false); setEdit(null) }}
+          onSaved={() => { setShowForm(false); setEdit(null); loadPromos(selectedStoreId) }} />
+      )}
     </div>
   )
 }
 
 function PromoRow({ promo, idx, onToggle, onEdit, onDelete, typeLabel }: {
-  promo: PromoItem; idx: number; onToggle: (p: PromoItem) => void; onEdit: (p: PromoItem) => void; onDelete: (p: PromoItem) => void; typeLabel: (t: string) => string
+  promo: PromoItem; idx: number
+  onToggle: (p: PromoItem) => void; onEdit: (p: PromoItem) => void
+  onDelete: (p: PromoItem) => void; typeLabel: (t: string) => string
 }) {
-  const until     = new Date(promo.valid_until).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })
-  const valueLabel = promo.promo_type === 'percent' ? `${promo.value}%` : promo.promo_type === 'fixed' ? `Rp ${promo.value.toLocaleString('id-ID')}` : 'Gratis 1'
+  const until      = new Date(promo.valid_until).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})
+  const valueLabel = promo.promo_type==='percent' ? `${promo.value}%` : promo.promo_type==='fixed' ? `Rp ${promo.value.toLocaleString('id-ID')}` : 'Gratis 1'
   return (
-    <div className={`flex items-center gap-3 px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+    <div className={`flex items-center gap-3 px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <p className="text-sm font-medium text-gray-900 truncate">{promo.name}</p>
-          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${promo.promo_type === 'buy1get1' ? 'bg-purple-100 text-purple-700' : promo.promo_type === 'percent' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>{typeLabel(promo.promo_type)}</span>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${promo.promo_type==='buy1get1'?'bg-purple-100 text-purple-700':promo.promo_type==='percent'?'bg-blue-100 text-blue-700':'bg-green-100 text-green-700'}`}>{typeLabel(promo.promo_type)}</span>
         </div>
         <p className="text-xs text-gray-500">{valueLabel} · s/d {until}</p>
       </div>
@@ -572,8 +694,8 @@ function PromoRow({ promo, idx, onToggle, onEdit, onDelete, typeLabel }: {
         <button onClick={() => onEdit(promo)} className="p-1.5 text-gray-400 rounded-lg">
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
         </button>
-        <button onClick={() => onToggle(promo)} className={`w-9 h-5 rounded-full transition-colors relative flex-shrink-0 ${promo.is_active ? 'bg-gray-900' : 'bg-gray-200'}`}>
-          <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${promo.is_active ? 'left-[18px]' : 'left-0.5'}`} />
+        <button onClick={() => onToggle(promo)} className={`w-9 h-5 rounded-full transition-colors relative flex-shrink-0 ${promo.is_active?'bg-gray-900':'bg-gray-200'}`}>
+          <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${promo.is_active?'left-[18px]':'left-0.5'}`} />
         </button>
         <button onClick={() => onDelete(promo)} className="p-1.5 text-red-400 rounded-lg"><Trash2 size={14} /></button>
       </div>
@@ -582,67 +704,67 @@ function PromoRow({ promo, idx, onToggle, onEdit, onDelete, typeLabel }: {
 }
 
 function PromoForm({ storeId, promo, onClose, onSaved }: { storeId: string; promo: PromoItem|null; onClose: () => void; onSaved: () => void }) {
-  const products = useLiveQuery(() => db.products.filter(p => p.is_active).toArray(), [])
+  const products  = useLiveQuery(() => db.products.filter(p => p.is_active).toArray(), [])
   const today     = new Date().toISOString().slice(0,10)
-  const nextMonth = new Date(Date.now() + 30*86400000).toISOString().slice(0,10)
-  const [name,       setName]   = useState(promo?.name || '')
-  const [productId,  setProd]   = useState(promo?.product_id || '')
-  const [type,       setType]   = useState<'percent'|'fixed'|'buy1get1'>(promo?.promo_type || 'percent')
-  const [value,      setValue]  = useState(String(promo?.value || ''))
-  const [minQty,     setMinQty] = useState(String(promo?.min_qty || '1'))
-  const [from,       setFrom]   = useState(promo?.valid_from?.slice(0,10) || today)
-  const [until,      setUntil]  = useState(promo?.valid_until?.slice(0,10) || nextMonth)
-  const [isActive,   setActive] = useState(promo?.is_active ?? true)
-  const [saving,     setSaving] = useState(false)
+  const nextMonth = new Date(Date.now()+30*86400000).toISOString().slice(0,10)
+  const [name,     setName]    = useState(promo?.name||'')
+  const [productId,setProd]    = useState(promo?.product_id||'')
+  const [type,     setType]    = useState<'percent'|'fixed'|'buy1get1'>(promo?.promo_type||'percent')
+  const [value,    setValue]   = useState(String(promo?.value||''))
+  const [minQty,   setMinQty]  = useState(String(promo?.min_qty||'1'))
+  const [from,     setFrom]    = useState(promo?.valid_from?.slice(0,10)||today)
+  const [until,    setUntil]   = useState(promo?.valid_until?.slice(0,10)||nextMonth)
+  const [isActive, setActive]  = useState(promo?.is_active??true)
+  const [saving,   setSaving]  = useState(false)
 
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama promo wajib diisi')
     if (!productId)   return toast.error('Pilih produk')
-    if (type !== 'buy1get1' && !value) return toast.error('Nilai diskon wajib diisi')
+    if (type!=='buy1get1'&&!value) return toast.error('Nilai diskon wajib diisi')
     setSaving(true)
     try {
-      const data: PromoItem = { id: promo?.id || generateId(), store_id: storeId, product_id: productId, name: name.trim(), promo_type: type, value: type === 'buy1get1' ? 1 : Number(value), min_qty: Number(minQty) || 1, valid_from: new Date(from).toISOString(), valid_until: new Date(until + 'T23:59:59').toISOString(), is_active: isActive, created_at: promo?.created_at || now() }
+      const data: PromoItem = { id:promo?.id||generateId(), store_id:storeId, product_id:productId, name:name.trim(), promo_type:type, value:type==='buy1get1'?1:Number(value), min_qty:Number(minQty)||1, valid_from:new Date(from).toISOString(), valid_until:new Date(until+'T23:59:59').toISOString(), is_active:isActive, created_at:promo?.created_at||now() }
       await db.promotions.put(data as any)
       await supabase.from('promotions').upsert(data)
-      toast.success(promo ? 'Promo diupdate' : 'Promo ditambahkan')
+      toast.success(promo?'Promo diupdate':'Promo ditambahkan')
       onSaved()
     } catch (e) { console.error(e); toast.error('Gagal menyimpan') }
     finally { setSaving(false) }
   }
 
   return (
-    <Modal title={promo ? 'Edit Promo' : 'Tambah Promo'} onClose={onClose}>
-      <div><Label>Nama Promo</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
+    <Modal title={promo?'Edit Promo':'Tambah Promo'} onClose={onClose}>
+      <div><Label>Nama Promo</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus /></div>
       <div><Label>Produk</Label>
-        <select className="input" value={productId} onChange={e => setProd(e.target.value)}>
+        <select className="input" value={productId} onChange={e=>setProd(e.target.value)}>
           <option value="">-- Pilih produk *</option>
-          {products?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          {products?.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
       </div>
       <div><Label>Tipe Promo</Label>
         <div className="grid grid-cols-3 gap-2">
-          {([{id:'percent',label:'Diskon %'},{id:'fixed',label:'Disc Nominal'},{id:'buy1get1',label:'Buy 1 Get 1'}] as const).map(t => (
-            <button key={t.id} onClick={() => setType(t.id)} className={`py-2 rounded-xl text-xs font-medium border transition-colors ${type === t.id ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>{t.label}</button>
+          {([{id:'percent',label:'Diskon %'},{id:'fixed',label:'Disc Nominal'},{id:'buy1get1',label:'Buy 1 Get 1'}] as const).map(t=>(
+            <button key={t.id} onClick={()=>setType(t.id)} className={`py-2 rounded-xl text-xs font-medium border transition-colors ${type===t.id?'bg-gray-900 text-white border-gray-900':'border-gray-200 text-gray-600'}`}>{t.label}</button>
           ))}
         </div>
       </div>
-      {type !== 'buy1get1' && (
-        <div><Label>{type === 'percent' ? 'Diskon (%)' : 'Diskon (Rp)'}</Label>
-          <input className="input" inputMode="decimal" value={value} onChange={e => setValue(e.target.value.replace(/[^0-9.]/g,''))} placeholder={type === 'percent' ? '10' : '5000'} />
+      {type!=='buy1get1'&&(
+        <div><Label>{type==='percent'?'Diskon (%)':'Diskon (Rp)'}</Label>
+          <input className="input" inputMode="decimal" value={value} onChange={e=>setValue(e.target.value.replace(/[^0-9.]/g,''))} placeholder={type==='percent'?'10':'5000'} />
         </div>
       )}
-      <div><Label>Min. Qty</Label><input className="input" inputMode="decimal" value={minQty} onChange={e => setMinQty(e.target.value.replace(/[^0-9]/g,''))} placeholder="1" /></div>
+      <div><Label>Min. Qty</Label><input className="input" inputMode="decimal" value={minQty} onChange={e=>setMinQty(e.target.value.replace(/[^0-9]/g,''))} placeholder="1" /></div>
       <div className="grid grid-cols-2 gap-3">
-        <div><Label>Dari</Label><input className="input" type="date" value={from} onChange={e => setFrom(e.target.value)} /></div>
-        <div><Label>Sampai</Label><input className="input" type="date" value={until} onChange={e => setUntil(e.target.value)} /></div>
+        <div><Label>Dari</Label><input className="input" type="date" value={from} onChange={e=>setFrom(e.target.value)} /></div>
+        <div><Label>Sampai</Label><input className="input" type="date" value={until} onChange={e=>setUntil(e.target.value)} /></div>
       </div>
       <div className="flex items-center justify-between py-2 border-t border-gray-100">
         <p className="text-sm text-gray-700">Aktif</p>
-        <button onClick={() => setActive(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}><div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} /></button>
+        <button onClick={()=>setActive(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive?'bg-gray-900':'bg-gray-200'}`}><div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive?'left-[22px]':'left-0.5'}`} /></button>
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
       </div>
     </Modal>
   )
@@ -650,53 +772,88 @@ function PromoForm({ storeId, promo, onClose, onSaved }: { storeId: string; prom
 
 // ── RESET TAB ─────────────────────────────────────────────────
 function ResetDataTab() {
-  const [resetting, setResetting] = useState(false); const [done, setDone] = useState<string[]>([])
+  const [resetting, setResetting] = useState(false)
+  const [done,      setDone]      = useState<string[]>([])
+
   async function resetGudang() {
     setResetting(true); setDone([])
     try {
-      setDone(prev => [...prev, 'Menghapus dari server...'])
-      await supabase.from('warehouse_mutation_items').delete().gte('created_at','2000-01-01')
-      await supabase.from('warehouse_mutations').delete().gte('created_at','2000-01-01')
-      await supabase.from('purchase_items').delete().gte('created_at','2000-01-01')
-      await supabase.from('purchases').delete().gte('created_at','2000-01-01')
-      await supabase.from('warehouse_expenses').delete().gte('created_at','2000-01-01')
-      await supabase.from('warehouse_stock').delete().gte('last_updated','2000-01-01')
+      setDone(prev=>[...prev,'Menghapus dari server...'])
+      for (const t of ['warehouse_mutation_items','warehouse_mutations','purchase_items','purchases','warehouse_expenses','warehouse_stock']) {
+        await supabase.from(t).delete().gte('created_at','2000-01-01')
+      }
       await db.warehouse_mutation_items.clear(); await db.warehouse_mutations.clear()
       await db.purchase_items.clear(); await db.purchases.clear()
       await db.warehouse_expenses.clear(); await db.warehouse_stock.clear()
-      setDone(prev => [...prev, 'Selesai'])
+      setDone(prev=>[...prev,'Selesai'])
       toast.success('Data gudang direset')
-    } catch (e) { toast.error('Gagal: ' + String(e)) }
+    } catch (e) { toast.error('Gagal: '+String(e)) }
     finally { setResetting(false) }
   }
+
   async function resetProduksi() {
     setResetting(true); setDone([])
     try {
-      setDone(prev => [...prev, 'Menghapus dari server...'])
+      setDone(prev=>[...prev,'Menghapus dari server...'])
       for (const t of ['production_log_materials','production_logs','production_mutation_items','production_mutations','production_stock','finished_goods_stock']) {
         await supabase.from(t).delete().gte('created_at','2000-01-01')
       }
       await db.production_log_materials.clear(); await db.production_logs.clear()
       await db.production_mutation_items.clear(); await db.production_mutations.clear()
       await db.production_stock.clear(); await db.finished_goods_stock.clear()
-      setDone(prev => [...prev, 'Selesai'])
+      setDone(prev=>[...prev,'Selesai'])
       toast.success('Data produksi direset')
-    } catch (e) { toast.error('Gagal: ' + String(e)) }
+    } catch (e) { toast.error('Gagal: '+String(e)) }
     finally { setResetting(false) }
   }
+
   return (
     <div className="p-4 space-y-4">
       <div className="bg-red-50 border border-red-100 rounded-xl p-3">
         <p className="text-sm font-medium text-red-700 mb-1">Hati-hati — Data tidak bisa dikembalikan</p>
         <p className="text-xs text-red-500">Master data (bahan, supplier, resep) tetap aman.</p>
       </div>
-      {[{label:'Reset Data Gudang',sub:'Pembelian, mutasi, biaya, stok gudang',fn:resetGudang},{label:'Reset Data Produksi',sub:'Log produksi, stok produksi & produk jadi',fn:resetProduksi}].map(btn => (
+
+      {[
+        { label:'Reset Data Gudang',    sub:'Pembelian, mutasi, biaya, stok gudang', fn:resetGudang },
+        { label:'Reset Data Produksi',  sub:'Log produksi, stok produksi & produk jadi', fn:resetProduksi },
+      ].map(btn => (
         <div key={btn.label} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-50"><p className="text-sm font-medium text-gray-900">{btn.label}</p><p className="text-xs text-gray-400 mt-0.5">{btn.sub}</p></div>
-          <div className="px-4 py-3"><button onClick={btn.fn} disabled={resetting} className="w-full py-2.5 rounded-xl border border-red-200 text-sm font-medium text-red-600 disabled:opacity-50">{resetting ? 'Mereset...' : btn.label}</button></div>
+          <div className="px-4 py-3 border-b border-gray-50">
+            <p className="text-sm font-medium text-gray-900">{btn.label}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{btn.sub}</p>
+          </div>
+          <div className="px-4 py-3">
+            <button onClick={btn.fn} disabled={resetting} className="w-full py-2.5 rounded-xl border border-red-200 text-sm font-medium text-red-600 disabled:opacity-50">
+              {resetting?'Mereset...':btn.label}
+            </button>
+          </div>
         </div>
       ))}
-      {done.length > 0 && <div className="bg-green-50 border border-green-100 rounded-xl p-3 space-y-1">{done.map((d,i) => <p key={i} className="text-xs text-green-700">✓ {d}</p>)}</div>}
+
+      {/* Bersihkan data lokal device */}
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-50">
+          <p className="text-sm font-medium text-gray-900">Bersihkan Data Lokal Device</p>
+          <p className="text-xs text-gray-400 mt-0.5">Hapus cache di device ini. Data server tidak ikut terhapus. Berguna jika ada data duplikat.</p>
+        </div>
+        <div className="px-4 py-3">
+          <button onClick={async () => {
+            if (!confirm('Hapus semua data lokal device ini? Data server aman.\nAnda akan logout otomatis.')) return
+            await hardResetLocal()
+            toast.success('Data lokal dihapus. Login ulang untuk sync.')
+            setTimeout(() => { window.location.href = '/login' }, 1500)
+          }} className="w-full py-2.5 rounded-xl border border-orange-200 text-sm font-medium text-orange-600 active:bg-orange-50">
+            Bersihkan Data Lokal & Logout
+          </button>
+        </div>
+      </div>
+
+      {done.length > 0 && (
+        <div className="bg-green-50 border border-green-100 rounded-xl p-3 space-y-1">
+          {done.map((d,i) => <p key={i} className="text-xs text-green-700">✓ {d}</p>)}
+        </div>
+      )}
     </div>
   )
 }
@@ -715,143 +872,130 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
     </div>
   )
 }
+
 function Label({ children }: { children: React.ReactNode }) {
   return <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">{children}</label>
 }
 
-// ── UserForm — dengan pilih toko untuk kasir/gudang/produksi ──
-function UserForm({ user, currentStoreId, onClose }: {
-  user: User|null; currentStoreId: string; onClose: () => void
-}) {
-  const [name,     setName]   = useState(user?.name || '')
-  const [username, setUname]  = useState(user?.username || '')
-  const [password, setPass]   = useState('')
-  const [role,     setRole]   = useState<Role>(user?.role || 'kasir')
-  const [storeId,  setStore]  = useState(user?.store_id || currentStoreId)
-  const [isActive, setActive] = useState(user?.is_active ?? true)
-  const [saving,   setSaving] = useState(false)
-
+// ── UserForm ──────────────────────────────────────────────────
+function UserForm({ user, currentStoreId, onClose }: { user: User|null; currentStoreId: string; onClose: () => void }) {
+  const [name,     setName]    = useState(user?.name||'')
+  const [username, setUname]   = useState(user?.username||'')
+  const [password, setPass]    = useState('')
+  const [role,     setRole]    = useState<Role>(user?.role||'kasir')
+  const [storeId,  setStore]   = useState(user?.store_id||currentStoreId)
+  const [isActive, setActive]  = useState(user?.is_active??true)
+  const [saving,   setSaving]  = useState(false)
   const stores = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
-
-  // Role yang perlu pilih toko berbeda
   const needStorePick = ['kasir','gudang','produksi'].includes(role)
 
   async function handleSave() {
-    if (!name || !username) return toast.error('Nama dan username wajib diisi')
-    if (!user && !password)  return toast.error('Password wajib untuk user baru')
+    if (!name||!username)     return toast.error('Nama dan username wajib diisi')
+    if (!user&&!password)     return toast.error('Password wajib untuk user baru')
     setSaving(true)
     try {
-      const isNew = !user
+      const isNew        = !user
       const finalStoreId = needStorePick ? storeId : currentStoreId
-      const data: User = {
-        id: user?.id || generateId(), store_id: finalStoreId,
-        name, username,
-        password_hash: password ? await hashPassword(password) : user!.password_hash,
-        role, is_active: isActive, created_at: user?.created_at || now(),
-      }
+      const data: User   = { id:user?.id||generateId(), store_id:finalStoreId, name, username, password_hash:password?await hashPassword(password):user!.password_hash, role, is_active:isActive, created_at:user?.created_at||now() }
       await db.users.put(data)
       await supabase.from('users').upsert(data)
-      await addToSyncQueue('users', data.id, isNew ? 'insert' : 'update', data, finalStoreId)
-      toast.success(isNew ? 'User ditambahkan' : 'User diupdate')
+      await addToSyncQueue('users', data.id, isNew?'insert':'update', data, finalStoreId)
+      toast.success(isNew?'User ditambahkan':'User diupdate')
       onClose()
     } finally { setSaving(false) }
   }
 
   return (
-    <Modal title={user ? 'Edit User' : 'Tambah User'} onClose={onClose}>
-      <div><Label>Nama</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
-      <div><Label>Username</Label><input className="input" value={username} onChange={e => setUname(e.target.value)} /></div>
-      <div><Label>Password {user ? '(kosongkan jika tidak diubah)' : ''}</Label>
-        <input className="input" type="password" value={password} onChange={e => setPass(e.target.value)} placeholder={user ? '••••' : 'Min. 4 karakter'} />
+    <Modal title={user?'Edit User':'Tambah User'} onClose={onClose}>
+      <div><Label>Nama</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus /></div>
+      <div><Label>Username</Label><input className="input" value={username} onChange={e=>setUname(e.target.value)} /></div>
+      <div><Label>Password {user?'(kosongkan jika tidak diubah)':''}</Label>
+        <input className="input" type="password" value={password} onChange={e=>setPass(e.target.value)} placeholder={user?'••••':'Min. 4 karakter'} />
       </div>
       <div><Label>Role</Label>
         <div className="grid grid-cols-2 gap-2">
-          {(['kasir','gudang','produksi','manager'] as Role[]).map(r => (
-            <button key={r} onClick={() => setRole(r)}
-              className={`py-2 rounded-xl text-sm font-medium border capitalize transition-colors ${role === r ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>{r}</button>
+          {(['kasir','gudang','produksi','manager'] as Role[]).map(r=>(
+            <button key={r} onClick={()=>setRole(r)} className={`py-2 rounded-xl text-sm font-medium border capitalize transition-colors ${role===r?'bg-gray-900 text-white border-gray-900':'border-gray-200 text-gray-600'}`}>{r}</button>
           ))}
         </div>
       </div>
-
-      {/* Pilih toko — untuk kasir, gudang, produksi */}
-      {needStorePick && stores && stores.length > 1 && (
+      {needStorePick && stores && stores.length > 0 && (
         <div>
           <Label>Toko</Label>
-          <select className="input" value={storeId} onChange={e => setStore(e.target.value)}>
-            {stores.map(s => <option key={s.id} value={s.id}>{s.name} · {s.city}</option>)}
+          <select className="input" value={storeId} onChange={e=>setStore(e.target.value)}>
+            {stores.map(s=><option key={s.id} value={s.id}>{s.name} · {s.city}</option>)}
           </select>
           <p className="text-xs text-gray-400 mt-1">User ini akan login ke toko yang dipilih</p>
         </div>
       )}
-
       <div className="flex items-center justify-between py-2 border-t border-gray-100">
         <p className="text-sm text-gray-700">Aktif</p>
-        <button onClick={() => setActive(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
-          <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} />
+        <button onClick={()=>setActive(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive?'bg-gray-900':'bg-gray-200'}`}>
+          <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive?'left-[22px]':'left-0.5'}`} />
         </button>
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
       </div>
     </Modal>
   )
 }
 
 function SupplierForm({ supplier, onClose }: { supplier: Supplier|null; onClose: () => void }) {
-  const [name, setName] = useState(supplier?.name || ''); const [phone, setPhone] = useState(supplier?.phone || ''); const [address, setAddr] = useState(supplier?.address || ''); const [isActive, setActive] = useState(supplier?.is_active ?? true); const [saving, setSaving] = useState(false)
+  const [name,setName]=useState(supplier?.name||'');const [phone,setPhone]=useState(supplier?.phone||'');const [address,setAddr]=useState(supplier?.address||'');const [isActive,setActive]=useState(supplier?.is_active??true);const [saving,setSaving]=useState(false)
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama wajib diisi')
     setSaving(true)
     try {
-      const data: Supplier = { id: supplier?.id || generateId(), name: name.trim(), phone: phone || undefined, address: address || undefined, is_active: isActive, created_at: supplier?.created_at || now() }
-      await db.suppliers.put(data); await supabase.from('suppliers').upsert(data)
-      toast.success(supplier ? 'Diupdate' : 'Ditambahkan'); onClose()
-    } finally { setSaving(false) }
+      const data:Supplier={id:supplier?.id||generateId(),name:name.trim(),phone:phone||undefined,address:address||undefined,is_active:isActive,created_at:supplier?.created_at||now()}
+      await db.suppliers.put(data);await supabase.from('suppliers').upsert(data)
+      toast.success(supplier?'Diupdate':'Ditambahkan');onClose()
+    } finally{setSaving(false)}
   }
   return (
-    <Modal title={supplier ? 'Edit Supplier' : 'Tambah Supplier'} onClose={onClose}>
-      <div><Label>Nama Supplier</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
-      <div><Label>No. Telepon</Label><input className="input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} /></div>
-      <div><Label>Alamat</Label><input className="input" value={address} onChange={e => setAddr(e.target.value)} placeholder="Opsional" /></div>
+    <Modal title={supplier?'Edit Supplier':'Tambah Supplier'} onClose={onClose}>
+      <div><Label>Nama Supplier</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus /></div>
+      <div><Label>No. Telepon</Label><input className="input" type="tel" value={phone} onChange={e=>setPhone(e.target.value)} /></div>
+      <div><Label>Alamat</Label><input className="input" value={address} onChange={e=>setAddr(e.target.value)} placeholder="Opsional" /></div>
       <div className="flex items-center justify-between py-2 border-t border-gray-100">
         <p className="text-sm text-gray-700">Aktif</p>
-        <button onClick={() => setActive(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}><div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} /></button>
+        <button onClick={()=>setActive(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive?'bg-gray-900':'bg-gray-200'}`}><div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive?'left-[22px]':'left-0.5'}`}/></button>
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
       </div>
     </Modal>
   )
 }
 
 function MitraForm({ partner, onClose }: { partner: Partner|null; onClose: () => void }) {
-  const [name, setName] = useState(partner?.name || ''); const [contact, setContact] = useState(partner?.contact || ''); const [city, setCity] = useState(partner?.city || ''); const [address, setAddr] = useState(partner?.address || ''); const [isActive, setActive] = useState(partner?.is_active ?? true); const [saving, setSaving] = useState(false)
+  const [name,setName]=useState(partner?.name||'');const [contact,setContact]=useState(partner?.contact||'');const [city,setCity]=useState(partner?.city||'');const [address,setAddr]=useState(partner?.address||'');const [isActive,setActive]=useState(partner?.is_active??true);const [saving,setSaving]=useState(false)
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama wajib diisi')
     setSaving(true)
     try {
-      const data: Partner = { id: partner?.id || generateId(), name: name.trim(), contact: contact || undefined, city: city || undefined, address: address || undefined, is_active: isActive, created_at: partner?.created_at || now() }
-      await db.partners.put(data); await supabase.from('partners').upsert(data)
-      toast.success(partner ? 'Diupdate' : 'Ditambahkan'); onClose()
-    } finally { setSaving(false) }
+      const data:Partner={id:partner?.id||generateId(),name:name.trim(),contact:contact||undefined,city:city||undefined,address:address||undefined,is_active:isActive,created_at:partner?.created_at||now()}
+      await db.partners.put(data);await supabase.from('partners').upsert(data)
+      toast.success(partner?'Diupdate':'Ditambahkan');onClose()
+    } finally{setSaving(false)}
   }
   return (
-    <Modal title={partner ? 'Edit Mitra' : 'Tambah Franchise'} onClose={onClose}>
-      <div><Label>Nama Franchise</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
+    <Modal title={partner?'Edit Mitra':'Tambah Franchise'} onClose={onClose}>
+      <div><Label>Nama Franchise</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus /></div>
       <div className="grid grid-cols-2 gap-3">
-        <div><Label>Kota</Label><input className="input" value={city} onChange={e => setCity(e.target.value)} /></div>
-        <div><Label>Kontak</Label><input className="input" type="tel" value={contact} onChange={e => setContact(e.target.value)} /></div>
+        <div><Label>Kota</Label><input className="input" value={city} onChange={e=>setCity(e.target.value)} /></div>
+        <div><Label>Kontak</Label><input className="input" type="tel" value={contact} onChange={e=>setContact(e.target.value)} /></div>
       </div>
-      <div><Label>Alamat</Label><input className="input" value={address} onChange={e => setAddr(e.target.value)} placeholder="Opsional" /></div>
+      <div><Label>Alamat</Label><input className="input" value={address} onChange={e=>setAddr(e.target.value)} placeholder="Opsional" /></div>
       <div className="flex items-center justify-between py-2 border-t border-gray-100">
         <p className="text-sm text-gray-700">Aktif</p>
-        <button onClick={() => setActive(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}><div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} /></button>
+        <button onClick={()=>setActive(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive?'bg-gray-900':'bg-gray-200'}`}><div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive?'left-[22px]':'left-0.5'}`}/></button>
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
       </div>
     </Modal>
   )

@@ -87,6 +87,23 @@ function ResepProduksiTab() {
 
   return (
     <div className="p-4 space-y-3">
+      {/* Store selector — hanya owner */}
+      {isOwner && stores && stores.length > 1 && (
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-gray-50">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Pilih Toko</p>
+          </div>
+          <div className="flex gap-1.5 p-3 overflow-x-auto scrollbar-hide">
+            {stores.map(s => (
+              <button key={s.id} onClick={() => setActiveStoreId(s.id)}
+                className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${activeStoreId===s.id?'bg-gray-900 text-white':'bg-gray-100 text-gray-600'}`}>
+                {s.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {isOwnerManager && (
         <div className="flex justify-end">
           <button onClick={() => { setEditRecipe(null); setShowForm(true) }}
@@ -245,12 +262,16 @@ function ResepProduksiForm({ recipe, onClose }: { recipe: any; onClose: () => vo
 // Flow: Gudang → mutasi ke Toko → Stok Toko → Kasir jual → berkurang
 function ResepTokoTab({ storeId }: { storeId: string }) {
   const { user } = useAuthStore()
+  const isOwner        = user?.role === 'owner'
   const isOwnerManager = ['owner','manager'].includes(user?.role || '')
-  const [showForm, setShowForm]     = useState(false)
-  const [editRecipe, setEditRecipe] = useState<any>(null)
+  const stores         = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
+  // Owner bisa pilih toko mana yang mau diset resepnya
+  const [activeStoreId, setActiveStoreId] = useState(storeId)
+  const [showForm,    setShowForm]    = useState(false)
+  const [editRecipe,  setEditRecipe]  = useState<any>(null)
 
   const recipes = useLiveQuery(async () => {
-    const r     = await db.store_recipes.where('store_id').equals(storeId).toArray()
+    const r     = await db.store_recipes.where('store_id').equals(activeStoreId).toArray()
     const items = await db.store_recipe_items.toArray()
     const mats  = await db.materials.toArray()
     const prods = await db.products.toArray()
@@ -261,7 +282,7 @@ function ResepTokoTab({ storeId }: { storeId: string }) {
       product: pMap[recipe.product_id],
       items: items.filter(i => i.recipe_id === recipe.id).map(i => ({ ...i, material: mMap[i.material_id] }))
     }))
-  }, [storeId])
+  }, [activeStoreId])
 
   return (
     <div className="p-4 space-y-3">
@@ -320,7 +341,7 @@ function ResepTokoTab({ storeId }: { storeId: string }) {
       </div>
 
       {showForm && isOwnerManager && (
-        <ResepTokoForm recipe={editRecipe} storeId={storeId}
+        <ResepTokoForm recipe={editRecipe} storeId={activeStoreId}
           onClose={() => { setShowForm(false); setEditRecipe(null) }} />
       )}
     </div>

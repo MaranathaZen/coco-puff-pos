@@ -1,8 +1,8 @@
 // src/pages/mutasi/UnifiedMutasiPage.tsx
 // CHANGELOG:
-// - Fix posisi catatan: di bawah tanggal, sebelum detail item
-// - Produksi internal_use/adjustment: pilih dari semua bahan produksi + produk jadi
-// - Kasir: pilih semua stok toko (bahan + produk jadi)
+// - Owner/Manager: filter per toko di list mutasi
+// - Owner/Manager: bisa lihat semua mutasi semua toko
+// - Fix posisi catatan di bawah tanggal
 
 import { useState, useMemo, useEffect, useContext, createContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -85,7 +85,7 @@ export default function UnifiedMutasiPage() {
     setSyncing(true)
     try {
       const [m, mi, mats, stores, partners, prods, fgStock] = await Promise.all([
-        supabase.from('warehouse_mutations').select('*').order('created_at', { ascending: false }).limit(300),
+        supabase.from('warehouse_mutations').select('*').order('created_at', { ascending: false }).limit(500),
         supabase.from('warehouse_mutation_items').select('*'),
         supabase.from('materials').select('*'),
         supabase.from('stores').select('*'),
@@ -93,8 +93,8 @@ export default function UnifiedMutasiPage() {
         supabase.from('products').select('*').eq('is_active', true),
         supabase.from('finished_goods_stock').select('*'),
       ])
-      if (m.data?.length)        { await db.warehouse_mutations.clear(); await db.warehouse_mutations.bulkPut(m.data) }
-      if (mi.data?.length)       { await db.warehouse_mutation_items.clear(); await db.warehouse_mutation_items.bulkPut(mi.data) }
+      if (m.data !== null)   { await db.warehouse_mutations.clear();      if (m.data.length)   await db.warehouse_mutations.bulkPut(m.data)      }
+      if (mi.data !== null)  { await db.warehouse_mutation_items.clear(); if (mi.data.length)  await db.warehouse_mutation_items.bulkPut(mi.data) }
       if (mats.data?.length)     await db.materials.bulkPut(mats.data)
       if (stores.data?.length)   await db.stores.bulkPut(stores.data)
       if (partners.data?.length) await db.partners.bulkPut(partners.data)
@@ -126,15 +126,19 @@ export default function UnifiedMutasiPage() {
 }
 
 function MutasiList({ userId, role, storeId }: { userId: string; role: string; storeId: string }) {
-  const setToolbar = useContext(ToolbarCtx)
+  const setToolbar  = useContext(ToolbarCtx)
   const [showForm,  setShowForm]  = useState(false)
   const [groupMode, setGroupMode] = useState<Period>('hari')
-  const [filterType, setFilterType] = useState('semua')
-  const [search, setSearch] = useState('')
+  const [filterType,  setFilterType]  = useState('semua')
+  const [filterStore, setFilterStore] = useState('semua')
+  const [search,      setSearch]      = useState('')
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
     const today = new Date().toISOString().slice(0,10)
     return { [today]: true }
   })
+
+  const isOwnerManager = ['owner','manager'].includes(role)
+  const stores = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
 
   useEffect(() => {
     setToolbar(
@@ -155,8 +159,11 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
 
   const mutations = useLiveQuery(async () => {
     let m = await db.warehouse_mutations.orderBy('created_at').reverse().toArray()
+    // Filter per role — owner/manager lihat semua
     if (role === 'produksi') m = m.filter(x => x.created_by === userId)
     else if (role === 'kasir') m = m.filter(x => x.destination_id === storeId || x.created_by === userId)
+    else if (role === 'gudang') m = m.filter(x => x.created_by === userId || x.destination_id === storeId)
+    // owner/manager: semua, tidak ada filter di sini
     const mi   = await db.warehouse_mutation_items.toArray()
     const mats = await db.materials.toArray()
     const prods = await db.products.toArray()
@@ -170,10 +177,15 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
     }))
   }, [role, userId, storeId])
 
+  const storeMap = Object.fromEntries((stores||[]).map(s => [s.id, s.name]))
+
   const filtered = useMemo(() => {
     if (!mutations) return []
     let list = mutations
     if (filterType !== 'semua') list = list.filter(m => m.mutation_type === filterType)
+    if (filterStore !== 'semua') list = list.filter(m =>
+      m.destination_id === filterStore || m.created_by === filterStore
+    )
     if (search) {
       const q = search.toLowerCase()
       list = list.filter(m =>
@@ -183,9 +195,10 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
       )
     }
     return list
-  }, [mutations, filterType, search])
+  }, [mutations, filterType, filterStore, search])
 
   const grouped = useMemo(() => groupBy(filtered, m => groupKey(m.created_at, groupMode)), [filtered, groupMode])
+
   const totalNilaiMutasi = useMemo(() => {
     const now2 = new Date()
     return (mutations || [])
@@ -198,7 +211,24 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
       <div className="bg-white rounded-xl border border-gray-100 p-4">
         <p className="text-xs text-gray-400 mb-1">Total Nilai Mutasi Bulan Ini</p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalNilaiMutasi)}</p>
+        <p className="text-xs text-gray-400 mt-0.5">{mutations?.length || 0} transaksi</p>
       </div>
+
+      {/* Filter toko — owner/manager */}
+      {isOwnerManager && stores && stores.length > 1 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+          <button onClick={() => setFilterStore('semua')}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore==='semua'?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
+            Semua Toko
+          </button>
+          {stores.map(s => (
+            <button key={s.id} onClick={() => setFilterStore(s.id)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore===s.id?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       <input value={search} onChange={e => setSearch(e.target.value)}
         className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
@@ -214,8 +244,8 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
       </div>
 
       {grouped.map(({ key, items: grpItems }) => {
-        const total = grpItems.reduce((s, m) => s + m.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0)
-        const today = new Date().toISOString().slice(0,10)
+        const total    = grpItems.reduce((s, m) => s + m.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0)
+        const today    = new Date().toISOString().slice(0,10)
         const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : key === today
         return (
           <div key={key}>
@@ -235,37 +265,34 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
 
             <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{ display: expanded ? undefined : 'none' }}>
               {grpItems.map((m, idx) => {
-                const tc = TYPE_CONFIG[m.mutation_type] || { label: m.mutation_type, color: 'text-gray-600 bg-gray-100' }
+                const tc         = TYPE_CONFIG[m.mutation_type] || { label: m.mutation_type, color: 'text-gray-600 bg-gray-100' }
                 const totalNilai = m.items.reduce((s, i) => s + i.qty * i.unit_cost, 0)
-                const mutNo = (m as any).mutation_number
+                const mutNo      = (m as any).mutation_number
                 return (
                   <div key={m.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                    {/* Baris 1: nomor + nilai */}
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
                         {mutNo && <p className="text-xs font-mono text-blue-600 mb-1">{mutNo}<CopyBtn text={mutNo} /></p>}
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tc.color}`}>{tc.label}</span>
                           {m.destination_name && <span className="text-xs font-semibold text-gray-800">{m.destination_name}</span>}
+                          {/* Badge toko asal — untuk owner/manager */}
+                          {isOwnerManager && storeMap[m.destination_id || ''] && (
+                            <span className="text-xs text-gray-400">{storeMap[m.destination_id || '']}</span>
+                          )}
                         </div>
-                        {/* Tanggal */}
                         <p className="text-xs text-gray-400 mt-0.5">
                           {new Date(m.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })},{' '}
                           {new Date(m.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12:false })}
                         </p>
-                        {/* CATATAN — di bawah tanggal, sebelum item */}
-                        {(m as any).notes && (
-                          <p className="text-xs text-gray-500 italic mt-0.5">📝 {(m as any).notes}</p>
-                        )}
+                        {(m as any).notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {(m as any).notes}</p>}
                       </div>
                       {totalNilai > 0 && <p className="text-sm font-semibold text-gray-900 flex-shrink-0 ml-3">{formatRupiah(totalNilai)}</p>}
                     </div>
-
-                    {/* Detail item */}
                     {m.items.length > 0 && (
                       <div className="mt-2 space-y-0.5 border-t border-gray-50 pt-1.5">
                         {m.items.map(i => {
-                          const mat = i.material as any
+                          const mat      = i.material as any
                           const subtotal = i.qty * i.unit_cost
                           return (
                             <div key={i.id} className="flex items-center justify-between text-xs">
@@ -304,7 +331,6 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
   const partners   = useLiveQuery(() => db.partners.filter(p => p.is_active).toArray(), [])
   const stores     = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
 
-  // Stok toko (kasir)
   const storeStocks = useLiveQuery(async () => {
     if (role !== 'kasir') return []
     const stocks = await db.stock.where('store_id').equals(storeId).toArray()
@@ -320,13 +346,11 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
     }).filter(Boolean) as { id: string; name: string; unit: string; qty: number }[]
   }, [storeId, role])
 
-  // Produk jadi produksi
   const fgStocks = useLiveQuery(async () => {
     if (role !== 'produksi') return []
     try { return await (db as any).finished_goods_stock?.toArray() ?? [] } catch { return [] }
   }, [role])
 
-  // Bahan produksi (production_stock)
   const prodStocks = useLiveQuery(async () => {
     if (role !== 'produksi') return []
     const ps   = await db.production_stock.toArray()
@@ -345,16 +369,13 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
   function getOptions() {
     if (role === 'kasir') return storeStocks || []
     if (role === 'produksi') {
-      // Kirim ke toko/franchise: produk jadi saja
       if (type === 'to_store' || type === 'to_partner') {
         return (fgStocks || []).map((f: any) => ({ id: f.product_id ?? f.id, name: f.product_name ?? f.name, unit: 'pcs', qty: f.qty_on_hand }))
       }
-      // Pemakaian/retur: semua bahan produksi + produk jadi
-      const fg = (fgStocks || []).map((f: any) => ({ id: f.product_id ?? f.id, name: `[Produk] ${f.product_name ?? f.name}`, unit: 'pcs', qty: f.qty_on_hand }))
+      const fg    = (fgStocks || []).map((f: any) => ({ id: f.product_id ?? f.id, name: `[Produk] ${f.product_name ?? f.name}`, unit: 'pcs', qty: f.qty_on_hand }))
       const bahan = (prodStocks || []).map(s => ({ id: s.id, name: s.name, unit: s.unit, qty: s.qty }))
       return [...fg, ...bahan]
     }
-    // Gudang/owner/manager: semua bahan aktif
     return (materials || []).map(m => ({ id: m.id, name: m.name, unit: m.unit, qty: null }))
   }
 
@@ -370,7 +391,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
 
   async function handleSave() {
     const valid = items.filter(i => i.material_id && Number(i.qty) > 0)
-    if (!valid.length)               return toast.error('Tambahkan minimal 1 item')
+    if (!valid.length)                return toast.error('Tambahkan minimal 1 item')
     if (type === 'to_store'   && !destId) return toast.error('Pilih toko tujuan')
     if (type === 'to_partner' && !destId) return toast.error('Pilih franchise tujuan')
     setSaving(true)
@@ -380,7 +401,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
         type === 'to_partner' ? partners?.find(p => p.id === destId)?.name || '' :
         type === 'internal_use' ? 'Pemakaian Internal' : ''
 
-      const mutId = generateId()
+      const mutId    = generateId()
       const mutNumber = await generateMutationNumber()
       const mut: any = { id: mutId, mutation_number: mutNumber, mutation_type: type, destination_id: destId || undefined, destination_name: destName || undefined, notes: notes || undefined, status: 'confirmed', created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId }
       await db.warehouse_mutations.add(mut)
@@ -392,12 +413,10 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
         await db.warehouse_mutation_items.add(mi)
         await supabase.from('warehouse_mutation_items').insert(mi)
 
-        // Kurangi stok sumber
         if (role === 'kasir') {
           const ss = await db.stock.filter(s => s.store_id === storeId && (s.ingredient_id === item.material_id || (s as any).product_id === item.material_id)).first()
           if (ss) { const n = Math.max(0, ss.qty_on_hand - Number(item.qty)); await db.stock.update(ss.id, { qty_on_hand: n, last_updated: now() }); await supabase.from('stock').update({ qty_on_hand: n }).eq('id', ss.id) }
         } else if (role === 'produksi') {
-          // Cek apakah produk jadi atau bahan
           const isFg = (fgStocks || []).some((f: any) => (f.product_id ?? f.id) === item.material_id)
           if (isFg) {
             try {
@@ -409,11 +428,11 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
             if (ps) { const n = Math.max(0, ps.qty_on_hand - Number(item.qty)); await db.production_stock.update(ps.id, { qty_on_hand: n, last_updated: now() }); await supabase.from('production_stock').update({ qty_on_hand: n }).eq('id', ps.id) }
           }
         } else {
+          // gudang/owner/manager: kurangi warehouse_stock
           const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
           if (ws) { const n = Math.max(0, ws.qty_on_hand - Number(item.qty)); await db.warehouse_stock.update(ws.id, { qty_on_hand: n, last_updated: now() }); await supabase.from('warehouse_stock').update({ qty_on_hand: n }).eq('id', ws.id) }
         }
 
-        // Tambah stok tujuan
         if (type === 'to_production') {
           const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
           const psd: any = { id: ps?.id || generateId(), material_id: item.material_id, qty_on_hand: (ps?.qty_on_hand || 0) + Number(item.qty), last_updated: now() }
@@ -446,7 +465,6 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           ))}
         </div>
       </div>
-
       {type === 'to_store' && (
         <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Toko Tujuan</label>
           <select className={`input ${!destId ? 'border-red-200' : ''}`} value={destId} onChange={e => setDest(e.target.value)}>
@@ -463,13 +481,12 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           </select>
         </div>
       )}
-
       <div>
         <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Item <span className="text-red-400">*</span></label>
         <div className="space-y-2">
           {items.map((item, i) => {
             const selOpt = opts.find(o => o.id === item.material_id)
-            const cost = getUnitCost(item.material_id)
+            const cost   = getUnitCost(item.material_id)
             return (
               <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
                 <select className="input text-sm" value={item.material_id}
@@ -493,19 +510,16 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
         </div>
         <button onClick={() => setItems(p => [...p, { material_id: '', qty: '' }])} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
       </div>
-
       {totalNilai > 0 && (
         <div className="flex items-center justify-between py-2 bg-gray-50 rounded-xl px-3">
           <span className="text-sm text-gray-600">Total Nilai</span>
           <span className="text-sm font-semibold text-gray-900">{formatRupiah(totalNilai)}</span>
         </div>
       )}
-
       <div>
         <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Catatan</label>
         <input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opsional" />
       </div>
-
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>

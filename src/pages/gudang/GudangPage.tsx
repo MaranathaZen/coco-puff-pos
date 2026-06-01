@@ -1,7 +1,9 @@
 // src/pages/gudang/GudangPage.tsx
 // CHANGELOG:
 // - Fix auto expand/collapse: hari ini auto expand, hari lain auto collapse
-//   (sebelumnya default expand semua karena `expandedGroups[key] !== false`)
+// - FIX avg_cost isolation: production_stock & stock (toko) punya avg_cost sendiri
+//   tidak ikut berubah saat gudang beli lagi dengan harga berbeda
+// - FIX to_store: mutasi gudang→toko sekarang update db.stock dengan material_id
 
 import { useState, useEffect, createContext, useContext, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -81,11 +83,10 @@ function groupKey(d: string, mode: 'hari'|'bulan'|'tahun') {
   return d.slice(0,4)
 }
 
-// ── Default expand logic: hari ini = expand, lainnya = collapse ──
 function isExpanded(key: string, expandedGroups: Record<string, boolean>): boolean {
   const today = new Date().toISOString().slice(0,10)
   if (expandedGroups[key] !== undefined) return expandedGroups[key]
-  return key === today  // auto expand hanya hari ini
+  return key === today
 }
 
 const ToolbarCtx = createContext<(node: React.ReactNode) => void>(() => {})
@@ -213,6 +214,8 @@ function GroupHeader({ label, total, count, expanded, onToggle }: {
 
 // ── STOK ──────────────────────────────────────────────────────
 function StokTab({ userId }: { userId: string }) {
+  const { user } = useAuthStore()
+  const isOwnerManager = user?.role === 'owner' || user?.role === 'manager'
   const setToolbar = useContext(ToolbarCtx)
   const [showForm,    setShowForm]    = useState(false)
   const [showOpening, setShowOpening] = useState(false)
@@ -221,6 +224,7 @@ function StokTab({ userId }: { userId: string }) {
   const [search,      setSearch]      = useState('')
 
   useEffect(() => {
+    if (!isOwnerManager) { setToolbar(null); return }
     setToolbar(
       <div className="flex items-center gap-2">
         <button onClick={() => setShowOpening(true)}
@@ -234,7 +238,7 @@ function StokTab({ userId }: { userId: string }) {
       </div>
     )
     return () => setToolbar(null)
-  }, [])
+  }, [isOwnerManager])
 
   const allItems = useLiveQuery(async () => {
     const mats   = await db.materials.toArray()
@@ -251,7 +255,7 @@ function StokTab({ userId }: { userId: string }) {
   }, [allItems, filter, search])
 
   const lowStock   = items.filter(i => i.qty <= i.min_stock && i.min_stock > 0 && i.is_active)
-  const totalNilai = items.reduce((s, i) => s + i.qty * (i.unit_cost || 0), 0)
+  const totalNilai = items.reduce((s, i) => s + i.qty * (i.avg_cost || i.unit_cost || 0), 0)
 
   return (
     <div className="p-4 space-y-3">
@@ -290,25 +294,29 @@ function StokTab({ userId }: { userId: string }) {
 
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {items.map((item, idx) => (
-          <button key={item.id} onClick={() => isOwnerManager && (setEditMat(item as any), setShowForm(true))}
+          <button key={item.id}
+            onClick={() => isOwnerManager && (setEditMat(item as any), setShowForm(true))}
             className={`w-full flex items-center px-4 py-3 text-left ${isOwnerManager ? 'active:bg-gray-50 cursor-pointer' : 'cursor-default'} ${idx !== 0 ? 'border-t border-gray-50' : ''} ${!item.is_active ? 'opacity-40' : ''}`}>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
               <p className="text-xs text-gray-400 mt-0.5">
-                {KATEGORI_GUDANG.find(k => k.value === item.category)?.label || item.category} · Avg {formatRupiah((item as any).avg_cost || item.unit_cost)}/{item.unit}
+                {KATEGORI_GUDANG.find(k => k.value === item.category)?.label || item.category}
+                {' · '}Avg {formatRupiah(item.avg_cost || item.unit_cost)}/{item.unit}
               </p>
             </div>
             <div className="text-right mr-3">
               <p className={`text-sm font-semibold ${item.qty <= item.min_stock && item.min_stock > 0 ? 'text-red-500' : 'text-gray-900'}`}>
                 {item.qty} <span className="font-normal text-gray-400 text-xs">{item.unit}</span>
               </p>
-              <p className="text-xs text-gray-400">{formatRupiah(item.qty * (item.unit_cost || 0))}</p>
+              <p className="text-xs text-gray-400">{formatRupiah(item.qty * (item.avg_cost || item.unit_cost || 0))}</p>
             </div>
             <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
           </button>
         ))}
         {items.length === 0 && (
-          <div className="py-12 text-center text-sm text-gray-400">{search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada data bahan'}</div>
+          <div className="py-12 text-center text-sm text-gray-400">
+            {search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada data bahan'}
+          </div>
         )}
       </div>
 
@@ -749,7 +757,7 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
       const updated = { ...item, [f]: v }
       if (f === 'material_id') {
         const mat = materials?.find(m => m.id === v)
-        if (mat?.unit_cost) updated.unit_cost = String(mat.unit_cost)
+        if (mat?.unit_cost) updated.unit_cost = String(mat.avg_cost || mat.unit_cost)
       }
       return updated
     }))
@@ -767,8 +775,8 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
         await db.warehouse_stock.put(wsd)
         await supabase.from('warehouse_stock').upsert(wsd)
         if (cost > 0) {
-          await db.materials.update(item.material_id, { unit_cost: cost, updated_at: now() })
-          await supabase.from('materials').update({ unit_cost: cost }).eq('id', item.material_id)
+          await db.materials.update(item.material_id, { unit_cost: cost, avg_cost: cost, updated_at: now() })
+          await supabase.from('materials').update({ unit_cost: cost, avg_cost: cost }).eq('id', item.material_id)
         }
         const mutId = generateId()
         const mut = { id: mutId, mutation_type: 'opening_stock', destination_name: 'Saldo Awal', notes: notes || 'Stok awal', status: 'confirmed', created_by: 'system', created_at: `${date}T00:00:00.000Z`, confirmed_at: now(), confirmed_by: 'system' }
@@ -849,7 +857,7 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
     setItems(p => p.map((item, idx) => {
       if (idx !== i) return item
       const u = { ...item, [f]: v }
-      if (f === 'material_id') { const m = materials?.find(m => m.id === v); if (m?.unit_cost) u.unit_cost = String(m.unit_cost) }
+      if (f === 'material_id') { const m = materials?.find(m => m.id === v); if (m?.unit_cost) u.unit_cost = String(m.avg_cost || m.unit_cost) }
       if ((f === 'pack_price' || f === 'pack_qty') && u.pack_mode) {
         const pp = Number(f === 'pack_price' ? v : u.pack_price), pq = Number(f === 'pack_qty' ? v : u.pack_qty)
         if (pp > 0 && pq > 0) u.unit_cost = String((pp/pq).toFixed(4))
@@ -873,18 +881,33 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
         const pi = { id: generateId(), purchase_id: purchId, material_id: item.material_id, qty: Number(item.qty), unit_cost: uc, subtotal: Number(item.qty) * uc, qty_returned: 0 }
         await db.purchase_items.add(pi)
         await supabase.from('purchase_items').insert(pi)
+        // Update stok gudang
         const ws  = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
         const wsd: WarehouseStock = { id: ws?.id || generateId(), material_id: item.material_id, qty_on_hand: (ws?.qty_on_hand || 0) + Number(item.qty), last_updated: now() }
         await db.warehouse_stock.put(wsd)
         await supabase.from('warehouse_stock').upsert(wsd)
+        // Update moving average HANYA di gudang (materials) — produksi & toko tidak ikut berubah
         if (uc > 0) {
           const mat = await db.materials.get(item.material_id)
           if (mat) {
-            const prevQty = (mat as any).total_qty_purchased || 0, prevCost = (mat as any).total_cost_purchased || 0
-            const newQty = prevQty + Number(item.qty), newCost = prevCost + Number(item.qty) * uc
-            const avg = newQty > 0 ? newCost / newQty : uc
-            await db.materials.update(item.material_id, { unit_cost: avg, avg_cost: avg, total_qty_purchased: newQty, total_cost_purchased: newCost, updated_at: now() })
-            await supabase.from('materials').update({ unit_cost: avg, avg_cost: avg, total_qty_purchased: newQty, total_cost_purchased: newCost }).eq('id', item.material_id)
+            const prevQty  = mat.total_qty_purchased  || 0
+            const prevCost = mat.total_cost_purchased || 0
+            const newQty   = prevQty + Number(item.qty)
+            const newCost  = prevCost + Number(item.qty) * uc
+            const avg      = newQty > 0 ? newCost / newQty : uc
+            await db.materials.update(item.material_id, {
+              unit_cost: avg,
+              avg_cost: avg,
+              total_qty_purchased: newQty,
+              total_cost_purchased: newCost,
+              updated_at: now(),
+            })
+            await supabase.from('materials').update({
+              unit_cost: avg,
+              avg_cost: avg,
+              total_qty_purchased: newQty,
+              total_cost_purchased: newCost,
+            }).eq('id', item.material_id)
           }
         }
       }
@@ -941,7 +964,7 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
                       <div><p className="text-[10px] text-gray-400 mb-1">Isi/pack ({mat?.unit})</p><input className="input text-sm" type="number" value={item.pack_qty} onChange={e => updateItem(i,'pack_qty',e.target.value)} /></div>
                     </div>
                     {uc > 0 && <p className="text-xs text-blue-600">= {formatRupiah(uc)}/{mat?.unit}</p>}
-                    <div><p className="text-[10px] text-gray-400 mb-1">Qty ({mat?.unit})</p><input className="input text-sm" type="number" value={item.qty} onChange={e => updateItem(i,'qty',e.target.value)} /></div>
+                    <div><p className="text-[10px] text-gray-400 mb-1">Qty total ({mat?.unit})</p><input className="input text-sm" type="number" value={item.qty} onChange={e => updateItem(i,'qty',e.target.value)} /></div>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-2">
@@ -983,27 +1006,55 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
 
   const totalNilai = useMemo(() => items.reduce((s, item) => {
     const mat = materials?.find(m => m.id === item.material_id)
-    return s + Number(item.qty) * (mat?.unit_cost || 0)
+    return s + Number(item.qty) * (mat?.avg_cost || mat?.unit_cost || 0)
   }, 0), [items, materials])
 
   async function handleSave() {
     const valid = items.filter(i => i.material_id && Number(i.qty) > 0)
     if (!valid.length) return toast.error('Tambahkan minimal 1 item')
+    if (type === 'to_store' && !destId) return toast.error('Pilih toko tujuan')
+
     setSaving(true)
     try {
-      const destName = type === 'to_production' ? 'Produksi' : type === 'to_store' ? stores?.find(s => s.id === destId)?.name || '' : type === 'to_partner' ? partners?.find(p => p.id === destId)?.name || '' : type === 'internal_use' ? 'Pemakaian Internal' : ''
-      const mutId = generateId(), mutNumber = await generateMutationNumber()
-      const mut: any = { id: mutId, mutation_number: mutNumber, mutation_type: type, destination_id: destId || undefined, destination_name: destName || undefined, notes: notes || undefined, status: 'confirmed', created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId }
+      const destName =
+        type === 'to_production' ? 'Produksi' :
+        type === 'to_store'      ? stores?.find(s => s.id === destId)?.name || '' :
+        type === 'to_partner'    ? partners?.find(p => p.id === destId)?.name || '' :
+        type === 'internal_use'  ? 'Pemakaian Internal' : ''
+
+      const mutId = generateId()
+      const mutNumber = await generateMutationNumber()
+      const mut: any = {
+        id: mutId, mutation_number: mutNumber, mutation_type: type,
+        destination_id: destId || undefined, destination_name: destName || undefined,
+        notes: notes || undefined, status: 'confirmed',
+        created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId,
+      }
       await db.warehouse_mutations.add(mut)
       await supabase.from('warehouse_mutations').insert(mut)
+
       for (const item of valid) {
-        const mat = materials?.find(m => m.id === item.material_id)
-        const mi: WarehouseMutationItem = { id: generateId(), mutation_id: mutId, material_id: item.material_id, qty: Number(item.qty), unit_cost: mat?.unit_cost || 0 }
+        const mat = await db.materials.get(item.material_id)
+
+        // Snapshot avg_cost gudang saat mutasi dibuat
+        // Nilai ini TIDAK akan berubah meski gudang beli lagi dengan harga berbeda
+        const snapshotCost = mat?.avg_cost || mat?.unit_cost || 0
+
+        // Simpan mutation item dengan snapshot cost
+        const mi: WarehouseMutationItem = {
+          id: generateId(), mutation_id: mutId,
+          material_id: item.material_id, qty: Number(item.qty),
+          unit_cost: snapshotCost,
+        }
         await db.warehouse_mutation_items.add(mi)
         await supabase.from('warehouse_mutation_items').insert(mi)
+
+        // Kurangi stok gudang
         const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
         if (ws) {
-          const newQty = type === 'adjustment' ? ws.qty_on_hand + Number(item.qty) : Math.max(0, ws.qty_on_hand - Number(item.qty))
+          const newQty = type === 'adjustment'
+            ? ws.qty_on_hand + Number(item.qty)
+            : Math.max(0, ws.qty_on_hand - Number(item.qty))
           await db.warehouse_stock.update(ws.id, { qty_on_hand: newQty, last_updated: now() })
           await supabase.from('warehouse_stock').update({ qty_on_hand: newQty }).eq('id', ws.id)
         } else if (type === 'adjustment') {
@@ -1011,17 +1062,84 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
           await db.warehouse_stock.add(wsd)
           await supabase.from('warehouse_stock').insert(wsd)
         }
+
+        // ── TUJUAN: PRODUKSI ────────────────────────────────
         if (type === 'to_production') {
-          const ps  = await db.production_stock.where('material_id').equals(item.material_id).first()
-          const psd: any = { id: ps?.id || generateId(), material_id: item.material_id, qty_on_hand: (ps?.qty_on_hand || 0) + Number(item.qty), last_updated: now() }
+          const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
+          const prevQty  = ps?.qty_on_hand || 0
+          const prevCost = ps?.avg_cost    || 0
+          const inQty    = Number(item.qty)
+          // Moving average produksi dihitung sendiri — independent dari gudang
+          const newTotalQty = prevQty + inQty
+          const newAvgCost  = newTotalQty > 0
+            ? (prevQty * prevCost + inQty * snapshotCost) / newTotalQty
+            : snapshotCost
+          const psd: any = {
+            id: ps?.id || generateId(),
+            material_id: item.material_id,
+            qty_on_hand: newTotalQty,
+            avg_cost: newAvgCost,
+            last_updated: now(),
+          }
           await db.production_stock.put(psd)
           await supabase.from('production_stock').upsert(psd)
         }
+
+        // ── TUJUAN: TOKO ────────────────────────────────────
+        if (type === 'to_store' && destId) {
+          // Cari stok toko: coba by material_id dulu (data baru), fallback filter manual
+          const existingStock = await db.stock
+            .where('material_id')
+            .equals(item.material_id)
+            .filter(s => s.store_id === destId)
+            .first()
+            || await db.stock
+              .filter(s => s.store_id === destId && (s as any).material_id === item.material_id)
+              .first()
+
+          const prevQty  = existingStock?.qty_on_hand ?? 0
+          const prevCost = (existingStock as any)?.avg_cost ?? 0
+          const inQty    = Number(item.qty)
+          // Moving average toko dihitung sendiri — independent dari gudang
+          const newTotalQty = prevQty + inQty
+          const newAvgCost  = newTotalQty > 0
+            ? (prevQty * prevCost + inQty * snapshotCost) / newTotalQty
+            : snapshotCost
+
+          if (existingStock) {
+            await db.stock.update(existingStock.id, {
+              qty_on_hand: newTotalQty,
+              avg_cost: newAvgCost,
+              last_updated: now(),
+            } as any)
+            await supabase.from('stock')
+              .update({ qty_on_hand: newTotalQty, avg_cost: newAvgCost, last_updated: now() })
+              .eq('id', existingStock.id)
+          } else {
+            // Buat record baru — ingredient_id diisi material_id sebagai jembatan
+            const newStock: any = {
+              id: generateId(),
+              store_id: destId,
+              ingredient_id: item.material_id,   // jembatan: pakai material_id
+              material_id: item.material_id,
+              qty_on_hand: inQty,
+              avg_cost: snapshotCost,
+              last_updated: now(),
+            }
+            await db.stock.add(newStock)
+            await supabase.from('stock').insert(newStock)
+          }
+        }
       }
+
       toast.success('Mutasi dicatat')
       onClose()
-    } catch (e) { console.error(e); toast.error('Gagal menyimpan') }
-    finally { setSaving(false) }
+    } catch (e) {
+      console.error('[MutasiForm]', e)
+      toast.error('Gagal menyimpan: ' + String((e as any)?.message || e))
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -1029,37 +1147,75 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
       <div>
         <Label required>Tujuan</Label>
         <div className="grid grid-cols-2 gap-2">
-          {([{v:'to_production',l:'Produksi'},{v:'to_store',l:'ke Toko'},{v:'to_partner',l:'Franchise'},{v:'internal_use',l:'Pemakaian'},{v:'adjustment',l:'Retur'}] as const).map(t => (
-            <button key={t.v} onClick={() => setType(t.v)}
+          {([
+            {v:'to_production',l:'Produksi'},
+            {v:'to_store',     l:'ke Toko'},
+            {v:'to_partner',   l:'Franchise'},
+            {v:'internal_use', l:'Pemakaian'},
+            {v:'adjustment',   l:'Retur'},
+          ] as const).map(t => (
+            <button key={t.v} onClick={() => { setType(t.v); setDest('') }}
               className={`py-2.5 rounded-xl text-sm font-medium border ${type === t.v ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>{t.l}</button>
           ))}
         </div>
       </div>
-      {type === 'to_store' && (<div><Label required>Toko Tujuan</Label><select className="input" value={destId} onChange={e => setDest(e.target.value)}><option value="">Pilih toko</option>{stores?.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>)}
-      {type === 'to_partner' && (<div><Label required>Franchise</Label><select className="input" value={destId} onChange={e => setDest(e.target.value)}><option value="">Pilih franchise</option>{partners?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>)}
+      {type === 'to_store' && (
+        <div>
+          <Label required>Toko Tujuan</Label>
+          <select className="input" value={destId} onChange={e => setDest(e.target.value)}>
+            <option value="">Pilih toko</option>
+            {stores?.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+      )}
+      {type === 'to_partner' && (
+        <div>
+          <Label required>Franchise</Label>
+          <select className="input" value={destId} onChange={e => setDest(e.target.value)}>
+            <option value="">Pilih franchise</option>
+            {partners?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+      )}
       <div>
         <Label required>Item</Label>
         <div className="space-y-2">
           {items.map((item, i) => {
             const mat = materials?.find(m => m.id === item.material_id)
+            const displayCost = mat?.avg_cost || mat?.unit_cost || 0
             return (
               <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
-                <select className="input text-sm" value={item.material_id} onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,material_id:e.target.value} : x))}>
+                <select className="input text-sm" value={item.material_id}
+                  onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,material_id:e.target.value} : x))}>
                   <option value="">Pilih bahan</option>
                   {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
                 </select>
                 <div className="flex items-center gap-2">
-                  <input className="input text-sm flex-1" type="number" placeholder={`Qty (${mat?.unit || ''})`} value={item.qty} onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,qty:e.target.value} : x))} />
-                  {mat && item.qty && <span className="text-xs text-gray-400 flex-shrink-0">{formatRupiah(Number(item.qty) * mat.unit_cost)}</span>}
+                  <input className="input text-sm flex-1" type="number" placeholder={`Qty (${mat?.unit || ''})`}
+                    value={item.qty}
+                    onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,qty:e.target.value} : x))} />
+                  {mat && item.qty && (
+                    <span className="text-xs text-gray-400 flex-shrink-0">
+                      {formatRupiah(Number(item.qty) * displayCost)}
+                      <span className="block text-gray-300">@ {formatRupiah(displayCost)}/{mat.unit}</span>
+                    </span>
+                  )}
                 </div>
-                {items.length > 1 && <button onClick={() => setItems(p => p.filter((_,idx) => idx !== i))} className="text-xs text-red-400">Hapus item</button>}
+                {items.length > 1 && (
+                  <button onClick={() => setItems(p => p.filter((_,idx) => idx !== i))} className="text-xs text-red-400">Hapus item</button>
+                )}
               </div>
             )
           })}
         </div>
         <button onClick={() => setItems(p => [...p, {material_id:'',qty:''}])} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
       </div>
-      {totalNilai > 0 && <div className="flex items-center justify-between py-2 bg-gray-50 rounded-xl px-3"><span className="text-sm text-gray-600">Total Nilai</span><span className="text-sm font-semibold">{formatRupiah(totalNilai)}</span></div>}
+      {totalNilai > 0 && (
+        <div className="flex items-center justify-between py-2 bg-gray-50 rounded-xl px-3">
+          <span className="text-sm text-gray-600">Total Nilai</span>
+          <span className="text-sm font-semibold">{formatRupiah(totalNilai)}</span>
+        </div>
+      )}
       <div><Label>Catatan</Label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opsional" /></div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
@@ -1086,7 +1242,13 @@ function BiayaForm({ userId, onClose }: { userId: string; onClose: () => void })
     setSaving(true)
     try {
       const expNumber = await generateExpenseNumber()
-      const data: any = { id: generateId(), expense_number: expNumber, name: name.trim(), amount: Number(amount), expense_date: now().slice(0,10), category, payment_method: payMethod, transfer_to: transferTo || undefined, due_date: dueDate || undefined, notes: notes || undefined, created_by: userId, created_at: now() }
+      const data: any = {
+        id: generateId(), expense_number: expNumber, name: name.trim(),
+        amount: Number(amount), expense_date: now().slice(0,10),
+        category, payment_method: payMethod,
+        transfer_to: transferTo || undefined, due_date: dueDate || undefined,
+        notes: notes || undefined, created_by: userId, created_at: now(),
+      }
       await db.warehouse_expenses.add(data)
       await supabase.from('warehouse_expenses').insert(data)
       toast.success('Biaya dicatat')
@@ -1109,4 +1271,23 @@ function BiayaForm({ userId, onClose }: { userId: string; onClose: () => void })
               <p className={`text-[10px] leading-tight mt-0.5 ${category === c.value ? 'text-gray-300' : 'text-gray-400'}`}>{c.desc}</p>
             </button>
           ))}
-        </di
+        </div>
+      </div>
+      <div><Label required>Metode Bayar</Label>
+        <div className="flex gap-2">
+          {METODE_BAYAR.map(m => (
+            <button key={m.value} onClick={() => setPay(m.value)}
+              className={`flex-1 py-2 rounded-xl text-xs font-medium border ${payMethod === m.value ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>{m.label}</button>
+          ))}
+        </div>
+      </div>
+      {payMethod === 'transfer' && <div><Label>Transfer ke</Label><input className="input" value={transferTo} onChange={e => setTrans(e.target.value)} placeholder="BCA 1234567890" /></div>}
+      {payMethod === 'kredit'   && <div><Label>Jatuh Tempo</Label><input className="input" type="date" value={dueDate} onChange={e => setDue(e.target.value)} /></div>}
+      <div><Label>Catatan</Label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} /></div>
+      <div className="flex gap-3">
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
+      </div>
+    </Modal>
+  )
+}

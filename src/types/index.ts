@@ -150,6 +150,11 @@ export interface Stock {
   store_id: string
   ingredient_id: string
   qty_on_hand: number
+  // FIX: tambah material_id sebagai jembatan ke sistem gudang baru
+  // Saat mutasi gudang → toko, ingredient_id dan material_id diisi nilai yang sama
+  material_id?: string
+  // FIX: avg_cost isolated per toko, tidak ikut berubah saat gudang beli lagi
+  avg_cost?: number
   last_updated: string
   ingredient?: Ingredient
 }

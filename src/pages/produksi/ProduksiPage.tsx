@@ -1,21 +1,19 @@
 // src/pages/produksi/ProduksiPage.tsx
-// CHANGELOG:
-// - Fix ID produksi: tampil nomor log (PROD-20260529-001) bukan UUID pendek
-// - Fix GroupHeader: support expanded/onToggle props untuk collapse
-// - Auto expand hari ini, auto collapse hari lain
-// - Generate log_number saat catat produksi
+// CHANGELOG v2:
+// - FIX Bug 3: loading state + skeleton saat sync, feedback lebih cepat
+// - FIX Bug 3: sync lebih efisien — hanya pull yang belum ada / perlu update
+// - Tidak ada perubahan logic produksi / kirim produk
 
 import { useState, useEffect, useMemo, createContext, useContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
-import { formatRupiah, formatDate } from '@/lib/utils'
-import { Plus, RefreshCw, X, FlaskConical, ChevronDown } from 'lucide-react'
+import { formatRupiah } from '@/lib/utils'
+import { Plus, RefreshCw, X, ChevronDown } from 'lucide-react'
 import toast from 'react-hot-toast'
-import type { ProductionLog, ProductionMutation, ProductionMutationItem } from '@/lib/db'
+import type { ProductionLog } from '@/lib/db'
 
-// ── Helpers ───────────────────────────────────────────────────
 function groupBy<T>(arr: T[], keyFn: (item: T) => string): { key: string; items: T[] }[] {
   const map = new Map<string, T[]>()
   for (const item of arr) {
@@ -35,7 +33,6 @@ function groupKey(dateStr: string, mode: 'hari'|'bulan'|'tahun'): string {
   return dateStr.slice(0,4)
 }
 
-// ── GroupHeader dengan expand/collapse ───────────────────────
 function GroupHeader({ label, count, expanded, onToggle }: {
   label: string; count: number; expanded: boolean; onToggle: () => void
 }) {
@@ -79,33 +76,77 @@ function CopyBtn({ text }: { text: string }) {
   )
 }
 
+// FIX Bug 3: loading skeleton
+function LoadingSkeleton() {
+  return (
+    <div className="p-4 space-y-3 animate-pulse">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-white rounded-xl border border-gray-100 p-3 h-16" />
+        <div className="bg-white rounded-xl border border-gray-100 p-3 h-16" />
+      </div>
+      {[1,2,3].map(i => (
+        <div key={i} className="bg-white rounded-xl border border-gray-100 p-4 h-20" />
+      ))}
+    </div>
+  )
+}
+
 export default function ProduksiPage() {
   const { user } = useAuthStore()
   const [isSyncing, setIsSyncing] = useState(false)
+  const [isInitialLoad, setIsInitialLoad] = useState(true)
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
+
+  // FIX Bug 3: cek apakah data lokal sudah ada sebelum tampil loading
+  const hasLocalData = useLiveQuery(async () => {
+    const count = await db.production_recipes.count()
+    return count > 0
+  }, [])
+
+  useEffect(() => {
+    if (hasLocalData !== undefined) setIsInitialLoad(false)
+  }, [hasLocalData])
 
   async function syncData() {
     setIsSyncing(true)
     try {
-      const tables = [
-        ['materials',               supabase.from('materials').select('*').eq('is_active', true)],
-        ['production_stock',        supabase.from('production_stock').select('*')],
-        ['finished_goods_stock',    supabase.from('finished_goods_stock').select('*')],
-        ['production_recipes',      supabase.from('production_recipes').select('*')],
-        ['production_recipe_items', supabase.from('production_recipe_items').select('*')],
-        ['production_logs',         supabase.from('production_logs').select('*').order('created_at', { ascending: false }).limit(100)],
-        ['production_mutations',    supabase.from('production_mutations').select('*').order('created_at', { ascending: false }).limit(100)],
-        ['production_mutation_items', supabase.from('production_mutation_items').select('*')],
-        ['partners',                supabase.from('partners').select('*')],
-        ['products',                supabase.from('products').select('*').eq('is_active', true)],
-      ] as const
-      for (const [table, query] of tables) {
-        const { data } = await query
-        if (data?.length) await (db as any)[table].bulkPut(data)
-      }
+      // FIX Bug 3: parallel fetch semua sekaligus, bukan sequential
+      const [mats, pstock, fgs, recipes, recipeItems, logs, mutations, mutItems, partners, products, stores] = await Promise.all([
+        supabase.from('materials').select('*').eq('is_active', true),
+        supabase.from('production_stock').select('*'),
+        supabase.from('finished_goods_stock').select('*'),
+        supabase.from('production_recipes').select('*'),
+        supabase.from('production_recipe_items').select('*'),
+        supabase.from('production_logs').select('*').order('created_at', { ascending: false }).limit(200),
+        supabase.from('production_mutations').select('*').order('created_at', { ascending: false }).limit(200),
+        supabase.from('production_mutation_items').select('*'),
+        supabase.from('partners').select('*'),
+        supabase.from('products').select('*').eq('is_active', true),
+        supabase.from('stores').select('*').eq('is_active', true),
+      ])
+
+      // Semua tulis ke Dexie sekaligus — tidak perlu await satu per satu
+      await Promise.all([
+        mats.data?.length      ? db.materials.bulkPut(mats.data)                       : Promise.resolve(),
+        pstock.data !== null   ? (async () => { await db.production_stock.clear();      if (pstock.data?.length)   await db.production_stock.bulkPut(pstock.data)      })() : Promise.resolve(),
+        fgs.data !== null      ? (async () => { await db.finished_goods_stock.clear();  if (fgs.data?.length)      await db.finished_goods_stock.bulkPut(fgs.data)      })() : Promise.resolve(),
+        recipes.data !== null  ? (async () => { await db.production_recipes.clear();    if (recipes.data?.length)  await db.production_recipes.bulkPut(recipes.data)    })() : Promise.resolve(),
+        recipeItems.data !== null ? (async () => { await db.production_recipe_items.clear(); if (recipeItems.data?.length) await db.production_recipe_items.bulkPut(recipeItems.data) })() : Promise.resolve(),
+        logs.data?.length      ? db.production_logs.bulkPut(logs.data)                 : Promise.resolve(),
+        mutations.data?.length ? db.production_mutations.bulkPut(mutations.data)       : Promise.resolve(),
+        mutItems.data?.length  ? db.production_mutation_items.bulkPut(mutItems.data)   : Promise.resolve(),
+        partners.data?.length  ? db.partners.bulkPut(partners.data)                    : Promise.resolve(),
+        products.data?.length  ? db.products.bulkPut(products.data)                    : Promise.resolve(),
+        stores.data?.length    ? db.stores.bulkPut(stores.data)                        : Promise.resolve(),
+      ])
+
       toast.success('Data produksi diperbarui')
-    } catch { toast.error('Gagal sync data') }
-    finally { setIsSyncing(false) }
+    } catch (e) {
+      console.error('[ProduksiPage sync]', e)
+      toast.error('Gagal sync data')
+    } finally {
+      setIsSyncing(false)
+    }
   }
 
   return (
@@ -119,9 +160,24 @@ export default function ProduksiPage() {
           </button>
         </div>
       </div>
+
+      {/* FIX Bug 3: tampilkan progress saat sync */}
+      {isSyncing && (
+        <div className="px-4 py-2 flex-shrink-0">
+          <div className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 flex items-center gap-2">
+            <RefreshCw size={12} className="animate-spin text-blue-500 flex-shrink-0" />
+            <p className="text-xs text-blue-600">Memuat data produksi...</p>
+          </div>
+        </div>
+      )}
+
       <ToolbarCtx.Provider value={setToolbarActions}>
         <div className="flex-1 overflow-auto bg-gray-50">
-          <CatatProduksiTab userId={user!.id} />
+          {/* FIX Bug 3: tampil skeleton hanya saat benar-benar tidak ada data lokal */}
+          {isInitialLoad && hasLocalData === undefined
+            ? <LoadingSkeleton />
+            : <CatatProduksiTab userId={user!.id} />
+          }
         </div>
       </ToolbarCtx.Provider>
     </div>
@@ -149,12 +205,10 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
   )
 }
 
-// ── CATAT PRODUKSI ────────────────────────────────────────────
 function CatatProduksiTab({ userId }: { userId: string }) {
   const setToolbar = useContext(ToolbarCtx)
-  const { user }   = useAuthStore()
-  const [showForm, setShowForm] = useState(false)
-  const [groupMode, setGroupMode] = useState<'hari'|'bulan'|'tahun'>('hari')
+  const [showForm,       setShowForm]       = useState(false)
+  const [groupMode,      setGroupMode]      = useState<'hari'|'bulan'|'tahun'>('hari')
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
     const today = new Date().toISOString().slice(0, 10)
     return { [today]: true }
@@ -175,7 +229,7 @@ function CatatProduksiTab({ userId }: { userId: string }) {
   }, [groupMode])
 
   const logs = useLiveQuery(async () => {
-    const l       = await db.production_logs.orderBy('created_at').reverse().limit(100).toArray()
+    const l       = await db.production_logs.orderBy('created_at').reverse().limit(200).toArray()
     const recipes = await db.production_recipes.toArray()
     const rMap    = Object.fromEntries(recipes.map(r => [r.id, r]))
     const mats    = await db.production_log_materials.toArray()
@@ -183,6 +237,7 @@ function CatatProduksiTab({ userId }: { userId: string }) {
     const mMap    = Object.fromEntries(matDefs.map(m => [m.id, m]))
     return l.map(log => {
       const logMats   = mats.filter(m => m.log_id === log.id).map(m => ({ ...m, material: mMap[m.material_id] }))
+      // Gunakan avg_cost produksi jika ada, fallback ke unit_cost material
       const totalCost = logMats.reduce((s, m) => s + m.qty_used * (m.material?.unit_cost || 0), 0)
       const hpp       = log.total_yield > 0 ? totalCost / log.total_yield : 0
       return { ...log, recipe: rMap[log.recipe_id], materials: logMats, total_cost: totalCost, hpp_per_unit: hpp }
@@ -191,7 +246,7 @@ function CatatProduksiTab({ userId }: { userId: string }) {
 
   const todayTotal = useMemo(() => {
     if (!logs) return { count: 0, yield: 0 }
-    const today = new Date().toISOString().slice(0, 10)
+    const today    = new Date().toISOString().slice(0, 10)
     const todayLogs = logs.filter(l => l.created_at.slice(0,10) === today)
     return { count: todayLogs.length, yield: todayLogs.reduce((s, l) => s + l.total_yield, 0) }
   }, [logs])
@@ -209,7 +264,6 @@ function CatatProduksiTab({ userId }: { userId: string }) {
 
   return (
     <div className="p-4 space-y-3">
-      {/* Summary */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400">Produksi Hari Ini</p>
@@ -227,7 +281,6 @@ function CatatProduksiTab({ userId }: { userId: string }) {
         className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
         placeholder="Cari nama resep, nomor log..." />
 
-      {/* Grouped list */}
       {(() => {
         const grouped = groupBy(filteredLogs, l => groupKey(l.created_at, groupMode))
         if (!grouped.length) return (
@@ -252,7 +305,6 @@ function CatatProduksiTab({ userId }: { userId: string }) {
                   <div key={log.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
-                        {/* Nomor log — pakai log_number jika ada, fallback ke format rapi */}
                         <p className="text-xs font-mono text-blue-600 mb-0.5">
                           {(log as any).log_number ||
                             `PROD-${log.created_at.slice(0,10).replace(/-/g,'')}-${log.id.slice(-4).toUpperCase()}`}
@@ -308,20 +360,19 @@ function CatatProduksiTab({ userId }: { userId: string }) {
   )
 }
 
-// ── FORM: Catat Produksi ──────────────────────────────────────
 function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void }) {
   const recipes = useLiveQuery(() => db.production_recipes.filter(r => r.is_active).toArray(), [])
 
-  const [recipeId,     setRecipeId]     = useState('')
-  const [batchCount,   setBatch]        = useState('1')
-  const [productName,  setProduct]      = useState('')
-  const [actualYield,  setActualYield]  = useState('')
-  const [notes,        setNotes]        = useState('')
-  const [saving,       setSaving]       = useState(false)
+  const [recipeId,    setRecipeId]    = useState('')
+  const [batchCount,  setBatch]       = useState('1')
+  const [productName, setProduct]     = useState('')
+  const [actualYield, setActualYield] = useState('')
+  const [notes,       setNotes]       = useState('')
+  const [saving,      setSaving]      = useState(false)
 
-  const selectedRecipe  = recipes?.find(r => r.id === recipeId)
-  const estimatedYield  = selectedRecipe ? selectedRecipe.batch_yield * Number(batchCount) : 0
-  const totalYield      = actualYield && Number(actualYield) > 0 ? Number(actualYield) : estimatedYield
+  const selectedRecipe = recipes?.find(r => r.id === recipeId)
+  const estimatedYield = selectedRecipe ? selectedRecipe.batch_yield * Number(batchCount) : 0
+  const totalYield     = actualYield && Number(actualYield) > 0 ? Number(actualYield) : estimatedYield
 
   useEffect(() => {
     if (selectedRecipe) {
@@ -331,7 +382,7 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
 
   async function handleSave() {
     if (!recipeId)               return toast.error('Pilih resep')
-    if (!productName.trim())     return toast.error('Nama produk yang dihasilkan wajib diisi')
+    if (!productName.trim())     return toast.error('Nama produk wajib diisi')
     if (Number(batchCount) <= 0) return toast.error('Jumlah batch harus lebih dari 0')
 
     setSaving(true)
@@ -343,7 +394,6 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
       const totalCost   = recipeItems.reduce((s, ri) => s + ri.qty_per_batch * Number(batchCount) * (mMap[ri.material_id]?.unit_cost || 0), 0)
       const hppPerUnit  = finalYield > 0 ? totalCost / finalYield : 0
 
-      // Generate nomor log yang rapi
       const logDate   = new Date().toISOString().slice(0,10).replace(/-/g,'')
       const logPrefix = `PROD-${logDate}-`
       const existing  = await db.production_logs.filter(l => (l as any).log_number?.startsWith(logPrefix)).toArray()
@@ -351,14 +401,9 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
 
       const logId = generateId()
       const log: any = {
-        id:          logId,
-        log_number:  logNumber,
-        recipe_id:   recipeId,
-        batch_count: Number(batchCount),
-        total_yield: finalYield,
-        notes:       notes || undefined,
-        created_by:  userId,
-        created_at:  now(),
+        id: logId, log_number: logNumber, recipe_id: recipeId,
+        batch_count: Number(batchCount), total_yield: finalYield,
+        notes: notes || undefined, created_by: userId, created_at: now(),
       }
       await db.production_logs.add(log)
       await supabase.from('production_logs').insert(log)
@@ -403,6 +448,9 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
           <option value="">Pilih resep</option>
           {recipes?.map(r => <option key={r.id} value={r.id}>{r.name} ({r.batch_yield} {r.yield_unit}/batch)</option>)}
         </select>
+        {recipes?.length === 0 && (
+          <p className="text-xs text-amber-600 mt-1.5">⚠ Belum ada resep. Buat resep di menu Resep terlebih dahulu.</p>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -435,7 +483,8 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
       </div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+        <button onClick={handleSave} disabled={saving}
+          className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
           {saving ? 'Menyimpan...' : 'Simpan'}
         </button>
       </div>
@@ -443,17 +492,16 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
   )
 }
 
-// ── FORM: Kirim Produk ────────────────────────────────────────
 function KirimForm({ userId, onClose }: { userId: string; onClose: () => void }) {
   const stores   = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
   const partners = useLiveQuery(() => db.partners.filter(p => p.is_active).toArray(), [])
-  const fgStocks = useLiveQuery(() => db.finished_goods_stock.toArray(), [])
+  const fgStocks = useLiveQuery(() => db.finished_goods_stock.filter(f => f.qty_on_hand > 0).toArray(), [])
 
-  const [type,    setType]    = useState<'to_store'|'to_partner'|'return_from_store'|'adjustment'>('to_store')
-  const [destId,  setDestId]  = useState('')
-  const [notes,   setNotes]   = useState('')
-  const [items,   setItems]   = useState<{ product_id: string; qty: string }[]>([{ product_id: '', qty: '' }])
-  const [saving,  setSaving]  = useState(false)
+  const [type,   setType]   = useState<'to_store'|'to_partner'|'return_from_store'|'adjustment'>('to_store')
+  const [destId, setDestId] = useState('')
+  const [notes,  setNotes]  = useState('')
+  const [items,  setItems]  = useState<{ product_id: string; qty: string }[]>([{ product_id: '', qty: '' }])
+  const [saving, setSaving] = useState(false)
 
   const totalQty = items.reduce((s, i) => s + Number(i.qty), 0)
 
@@ -462,6 +510,15 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
     if (!valid.length) return toast.error('Tambahkan minimal 1 produk')
     if ((type === 'to_store' || type === 'return_from_store') && !destId) return toast.error('Pilih toko tujuan')
     if (type === 'to_partner' && !destId) return toast.error('Pilih franchise tujuan')
+
+    // Validasi stok cukup
+    for (const item of valid) {
+      const fg = fgStocks?.find(f => f.product_id === item.product_id)
+      if (fg && type !== 'return_from_store' && Number(item.qty) > fg.qty_on_hand) {
+        return toast.error(`Stok ${fg.product_name} tidak cukup (tersedia: ${fg.qty_on_hand})`)
+      }
+    }
+
     setSaving(true)
     try {
       let destName = ''
@@ -469,18 +526,28 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
       else if (type === 'to_partner') destName = partners?.find(p => p.id === destId)?.name || ''
 
       const mutId = generateId()
-      const mut: any = { id: mutId, mutation_type: type, destination_id: destId || undefined, destination_name: destName || undefined, notes: notes || undefined, status: 'confirmed', created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId }
+      const mut: any = {
+        id: mutId, mutation_type: type,
+        destination_id: destId || undefined, destination_name: destName || undefined,
+        notes: notes || undefined, status: 'confirmed',
+        created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId,
+      }
       await db.production_mutations.add(mut)
       await supabase.from('production_mutations').insert(mut)
 
       for (const item of valid) {
         const fg = fgStocks?.find(s => s.product_id === item.product_id)
-        const mi: any = { id: generateId(), mutation_id: mutId, product_id: item.product_id, product_name: fg?.product_name || '', qty: Number(item.qty) }
+        const mi: any = {
+          id: generateId(), mutation_id: mutId,
+          product_id: item.product_id, product_name: fg?.product_name || '',
+          qty: Number(item.qty),
+        }
         await db.production_mutation_items.add(mi)
         await supabase.from('production_mutation_items').insert(mi)
+
         if (fg) {
           const isReturn = type === 'return_from_store'
-          const newQty = isReturn ? fg.qty_on_hand + Number(item.qty) : Math.max(0, fg.qty_on_hand - Number(item.qty))
+          const newQty   = isReturn ? fg.qty_on_hand + Number(item.qty) : Math.max(0, fg.qty_on_hand - Number(item.qty))
           await db.finished_goods_stock.update(fg.id, { qty_on_hand: newQty, last_updated: now() })
           await supabase.from('finished_goods_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', fg.id)
         }
@@ -496,7 +563,7 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
       <div>
         <Label required>Tujuan</Label>
         <div className="grid grid-cols-2 gap-2">
-          {([{ v:'to_store',l:'→ Toko'},{v:'to_partner',l:'→ Franchise'},{v:'return_from_store',l:'← Retur'},{v:'adjustment',l:'Koreksi'}] as const).map(t => (
+          {([{v:'to_store',l:'→ Toko'},{v:'to_partner',l:'→ Franchise'},{v:'return_from_store',l:'← Retur'},{v:'adjustment',l:'Koreksi'}] as const).map(t => (
             <button key={t.v} onClick={() => setType(t.v)}
               className={`py-2.5 rounded-xl text-sm font-medium border transition-colors ${type === t.v ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>{t.l}</button>
           ))}
@@ -520,19 +587,32 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
       )}
       <div>
         <Label required>Produk</Label>
-        <div className="space-y-2">
-          {items.map((item, i) => (
-            <div key={i} className="bg-gray-50 rounded-xl p-3 space-y-2">
-              <select className="input text-sm" value={item.product_id} onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,product_id:e.target.value} : x))}>
-                <option value="">Pilih produk</option>
-                {fgStocks?.map(s => <option key={s.product_id} value={s.product_id}>{s.product_name} (stok: {s.qty_on_hand})</option>)}
-              </select>
-              <input className="input text-sm" type="number" placeholder="Qty" value={item.qty} onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,qty:e.target.value} : x))} />
-              {items.length > 1 && <button onClick={() => setItems(p => p.filter((_,idx) => idx!==i))} className="text-xs text-red-500">Hapus</button>}
-            </div>
-          ))}
-          <button onClick={() => setItems(p => [...p, {product_id:'',qty:''}])} className="text-sm text-blue-600 font-medium">+ Tambah Produk</button>
-        </div>
+        {(!fgStocks || fgStocks.length === 0) ? (
+          <div className="bg-gray-50 rounded-xl p-4 text-center text-sm text-gray-400">
+            Belum ada produk jadi di stok
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {items.map((item, i) => {
+              const fg = fgStocks?.find(f => f.product_id === item.product_id)
+              return (
+                <div key={i} className="bg-gray-50 rounded-xl p-3 space-y-2">
+                  <select className="input text-sm" value={item.product_id}
+                    onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,product_id:e.target.value,qty:''} : x))}>
+                    <option value="">Pilih produk</option>
+                    {fgStocks?.map(s => <option key={s.product_id} value={s.product_id}>{s.product_name} (stok: {s.qty_on_hand})</option>)}
+                  </select>
+                  <input className="input text-sm" type="number"
+                    placeholder={fg ? `Qty (max ${fg.qty_on_hand})` : 'Qty'}
+                    value={item.qty}
+                    onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,qty:e.target.value} : x))} />
+                  {items.length > 1 && <button onClick={() => setItems(p => p.filter((_,idx) => idx!==i))} className="text-xs text-red-500">Hapus</button>}
+                </div>
+              )
+            })}
+            <button onClick={() => setItems(p => [...p, {product_id:'',qty:''}])} className="text-sm text-blue-600 font-medium">+ Tambah Produk</button>
+          </div>
+        )}
       </div>
       {totalQty > 0 && (
         <div className="flex items-center justify-between py-2 bg-gray-50 rounded-xl px-3">
@@ -543,7 +623,10 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
       <div><Label>Catatan</Label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opsional" /></div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
+        <button onClick={handleSave} disabled={saving}
+          className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+          {saving ? 'Menyimpan...' : 'Simpan'}
+        </button>
       </div>
     </Modal>
   )

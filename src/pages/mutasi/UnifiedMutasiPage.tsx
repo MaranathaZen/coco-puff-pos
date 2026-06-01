@@ -1,8 +1,11 @@
 // src/pages/mutasi/UnifiedMutasiPage.tsx
-// CHANGELOG:
-// - Owner/Manager: filter per toko di list mutasi
-// - Owner/Manager: bisa lihat semua mutasi semua toko
-// - Fix posisi catatan di bawah tanggal
+// CHANGELOG v2:
+// - FIX Bug 1: to_store update db.stock dengan material_id + avg_cost
+// - FIX Bug 2: produksi ke toko/franchise hanya tampil produk jadi (fg_stock)
+//              produksi pemakaian/retur tampil bahan produksi + stok qty
+// - FIX Bug 4: avg_cost dihitung per lokasi (snapshot saat mutasi)
+// - FIX Bug 5: validasi stok tidak cukup sebelum simpan + filter stok > 0
+//              dropdown gudang tampil qty stok gudang
 
 import { useState, useMemo, useEffect, useContext, createContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -84,7 +87,7 @@ export default function UnifiedMutasiPage() {
   async function syncData() {
     setSyncing(true)
     try {
-      const [m, mi, mats, stores, partners, prods, fgStock] = await Promise.all([
+      const [m, mi, mats, stores, partners, prods, fgStock, wstock, pstock, stock] = await Promise.all([
         supabase.from('warehouse_mutations').select('*').order('created_at', { ascending: false }).limit(500),
         supabase.from('warehouse_mutation_items').select('*'),
         supabase.from('materials').select('*'),
@@ -92,14 +95,20 @@ export default function UnifiedMutasiPage() {
         supabase.from('partners').select('*'),
         supabase.from('products').select('*').eq('is_active', true),
         supabase.from('finished_goods_stock').select('*'),
+        supabase.from('warehouse_stock').select('*'),
+        supabase.from('production_stock').select('*'),
+        supabase.from('stock').select('*'),
       ])
       if (m.data !== null)   { await db.warehouse_mutations.clear();      if (m.data.length)   await db.warehouse_mutations.bulkPut(m.data)      }
       if (mi.data !== null)  { await db.warehouse_mutation_items.clear(); if (mi.data.length)  await db.warehouse_mutation_items.bulkPut(mi.data) }
-      if (mats.data?.length)     await db.materials.bulkPut(mats.data)
-      if (stores.data?.length)   await db.stores.bulkPut(stores.data)
+      if (mats.data?.length)    await db.materials.bulkPut(mats.data)
+      if (stores.data?.length)  await db.stores.bulkPut(stores.data)
       if (partners.data?.length) await db.partners.bulkPut(partners.data)
-      if (prods.data?.length)    await db.products.bulkPut(prods.data)
-      if (fgStock.data?.length)  await (db as any).finished_goods_stock?.bulkPut(fgStock.data)
+      if (prods.data?.length)   await db.products.bulkPut(prods.data)
+      if (fgStock.data?.length) await db.finished_goods_stock.bulkPut(fgStock.data)
+      if (wstock.data?.length)  await db.warehouse_stock.bulkPut(wstock.data)
+      if (pstock.data?.length)  await db.production_stock.bulkPut(pstock.data)
+      if (stock.data !== null)  { await db.stock.clear(); if (stock.data.length) await db.stock.bulkPut(stock.data) }
       toast.success('Data diperbarui')
     } catch { toast.error('Gagal sync') }
     finally { setSyncing(false) }
@@ -159,16 +168,14 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
 
   const mutations = useLiveQuery(async () => {
     let m = await db.warehouse_mutations.orderBy('created_at').reverse().toArray()
-    // Filter per role — owner/manager lihat semua
     if (role === 'produksi') m = m.filter(x => x.created_by === userId)
     else if (role === 'kasir') m = m.filter(x => x.destination_id === storeId || x.created_by === userId)
     else if (role === 'gudang') m = m.filter(x => x.created_by === userId || x.destination_id === storeId)
-    // owner/manager: semua, tidak ada filter di sini
-    const mi   = await db.warehouse_mutation_items.toArray()
-    const mats = await db.materials.toArray()
+    const mi    = await db.warehouse_mutation_items.toArray()
+    const mats  = await db.materials.toArray()
     const prods = await db.products.toArray()
-    const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
-    const pMap = Object.fromEntries(prods.map(p => [p.id, p]))
+    const mMap  = Object.fromEntries(mats.map(m => [m.id, m]))
+    const pMap  = Object.fromEntries(prods.map(p => [p.id, p]))
     return m.map(x => ({
       ...x,
       items: mi.filter(i => i.mutation_id === x.id).map(i => ({
@@ -214,7 +221,6 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
         <p className="text-xs text-gray-400 mt-0.5">{mutations?.length || 0} transaksi</p>
       </div>
 
-      {/* Filter toko — owner/manager */}
       {isOwnerManager && stores && stores.length > 1 && (
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
           <button onClick={() => setFilterStore('semua')}
@@ -262,7 +268,6 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
                 {total > 0 && <span className="text-xs font-medium text-gray-700">{formatRupiah(total)}</span>}
               </div>
             </button>
-
             <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{ display: expanded ? undefined : 'none' }}>
               {grpItems.map((m, idx) => {
                 const tc         = TYPE_CONFIG[m.mutation_type] || { label: m.mutation_type, color: 'text-gray-600 bg-gray-100' }
@@ -276,7 +281,6 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tc.color}`}>{tc.label}</span>
                           {m.destination_name && <span className="text-xs font-semibold text-gray-800">{m.destination_name}</span>}
-                          {/* Badge toko asal — untuk owner/manager */}
                           {isOwnerManager && storeMap[m.destination_id || ''] && (
                             <span className="text-xs text-gray-400">{storeMap[m.destination_id || '']}</span>
                           )}
@@ -326,11 +330,56 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
   )
 }
 
+// ── FORM MUTASI ───────────────────────────────────────────────
 function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: string; storeId: string; onClose: () => void }) {
   const materials  = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const partners   = useLiveQuery(() => db.partners.filter(p => p.is_active).toArray(), [])
   const stores     = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
 
+  // Stok gudang — untuk gudang/owner/manager: tampilkan qty stok gudang
+  const warehouseStocks = useLiveQuery(async () => {
+    if (!['owner','manager','gudang'].includes(role)) return []
+    const ws   = await db.warehouse_stock.toArray()
+    const mats = await db.materials.filter(m => m.is_active).toArray()
+    const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
+    return ws
+      .filter(s => s.qty_on_hand > 0)   // FIX Bug 5: hanya tampil yang ada stok
+      .map(s => ({
+        id:   s.material_id,
+        name: mMap[s.material_id]?.name || '',
+        unit: mMap[s.material_id]?.unit || '',
+        qty:  s.qty_on_hand,
+        avg_cost: (mMap[s.material_id] as any)?.avg_cost || mMap[s.material_id]?.unit_cost || 0,
+      }))
+      .filter(s => s.name)
+  }, [role])
+
+  // Stok produksi — untuk role produksi
+  const prodStocks = useLiveQuery(async () => {
+    if (role !== 'produksi') return []
+    const ps   = await db.production_stock.toArray()
+    const mats = await db.materials.toArray()
+    const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
+    return ps
+      .filter(s => s.qty_on_hand > 0)   // FIX Bug 5: hanya tampil yang ada stok
+      .map(s => ({
+        id:       s.material_id,
+        name:     mMap[s.material_id]?.name || '',
+        unit:     mMap[s.material_id]?.unit || '',
+        qty:      s.qty_on_hand,
+        avg_cost: (s as any).avg_cost || mMap[s.material_id]?.unit_cost || 0,
+        category: mMap[s.material_id]?.category || '',
+      }))
+      .filter(s => s.name)
+  }, [role])
+
+  // Produk jadi — untuk role produksi ke toko/franchise
+  const fgStocks = useLiveQuery(async () => {
+    if (role !== 'produksi') return []
+    return await db.finished_goods_stock.filter(f => f.qty_on_hand > 0).toArray()
+  }, [role])
+
+  // Stok toko — untuk kasir
   const storeStocks = useLiveQuery(async () => {
     if (role !== 'kasir') return []
     const stocks = await db.stock.where('store_id').equals(storeId).toArray()
@@ -338,26 +387,15 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
     const mats   = await db.materials.toArray()
     const pMap   = Object.fromEntries(prods.map(p => [p.id, p]))
     const mMap   = Object.fromEntries(mats.map(m => [m.id, m]))
-    return stocks.map(s => {
-      const id = s.ingredient_id || (s as any).product_id || ''
-      const prod = pMap[id]; const mat = mMap[id]
-      if (!prod && !mat) return null
-      return { id, name: prod?.name || mat?.name || '', unit: prod?.unit || mat?.unit || 'pcs', qty: s.qty_on_hand }
-    }).filter(Boolean) as { id: string; name: string; unit: string; qty: number }[]
+    return stocks
+      .filter(s => s.qty_on_hand > 0)   // FIX Bug 5: hanya tampil yang ada stok
+      .map(s => {
+        const id   = s.ingredient_id || (s as any).product_id || ''
+        const prod = pMap[id]; const mat = mMap[id]
+        if (!prod && !mat) return null
+        return { id, name: prod?.name || mat?.name || '', unit: prod?.unit || mat?.unit || 'pcs', qty: s.qty_on_hand }
+      }).filter(Boolean) as { id: string; name: string; unit: string; qty: number }[]
   }, [storeId, role])
-
-  const fgStocks = useLiveQuery(async () => {
-    if (role !== 'produksi') return []
-    try { return await (db as any).finished_goods_stock?.toArray() ?? [] } catch { return [] }
-  }, [role])
-
-  const prodStocks = useLiveQuery(async () => {
-    if (role !== 'produksi') return []
-    const ps   = await db.production_stock.toArray()
-    const mats = await db.materials.toArray()
-    const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
-    return ps.map(s => ({ id: s.material_id, name: mMap[s.material_id]?.name || '', unit: mMap[s.material_id]?.unit || '', qty: s.qty_on_hand }))
-  }, [role])
 
   const availableTypes = ROLE_TYPES[role] || ROLE_TYPES.gudang
   const [type,   setType]   = useState(availableTypes[0])
@@ -366,88 +404,235 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
   const [items,  setItems]  = useState([{ material_id: '', qty: '' }])
   const [saving, setSaving] = useState(false)
 
-  function getOptions() {
-    if (role === 'kasir') return storeStocks || []
-    if (role === 'produksi') {
-      if (type === 'to_store' || type === 'to_partner') {
-        return (fgStocks || []).map((f: any) => ({ id: f.product_id ?? f.id, name: f.product_name ?? f.name, unit: 'pcs', qty: f.qty_on_hand }))
-      }
-      const fg    = (fgStocks || []).map((f: any) => ({ id: f.product_id ?? f.id, name: `[Produk] ${f.product_name ?? f.name}`, unit: 'pcs', qty: f.qty_on_hand }))
-      const bahan = (prodStocks || []).map(s => ({ id: s.id, name: s.name, unit: s.unit, qty: s.qty }))
-      return [...fg, ...bahan]
+  // FIX Bug 2: getOptions per role + tipe mutasi
+  function getOptions(): { id: string; name: string; unit: string; qty: number | null; avg_cost?: number }[] {
+    if (role === 'kasir') {
+      return (storeStocks || [])
     }
-    return (materials || []).map(m => ({ id: m.id, name: m.name, unit: m.unit, qty: null }))
+    if (role === 'produksi') {
+      // Kirim ke toko/franchise: hanya produk jadi
+      if (type === 'to_store' || type === 'to_partner') {
+        return (fgStocks || []).map((f: any) => ({
+          id:   f.product_id ?? f.id,
+          name: f.product_name ?? f.name,
+          unit: 'pcs',
+          qty:  f.qty_on_hand,
+        }))
+      }
+      // Pemakaian/retur: bahan produksi (bahan baku, packaging, dll)
+      // Tidak include produk jadi — produk jadi kirim via to_store/to_partner
+      return (prodStocks || []).map(s => ({
+        id:       s.id,
+        name:     s.name,
+        unit:     s.unit,
+        qty:      s.qty,
+        avg_cost: s.avg_cost,
+      }))
+    }
+    // gudang/owner/manager: bahan dari stok gudang
+    return (warehouseStocks || []).map(s => ({
+      id:       s.id,
+      name:     s.name,
+      unit:     s.unit,
+      qty:      s.qty,
+      avg_cost: s.avg_cost,
+    }))
   }
 
-  function getUnitCost(materialId: string): number {
+  function getSnapshotCost(materialId: string): number {
     if (role === 'produksi') {
       const fg = (fgStocks || []).find((f: any) => (f.product_id ?? f.id) === materialId)
       if (fg) return (fg as any).hpp_per_unit || 0
+      const ps = (prodStocks || []).find(s => s.id === materialId)
+      if (ps) return ps.avg_cost || 0
     }
+    const ws = (warehouseStocks || []).find(s => s.id === materialId)
+    if (ws) return ws.avg_cost || 0
     return materials?.find(m => m.id === materialId)?.unit_cost || 0
   }
 
-  const totalNilai = items.reduce((s, item) => s + Number(item.qty) * getUnitCost(item.material_id), 0)
+  function getAvailableQty(materialId: string): number {
+    if (role === 'kasir') {
+      return (storeStocks || []).find(s => s.id === materialId)?.qty || 0
+    }
+    if (role === 'produksi') {
+      if (type === 'to_store' || type === 'to_partner') {
+        const fg = (fgStocks || []).find((f: any) => (f.product_id ?? f.id) === materialId)
+        return fg?.qty_on_hand || 0
+      }
+      return (prodStocks || []).find(s => s.id === materialId)?.qty || 0
+    }
+    return (warehouseStocks || []).find(s => s.id === materialId)?.qty || 0
+  }
+
+  const totalNilai = items.reduce((s, item) => s + Number(item.qty) * getSnapshotCost(item.material_id), 0)
 
   async function handleSave() {
     const valid = items.filter(i => i.material_id && Number(i.qty) > 0)
-    if (!valid.length)                return toast.error('Tambahkan minimal 1 item')
+    if (!valid.length)                    return toast.error('Tambahkan minimal 1 item')
     if (type === 'to_store'   && !destId) return toast.error('Pilih toko tujuan')
     if (type === 'to_partner' && !destId) return toast.error('Pilih franchise tujuan')
+
+    // FIX Bug 5: validasi stok cukup sebelum simpan (kecuali adjustment/retur)
+    if (type !== 'adjustment') {
+      for (const item of valid) {
+        const available = getAvailableQty(item.material_id)
+        if (Number(item.qty) > available) {
+          const opt = getOptions().find(o => o.id === item.material_id)
+          return toast.error(`Stok ${opt?.name || 'bahan'} tidak cukup (tersedia: ${available} ${opt?.unit || ''})`)
+        }
+      }
+    }
+
     setSaving(true)
     try {
-      const destName = type === 'to_production' ? 'Produksi' :
-        type === 'to_store'   ? stores?.find(s => s.id === destId)?.name || '' :
-        type === 'to_partner' ? partners?.find(p => p.id === destId)?.name || '' :
-        type === 'internal_use' ? 'Pemakaian Internal' : ''
+      const destName =
+        type === 'to_production' ? 'Produksi' :
+        type === 'to_store'      ? stores?.find(s => s.id === destId)?.name || '' :
+        type === 'to_partner'    ? partners?.find(p => p.id === destId)?.name || '' :
+        type === 'internal_use'  ? 'Pemakaian Internal' : ''
 
-      const mutId    = generateId()
+      const mutId     = generateId()
       const mutNumber = await generateMutationNumber()
-      const mut: any = { id: mutId, mutation_number: mutNumber, mutation_type: type, destination_id: destId || undefined, destination_name: destName || undefined, notes: notes || undefined, status: 'confirmed', created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId }
+      const mut: any  = {
+        id: mutId, mutation_number: mutNumber, mutation_type: type,
+        destination_id: destId || undefined, destination_name: destName || undefined,
+        notes: notes || undefined, status: 'confirmed',
+        created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId,
+      }
       await db.warehouse_mutations.add(mut)
       await supabase.from('warehouse_mutations').insert(mut)
 
       for (const item of valid) {
-        const unitCost = getUnitCost(item.material_id)
-        const mi: WarehouseMutationItem = { id: generateId(), mutation_id: mutId, material_id: item.material_id, qty: Number(item.qty), unit_cost: unitCost }
+        // FIX Bug 4: snapshot cost dari stok lokasi asal, bukan dari materials langsung
+        const snapshotCost = getSnapshotCost(item.material_id)
+
+        const mi: WarehouseMutationItem = {
+          id: generateId(), mutation_id: mutId,
+          material_id: item.material_id,
+          qty: Number(item.qty),
+          unit_cost: snapshotCost,
+        }
         await db.warehouse_mutation_items.add(mi)
         await supabase.from('warehouse_mutation_items').insert(mi)
 
+        // ── Kurangi stok ASAL ──────────────────────────────
         if (role === 'kasir') {
-          const ss = await db.stock.filter(s => s.store_id === storeId && (s.ingredient_id === item.material_id || (s as any).product_id === item.material_id)).first()
-          if (ss) { const n = Math.max(0, ss.qty_on_hand - Number(item.qty)); await db.stock.update(ss.id, { qty_on_hand: n, last_updated: now() }); await supabase.from('stock').update({ qty_on_hand: n }).eq('id', ss.id) }
+          const ss = await db.stock.filter(s => s.store_id === storeId && (s.ingredient_id === item.material_id || (s as any).material_id === item.material_id)).first()
+          if (ss) {
+            const n = type === 'adjustment'
+              ? ss.qty_on_hand + Number(item.qty)
+              : Math.max(0, ss.qty_on_hand - Number(item.qty))
+            await db.stock.update(ss.id, { qty_on_hand: n, last_updated: now() })
+            await supabase.from('stock').update({ qty_on_hand: n, last_updated: now() }).eq('id', ss.id)
+          }
         } else if (role === 'produksi') {
-          const isFg = (fgStocks || []).some((f: any) => (f.product_id ?? f.id) === item.material_id)
+          const isFg = (type === 'to_store' || type === 'to_partner') &&
+            (fgStocks || []).some((f: any) => (f.product_id ?? f.id) === item.material_id)
           if (isFg) {
-            try {
-              const fg = await (db as any).finished_goods_stock?.filter((f: any) => (f.product_id ?? f.id) === item.material_id).first()
-              if (fg) { const n = Math.max(0, fg.qty_on_hand - Number(item.qty)); await (db as any).finished_goods_stock?.update(fg.id, { qty_on_hand: n, last_updated: now() }); await supabase.from('finished_goods_stock').update({ qty_on_hand: n }).eq('id', fg.id) }
-            } catch {}
+            const fg = await db.finished_goods_stock.filter((f: any) => (f.product_id ?? f.id) === item.material_id).first()
+            if (fg) {
+              const n = Math.max(0, fg.qty_on_hand - Number(item.qty))
+              await db.finished_goods_stock.update(fg.id, { qty_on_hand: n, last_updated: now() })
+              await supabase.from('finished_goods_stock').update({ qty_on_hand: n, last_updated: now() }).eq('id', fg.id)
+            }
           } else {
             const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
-            if (ps) { const n = Math.max(0, ps.qty_on_hand - Number(item.qty)); await db.production_stock.update(ps.id, { qty_on_hand: n, last_updated: now() }); await supabase.from('production_stock').update({ qty_on_hand: n }).eq('id', ps.id) }
+            if (ps) {
+              const n = type === 'adjustment'
+                ? ps.qty_on_hand + Number(item.qty)
+                : Math.max(0, ps.qty_on_hand - Number(item.qty))
+              await db.production_stock.update(ps.id, { qty_on_hand: n, last_updated: now() })
+              await supabase.from('production_stock').update({ qty_on_hand: n, last_updated: now() }).eq('id', ps.id)
+            }
           }
         } else {
           // gudang/owner/manager: kurangi warehouse_stock
           const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
-          if (ws) { const n = Math.max(0, ws.qty_on_hand - Number(item.qty)); await db.warehouse_stock.update(ws.id, { qty_on_hand: n, last_updated: now() }); await supabase.from('warehouse_stock').update({ qty_on_hand: n }).eq('id', ws.id) }
+          if (ws) {
+            const n = type === 'adjustment'
+              ? ws.qty_on_hand + Number(item.qty)
+              : Math.max(0, ws.qty_on_hand - Number(item.qty))
+            await db.warehouse_stock.update(ws.id, { qty_on_hand: n, last_updated: now() })
+            await supabase.from('warehouse_stock').update({ qty_on_hand: n, last_updated: now() }).eq('id', ws.id)
+          }
         }
 
+        // ── Tambah stok TUJUAN ─────────────────────────────
+
+        // → Produksi
         if (type === 'to_production') {
           const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
-          const psd: any = { id: ps?.id || generateId(), material_id: item.material_id, qty_on_hand: (ps?.qty_on_hand || 0) + Number(item.qty), last_updated: now() }
-          await db.production_stock.put(psd); await supabase.from('production_stock').upsert(psd)
+          const prevQty  = ps?.qty_on_hand || 0
+          const prevCost = (ps as any)?.avg_cost || 0
+          const inQty    = Number(item.qty)
+          // FIX Bug 4: moving average produksi independent dari gudang
+          const newQty  = prevQty + inQty
+          const newAvg  = newQty > 0 ? (prevQty * prevCost + inQty * snapshotCost) / newQty : snapshotCost
+          const psd: any = {
+            id: ps?.id || generateId(),
+            material_id: item.material_id,
+            qty_on_hand: newQty,
+            avg_cost: newAvg,
+            last_updated: now(),
+          }
+          await db.production_stock.put(psd)
+          await supabase.from('production_stock').upsert(psd)
         }
+
+        // → Toko (dari gudang atau produksi)
         if (type === 'to_store' && destId) {
-          const ss = await db.stock.filter(s => s.store_id === destId && s.ingredient_id === item.material_id).first()
-          const sd: any = { id: ss?.id || generateId(), store_id: destId, ingredient_id: item.material_id, qty_on_hand: (ss?.qty_on_hand || 0) + Number(item.qty), last_updated: now() }
-          await db.stock.put(sd); await supabase.from('stock').upsert(sd)
+          // FIX Bug 1: cari by material_id (field baru) atau ingredient_id
+          const existingStock = await db.stock
+            .filter(s => s.store_id === destId && (
+              (s as any).material_id === item.material_id ||
+              s.ingredient_id === item.material_id
+            ))
+            .first()
+
+          const prevQty  = existingStock?.qty_on_hand ?? 0
+          const prevCost = (existingStock as any)?.avg_cost ?? 0
+          const inQty    = Number(item.qty)
+          // FIX Bug 4: moving average toko independent dari gudang/produksi
+          const newQty  = prevQty + inQty
+          const newAvg  = newQty > 0 ? (prevQty * prevCost + inQty * snapshotCost) / newQty : snapshotCost
+
+          if (existingStock) {
+            await db.stock.update(existingStock.id, {
+              qty_on_hand: newQty,
+              avg_cost: newAvg,
+              last_updated: now(),
+            } as any)
+            await supabase.from('stock').update({
+              qty_on_hand: newQty,
+              avg_cost: newAvg,
+              last_updated: now(),
+            }).eq('id', existingStock.id)
+          } else {
+            // FIX Bug 1: buat record baru dengan material_id + ingredient_id
+            const newStock: any = {
+              id: generateId(),
+              store_id: destId,
+              ingredient_id: item.material_id,   // jembatan ke sistem lama
+              material_id: item.material_id,      // field baru
+              qty_on_hand: inQty,
+              avg_cost: snapshotCost,
+              last_updated: now(),
+            }
+            await db.stock.add(newStock)
+            await supabase.from('stock').insert(newStock)
+          }
         }
       }
+
       toast.success('Mutasi berhasil dicatat')
       onClose()
-    } catch (e) { console.error(e); toast.error('Gagal menyimpan') }
-    finally { setSaving(false) }
+    } catch (e) {
+      console.error('[MutasiForm]', e)
+      toast.error('Gagal menyimpan: ' + String((e as any)?.message || e))
+    } finally {
+      setSaving(false)
+    }
   }
 
   const opts = getOptions()
@@ -455,74 +640,124 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
   return (
     <Modal title="Catat Mutasi" onClose={onClose}>
       <div>
-        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Tujuan <span className="text-red-400">*</span></label>
+        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+          Tujuan <span className="text-red-400">*</span>
+        </label>
         <div className="grid grid-cols-2 gap-2">
           {availableTypes.map(t => (
-            <button key={t} onClick={() => { setType(t); setDest('') }}
+            <button key={t} onClick={() => { setType(t); setDest(''); setItems([{ material_id:'', qty:'' }]) }}
               className={`py-2.5 rounded-xl text-sm font-medium border transition-colors ${type === t ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
               {TYPE_CONFIG[t]?.label || t}
             </button>
           ))}
         </div>
       </div>
+
       {type === 'to_store' && (
-        <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Toko Tujuan</label>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Toko Tujuan *</label>
           <select className={`input ${!destId ? 'border-red-200' : ''}`} value={destId} onChange={e => setDest(e.target.value)}>
-            <option value="">-- Pilih toko *</option>
+            <option value="">-- Pilih toko</option>
             {stores?.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
       )}
       {type === 'to_partner' && (
-        <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Franchise</label>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Franchise *</label>
           <select className={`input ${!destId ? 'border-red-200' : ''}`} value={destId} onChange={e => setDest(e.target.value)}>
-            <option value="">-- Pilih franchise *</option>
+            <option value="">-- Pilih franchise</option>
             {partners?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>
       )}
-      <div>
-        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Item <span className="text-red-400">*</span></label>
-        <div className="space-y-2">
-          {items.map((item, i) => {
-            const selOpt = opts.find(o => o.id === item.material_id)
-            const cost   = getUnitCost(item.material_id)
-            return (
-              <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
-                <select className="input text-sm" value={item.material_id}
-                  onChange={e => setItems(p => p.map((x, idx) => idx === i ? { ...x, material_id: e.target.value } : x))}>
-                  <option value="">Pilih bahan / produk</option>
-                  {opts.map(o => (
-                    <option key={o.id} value={o.id}>
-                      {o.name}{o.qty !== null && o.qty !== undefined ? ` (stok: ${o.qty} ${o.unit})` : o.unit ? ` (${o.unit})` : ''}
-                    </option>
-                  ))}
-                </select>
-                <div className="flex items-center gap-2">
-                  <input className="input text-sm flex-1" inputMode="decimal" placeholder={`Qty${selOpt ? ` (${selOpt.unit})` : ''}`}
-                    value={item.qty} onChange={e => setItems(p => p.map((x, idx) => idx === i ? { ...x, qty: e.target.value.replace(/[^0-9.]/g, '') } : x))} />
-                  {item.qty && cost > 0 && <span className="text-xs text-gray-400 flex-shrink-0">{formatRupiah(Number(item.qty) * cost)}</span>}
-                </div>
-                {items.length > 1 && <button onClick={() => setItems(p => p.filter((_, idx) => idx !== i))} className="text-xs text-red-400">Hapus item ini</button>}
-              </div>
-            )
-          })}
+
+      {/* Info konteks untuk role produksi */}
+      {role === 'produksi' && (type === 'to_store' || type === 'to_partner') && (
+        <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
+          <p className="text-xs text-blue-700 font-medium">Kirim Produk Jadi</p>
+          <p className="text-xs text-blue-500 mt-0.5">Hanya produk jadi yang tersedia untuk dikirim ke toko/franchise</p>
         </div>
-        <button onClick={() => setItems(p => [...p, { material_id: '', qty: '' }])} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
+      )}
+      {role === 'produksi' && (type === 'internal_use' || type === 'adjustment') && (
+        <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+          <p className="text-xs text-amber-700 font-medium">Bahan Produksi</p>
+          <p className="text-xs text-amber-500 mt-0.5">Hanya bahan yang ada di stok produksi yang tampil</p>
+        </div>
+      )}
+
+      <div>
+        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+          Item <span className="text-red-400">*</span>
+        </label>
+        {opts.length === 0 ? (
+          <div className="bg-gray-50 rounded-xl p-4 text-center text-sm text-gray-400">
+            {role === 'produksi' && (type === 'to_store' || type === 'to_partner')
+              ? 'Belum ada produk jadi di stok produksi'
+              : 'Tidak ada bahan dengan stok tersedia'}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {items.map((item, i) => {
+              const selOpt   = opts.find(o => o.id === item.material_id)
+              const cost     = getSnapshotCost(item.material_id)
+              const available = item.material_id ? getAvailableQty(item.material_id) : null
+              const isOver   = available !== null && Number(item.qty) > available
+              return (
+                <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
+                  <select className="input text-sm" value={item.material_id}
+                    onChange={e => setItems(p => p.map((x, idx) => idx === i ? { ...x, material_id: e.target.value, qty: '' } : x))}>
+                    <option value="">Pilih bahan / produk</option>
+                    {opts.map(o => (
+                      <option key={o.id} value={o.id}>
+                        {o.name} — stok: {o.qty} {o.unit}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex items-center gap-2">
+                    <input
+                      className={`input text-sm flex-1 ${isOver ? 'border-red-300 bg-red-50' : ''}`}
+                      inputMode="decimal"
+                      placeholder={`Qty${selOpt ? ` (max ${selOpt.qty} ${selOpt.unit})` : ''}`}
+                      value={item.qty}
+                      onChange={e => setItems(p => p.map((x, idx) => idx === i ? { ...x, qty: e.target.value.replace(/[^0-9.]/g, '') } : x))}
+                    />
+                    {item.qty && cost > 0 && (
+                      <span className="text-xs text-gray-400 flex-shrink-0">{formatRupiah(Number(item.qty) * cost)}</span>
+                    )}
+                  </div>
+                  {isOver && (
+                    <p className="text-xs text-red-500">⚠ Melebihi stok tersedia ({available} {selOpt?.unit})</p>
+                  )}
+                  {items.length > 1 && (
+                    <button onClick={() => setItems(p => p.filter((_, idx) => idx !== i))} className="text-xs text-red-400">Hapus item ini</button>
+                  )}
+                </div>
+              )
+            })}
+            <button onClick={() => setItems(p => [...p, { material_id: '', qty: '' }])} className="mt-1 text-sm text-blue-600 font-medium">+ Tambah Item</button>
+          </div>
+        )}
       </div>
+
       {totalNilai > 0 && (
         <div className="flex items-center justify-between py-2 bg-gray-50 rounded-xl px-3">
           <span className="text-sm text-gray-600">Total Nilai</span>
           <span className="text-sm font-semibold text-gray-900">{formatRupiah(totalNilai)}</span>
         </div>
       )}
+
       <div>
         <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Catatan</label>
         <input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opsional" />
       </div>
+
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
+        <button onClick={handleSave} disabled={saving || opts.length === 0}
+          className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+          {saving ? 'Menyimpan...' : 'Simpan'}
+        </button>
       </div>
     </Modal>
   )

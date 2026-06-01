@@ -1,9 +1,9 @@
 // src/pages/stok/UnifiedStokPage.tsx
-// CHANGELOG:
-// - Owner/Manager: tombol Tambah Bahan + Stok Awal di tab Gudang
-// - Sync replace strategy untuk materials
-// - Edit bahan saat klik (owner/manager only)
-// - Hapus bahan (owner only)
+// CHANGELOG v2:
+// - FIX Bug 4: StokProduksiView baca avg_cost dari production_stock, bukan materials
+// - FIX Bug 4: StokTokoView tampilkan avg_cost dari stock record
+// - FIX Bug 4: StokGudangView tetap baca dari materials.avg_cost (benar)
+// - Nilai stok dihitung dari avg_cost masing-masing lokasi
 
 import { useState, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -38,15 +38,14 @@ function formatKategori(raw: string | undefined): string {
   return raw.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
-const SATUAN     = ['Gram', 'Ml', 'Pcs', 'Kg', 'Liter', 'Pack', 'Lembar', 'Roll']
-const KATEGORI   = [
+const SATUAN   = ['Gram', 'Ml', 'Pcs', 'Kg', 'Liter', 'Pack', 'Lembar', 'Roll']
+const KATEGORI = [
   { value: 'bahan_baku',          label: 'Bahan Baku' },
   { value: 'bahan_setengah_jadi', label: 'Bahan Setengah Jadi' },
   { value: 'packaging',           label: 'Packaging' },
   { value: 'non_produksi',        label: 'Non Produksi / ATK' },
 ]
 
-// ── Modal ─────────────────────────────────────────────────────
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -64,7 +63,6 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
   return <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">{children}{required && <span className="text-red-400 ml-0.5">*</span>}</label>
 }
 
-// ── Page ──────────────────────────────────────────────────────
 export default function UnifiedStokPage() {
   const { user } = useAuthStore()
   const role  = user?.role || 'kasir'
@@ -86,21 +84,13 @@ export default function UnifiedStokPage() {
         supabase.from('stock').select('*'),
         supabase.from('categories').select('*'),
       ])
-      // REPLACE strategy
-      if (mats.data !== null)   { await db.materials.clear();              if (mats.data.length)   await db.materials.bulkPut(mats.data)              }
-      if (ws.data !== null)     { await db.warehouse_stock.clear();        if (ws.data.length)     await db.warehouse_stock.bulkPut(ws.data)           }
-      if (ps.data !== null)     { await db.production_stock.clear();       if (ps.data.length)     await db.production_stock.bulkPut(ps.data)          }
-      if (fgs.data !== null)    { await db.finished_goods_stock.clear();   if (fgs.data.length)    await db.finished_goods_stock.bulkPut(fgs.data)     }
-      if (prods.data !== null)  { await db.products.clear();               if (prods.data.length)  await db.products.bulkPut(prods.data)               }
-      if (stocks.data !== null) {
-        const storeId = user?.store_id
-        if (storeId) {
-          const oldIds = await db.stock.where('store_id').equals(storeId).primaryKeys()
-          if (oldIds.length) await db.stock.bulkDelete(oldIds)
-          if (stocks.data.length) await db.stock.bulkPut(stocks.data)
-        }
-      }
-      if (cats.data !== null)   { await db.categories.clear();             if (cats.data.length)   await db.categories.bulkPut(cats.data)             }
+      if (mats.data !== null)   { await db.materials.clear();            if (mats.data.length)   await db.materials.bulkPut(mats.data)            }
+      if (ws.data !== null)     { await db.warehouse_stock.clear();      if (ws.data.length)     await db.warehouse_stock.bulkPut(ws.data)         }
+      if (ps.data !== null)     { await db.production_stock.clear();     if (ps.data.length)     await db.production_stock.bulkPut(ps.data)        }
+      if (fgs.data !== null)    { await db.finished_goods_stock.clear(); if (fgs.data.length)    await db.finished_goods_stock.bulkPut(fgs.data)   }
+      if (prods.data !== null)  { await db.products.clear();             if (prods.data.length)  await db.products.bulkPut(prods.data)             }
+      if (stocks.data !== null) { await db.stock.clear();                if (stocks.data.length) await db.stock.bulkPut(stocks.data)               }
+      if (cats.data !== null)   { await db.categories.clear();           if (cats.data.length)   await db.categories.bulkPut(cats.data)            }
       toast.success('Stok diperbarui')
     } catch { toast.error('Gagal sync') }
     finally { setSyncing(false) }
@@ -162,8 +152,13 @@ function StokGudangView({ isOwnerManager, isOwner }: { isOwnerManager: boolean; 
     const mats   = await db.materials.filter(m => m.is_active).toArray()
     const stocks = await db.warehouse_stock.toArray()
     const sMap   = Object.fromEntries(stocks.map(s => [s.material_id, s.qty_on_hand]))
-    const items  = mats.map(m => ({ ...m, qty: sMap[m.id] ?? 0, nilai: (sMap[m.id] ?? 0) * (m.unit_cost || 0) }))
-    const totalNilai = items.reduce((s, i) => s + i.nilai, 0)
+    // Gudang: avg_cost dari materials (benar — ini sumber kebenaran gudang)
+    const items  = mats.map(m => ({
+      ...m,
+      qty:      sMap[m.id] ?? 0,
+      avg_cost: m.avg_cost || m.unit_cost || 0,
+    }))
+    const totalNilai = items.reduce((s, i) => s + i.qty * i.avg_cost, 0)
     const lowStock   = items.filter(i => i.qty <= i.min_stock && i.min_stock > 0)
     return { items, totalNilai, lowStock }
   }, [])
@@ -179,7 +174,6 @@ function StokGudangView({ isOwnerManager, isOwner }: { isOwnerManager: boolean; 
 
   return (
     <div className="p-4 space-y-3">
-      {/* Tombol aksi — hanya owner/manager */}
       {isOwnerManager && (
         <div className="flex gap-2 justify-end">
           <button onClick={() => setShowOpening(true)}
@@ -193,7 +187,6 @@ function StokGudangView({ isOwnerManager, isOwner }: { isOwnerManager: boolean; 
         </div>
       )}
 
-      {/* Summary */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400">Nilai Stok</p>
@@ -235,19 +228,21 @@ function StokGudangView({ isOwnerManager, isOwner }: { isOwnerManager: boolean; 
       </div>
 
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        {filteredItems.sort((a, b) => b.nilai - a.nilai).map((item, idx) => (
+        {filteredItems.sort((a, b) => (b.qty * b.avg_cost) - (a.qty * a.avg_cost)).map((item, idx) => (
           <button key={item.id}
             onClick={() => isOwnerManager && (setEditMat(item as any), setShowForm(true))}
             className={`w-full flex items-center px-4 py-3 text-left ${idx !== 0 ? 'border-t border-gray-50' : ''} ${item.qty <= item.min_stock && item.min_stock > 0 ? 'bg-red-50/30' : ''} ${isOwnerManager ? 'active:bg-gray-50' : ''}`}>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
-              <p className="text-xs text-gray-400">{formatKategori(item.category)} · Avg {formatRupiah(item.unit_cost || 0)}/{item.unit}</p>
+              <p className="text-xs text-gray-400">
+                {formatKategori(item.category)} · Avg {formatRupiah(item.avg_cost)}/{item.unit}
+              </p>
             </div>
             <div className="text-right flex-shrink-0">
               <p className={`text-sm font-semibold ${item.qty <= item.min_stock && item.min_stock > 0 ? 'text-red-600' : 'text-gray-900'}`}>
                 {item.qty} <span className="text-xs font-normal text-gray-400">{item.unit}</span>
               </p>
-              <p className="text-xs text-gray-400">{formatRupiah(item.nilai)}</p>
+              <p className="text-xs text-gray-400">{formatRupiah(item.qty * item.avg_cost)}</p>
             </div>
           </button>
         ))}
@@ -258,7 +253,6 @@ function StokGudangView({ isOwnerManager, isOwner }: { isOwnerManager: boolean; 
         )}
       </div>
 
-      {/* Forms — hanya owner/manager */}
       {showForm    && isOwnerManager && (
         <MaterialForm material={editMat} isOwner={isOwner} onClose={() => { setShowForm(false); setEditMat(null) }} />
       )}
@@ -284,11 +278,18 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
     if (!material || !isOwner) return
     if (!confirm(`Hapus "${material.name}" permanen?\nData pembelian & mutasi terkait juga akan terhapus.`)) return
     try {
-      for (const t of ['warehouse_mutation_items','purchase_items','warehouse_stock','production_stock']) {
+      for (const t of ['warehouse_mutation_items','purchase_items','warehouse_stock','production_stock','store_recipe_items']) {
         await supabase.from(t).delete().eq('material_id', material.id)
       }
+      // Hapus stock toko yang pakai material ini
+      await supabase.from('stock').delete().eq('ingredient_id', material.id)
+      await supabase.from('stock').delete().eq('material_id', material.id)
       await supabase.from('materials').delete().eq('id', material.id)
+      // Hapus lokal
       await db.materials.delete(material.id)
+      await db.warehouse_stock.where('material_id').equals(material.id).delete()
+      await db.production_stock.where('material_id').equals(material.id).delete()
+      await db.stock.where('ingredient_id').equals(material.id).delete()
       toast.success(`"${material.name}" dihapus`)
       onClose()
     } catch (e) { toast.error('Gagal hapus: ' + String((e as any)?.message || e)) }
@@ -305,7 +306,11 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
     setSaving(true)
     try {
       const matId = material?.id || generateId()
-      const data: Material = { id: matId, name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock), is_active: isActive, created_at: material?.created_at || now(), updated_at: now() }
+      const data: Material = {
+        id: matId, name: name.trim(), category, unit,
+        unit_cost: Number(unitCost), min_stock: Number(minStock),
+        is_active: isActive, created_at: material?.created_at || now(), updated_at: now(),
+      }
       await db.materials.put(data)
       const { error } = await supabase.from('materials').upsert(data)
       if (error) throw error
@@ -374,19 +379,18 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
 // ── FORM: Stok Awal ───────────────────────────────────────────
 function OpeningStockForm({ onClose }: { onClose: () => void }) {
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
-  const [items,   setItems]   = useState([{ material_id: '', qty: '', unit_cost: '' }])
-  const [date,    setDate]    = useState(new Date().toISOString().slice(0,10))
-  const [notes,   setNotes]   = useState('Saldo awal migrasi')
-  const [saving,  setSaving]  = useState(false)
+  const [items,  setItems]  = useState([{ material_id: '', qty: '', unit_cost: '' }])
+  const [date,   setDate]   = useState(new Date().toISOString().slice(0,10))
+  const [notes,  setNotes]  = useState('Saldo awal migrasi')
+  const [saving, setSaving] = useState(false)
 
-  function addItem() { setItems(p => [...p, { material_id:'', qty:'', unit_cost:'' }]) }
   function updateItem(i: number, f: string, v: string) {
     setItems(p => p.map((item, idx) => {
       if (idx !== i) return item
       const updated = { ...item, [f]: v }
       if (f === 'material_id') {
         const mat = materials?.find(m => m.id === v)
-        if (mat?.unit_cost) updated.unit_cost = String(mat.unit_cost)
+        if (mat) updated.unit_cost = String(mat.avg_cost || mat.unit_cost || 0)
       }
       return updated
     }))
@@ -405,8 +409,8 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
         await db.warehouse_stock.put(wsd)
         await supabase.from('warehouse_stock').upsert(wsd)
         if (cost > 0) {
-          await db.materials.update(item.material_id, { unit_cost: cost, updated_at: now() })
-          await supabase.from('materials').update({ unit_cost: cost }).eq('id', item.material_id)
+          await db.materials.update(item.material_id, { unit_cost: cost, avg_cost: cost, updated_at: now() })
+          await supabase.from('materials').update({ unit_cost: cost, avg_cost: cost }).eq('id', item.material_id)
         }
         const mutId = generateId()
         const mut   = { id: mutId, mutation_type: 'opening_stock', destination_name: 'Saldo Awal', notes: notes || 'Stok awal', status: 'confirmed', created_by: 'system', created_at: `${date}T00:00:00.000Z`, confirmed_at: now(), confirmed_by: 'system' }
@@ -453,7 +457,7 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
             )
           })}
         </div>
-        <button onClick={addItem} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
+        <button onClick={() => setItems(p => [...p, { material_id:'', qty:'', unit_cost:'' }])} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
@@ -473,8 +477,17 @@ function StokProduksiView() {
     const fgs  = await db.finished_goods_stock.toArray()
     const mats = await db.materials.toArray()
     const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
-    const bahan = ps.map(s => ({ ...s, material: mMap[s.material_id] })).filter(s => s.material?.name)
-    const totalBahan = bahan.reduce((s, i) => s + i.qty_on_hand * (i.material?.unit_cost || 0), 0)
+    const bahan = ps
+      .map(s => ({
+        ...s,
+        material: mMap[s.material_id],
+        // FIX Bug 4: pakai avg_cost dari production_stock (isolated)
+        // bukan dari materials.unit_cost (yang berubah saat gudang beli lagi)
+        displayAvgCost: (s as any).avg_cost || mMap[s.material_id]?.unit_cost || 0,
+      }))
+      .filter(s => s.material?.name)
+    // FIX Bug 4: nilai stok produksi pakai avg_cost produksi sendiri
+    const totalBahan = bahan.reduce((s, i) => s + i.qty_on_hand * i.displayAvgCost, 0)
     return { bahan, fgs, totalBahan }
   }, [])
 
@@ -538,15 +551,24 @@ function StokProduksiView() {
             <div key={s.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900">{s.material?.name}</p>
-                <p className="text-xs text-gray-400">{formatKategori(s.material?.category)} · Avg {formatRupiah(s.material?.unit_cost || 0)}/{s.material?.unit}</p>
+                {/* FIX Bug 4: tampilkan avg_cost produksi (isolated), bukan avg gudang */}
+                <p className="text-xs text-gray-400">
+                  {formatKategori(s.material?.category)} · Avg {formatRupiah(s.displayAvgCost)}/{s.material?.unit}
+                </p>
               </div>
               <div className="text-right">
-                <p className="text-sm font-semibold text-gray-900">{s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.material?.unit}</span></p>
-                <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand * (s.material?.unit_cost || 0))}</p>
+                <p className="text-sm font-semibold text-gray-900">
+                  {s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.material?.unit}</span>
+                </p>
+                <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand * s.displayAvgCost)}</p>
               </div>
             </div>
           ))}
-          {filteredBahan.length === 0 && <div className="py-8 text-center text-sm text-gray-400">{search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada stok bahan'}</div>}
+          {filteredBahan.length === 0 && (
+            <div className="py-8 text-center text-sm text-gray-400">
+              {search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada stok bahan'}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -571,12 +593,22 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
     const cMap   = Object.fromEntries(cats.map(c => [c.id, c]))
     const mats   = await db.materials.toArray()
     const mMap   = Object.fromEntries(mats.map(m => [m.id, m]))
+
     return stocks.map(s => {
-      const id   = s.ingredient_id || (s as any).product_id || ''
-      const prod = pMap[id]; const mat = mMap[id]
+      // Cari berdasarkan ingredient_id atau material_id
+      const id   = (s as any).material_id || s.ingredient_id || ''
+      const prod = pMap[id]
+      const mat  = mMap[id]
       if (!prod && !mat) return null
+
+      // FIX Bug 4: pakai avg_cost dari stock record (isolated per toko)
+      const avgCost = (s as any).avg_cost || 0
+
       return {
-        id: s.id, ingredient_id: id, qty_on_hand: s.qty_on_hand,
+        id: s.id,
+        ingredient_id: id,
+        qty_on_hand: s.qty_on_hand,
+        avg_cost: avgCost,
         displayName: prod?.name || mat?.name || '',
         displayUnit: prod?.unit || mat?.unit || 'pcs',
         categoryName: prod ? (cMap[prod.category_id||'']?.name || 'Produk') : formatKategori(mat?.category),
@@ -587,10 +619,14 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
   }, [activeStoreId])
 
   const TOKO_FILTERS = [
-    { k:'semua',l:'Semua'},{k:'stok_rendah',l:'⚠ Stok Rendah'},{k:'stok_habis',l:'Habis'},
-    { k:'produk_jadi',l:'Produk Jadi'},{k:'bahan_baku',l:'Bahan Baku'},
-    { k:'bahan_setengah_jadi',l:'Bahan Setengah Jadi'},{k:'packaging',l:'Packaging'},
-    { k:'non_produksi',l:'Non-Produksi'},
+    { k:'semua',               l:'Semua' },
+    { k:'stok_rendah',         l:'⚠ Stok Rendah' },
+    { k:'stok_habis',          l:'Habis' },
+    { k:'produk_jadi',         l:'Produk Jadi' },
+    { k:'bahan_baku',          l:'Bahan Baku' },
+    { k:'bahan_setengah_jadi', l:'Bahan Setengah Jadi' },
+    { k:'packaging',           l:'Packaging' },
+    { k:'non_produksi',        l:'Non-Produksi' },
   ]
 
   const filtered = (data||[]).filter(s => {
@@ -604,6 +640,8 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
     return matchSearch && matchKat
   })
 
+  const totalNilai = filtered.reduce((s, i) => s + i.qty_on_hand * (i.avg_cost || 0), 0)
+
   return (
     <div className="p-4 space-y-3">
       {canSeeAllStores && stores && stores.length > 0 && (
@@ -616,15 +654,27 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
           ))}
         </div>
       )}
+
+      {/* Summary nilai stok toko */}
+      {filtered.length > 0 && totalNilai > 0 && (
+        <div className="bg-white rounded-xl border border-gray-100 p-3">
+          <p className="text-xs text-gray-400">Nilai Stok Toko</p>
+          <p className="text-base font-semibold text-gray-900">{formatRupiah(totalNilai)}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{filtered.length} item</p>
+        </div>
+      )}
+
       <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
         {TOKO_FILTERS.map(({ k, l }) => (
           <button key={k} onClick={() => setFilterTokoKat(k)}
             className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${filterTokoKat===k ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>{l}</button>
         ))}
       </div>
+
       <input value={search} onChange={e => setSearch(e.target.value)}
         className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
         placeholder="Cari nama produk / bahan..." />
+
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {filtered.map((s, idx) => (
           <div key={s.id} className={`flex items-center px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
@@ -634,11 +684,20 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
                 {s.isProduk
                   ? <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-medium">Produk Jadi</span>
                   : s.categoryName ? <p className="text-xs text-gray-400">{s.categoryName}</p> : null}
+                {/* FIX Bug 4: tampilkan avg_cost toko (isolated) */}
+                {s.avg_cost > 0 && (
+                  <p className="text-xs text-gray-300">· Avg {formatRupiah(s.avg_cost)}/{s.displayUnit}</p>
+                )}
               </div>
             </div>
-            <p className={`text-sm font-semibold ${s.qty_on_hand<=0?'text-red-500':'text-gray-900'}`}>
-              {s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.displayUnit}</span>
-            </p>
+            <div className="text-right">
+              <p className={`text-sm font-semibold ${s.qty_on_hand<=0?'text-red-500':'text-gray-900'}`}>
+                {s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.displayUnit}</span>
+              </p>
+              {s.avg_cost > 0 && (
+                <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand * s.avg_cost)}</p>
+              )}
+            </div>
           </div>
         ))}
         {filtered.length === 0 && (

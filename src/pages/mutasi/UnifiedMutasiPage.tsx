@@ -473,16 +473,19 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
     if (type === 'to_store'   && !destId) return toast.error('Pilih toko tujuan')
     if (type === 'to_partner' && !destId) return toast.error('Pilih franchise tujuan')
 
-    // FIX Bug 5: validasi stok cukup sebelum simpan (kecuali adjustment/retur)
-    if (type !== 'adjustment') {
-      for (const item of valid) {
-        const available = getAvailableQty(item.material_id)
-        if (Number(item.qty) > available) {
-          const opt = getOptions().find(o => o.id === item.material_id)
-          return toast.error(`Stok ${opt?.name || 'bahan'} tidak cukup (tersedia: ${available} ${opt?.unit || ''})`)
-        }
+    // Validasi stok — skip kalau data belum load
+if (type !== 'adjustment') {
+  const opts = getOptions()
+  if (opts.length > 0) {  // hanya validasi kalau data sudah load
+    for (const item of valid) {
+      const available = getAvailableQty(item.material_id)
+      const opt = opts.find(o => o.id === item.material_id)
+      if (available > 0 && Number(item.qty) > available) {
+        return toast.error(`Stok ${opt?.name || 'bahan'} tidak cukup (tersedia: ${available} ${opt?.unit || ''})`)
       }
     }
+  }
+}
 
     setSaving(true)
     try {

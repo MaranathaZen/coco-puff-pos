@@ -91,7 +91,7 @@ export default function App() {
   useAutoUpdate()
   useEffect(() => { seedIfEmpty() }, [])
   useEffect(() => {
-    if (user?.store_id) startSyncWorker(user.store_id)
+    if (user?.store_id) startSyncWorker(user.store_id, (user as any).region || 'malang')
     else stopSyncWorker()
   }, [user?.store_id])
 

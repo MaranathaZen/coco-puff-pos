@@ -1,9 +1,9 @@
 // src/pages/gudang/GudangPage.tsx
-// CHANGELOG:
-// - Fix auto expand/collapse: hari ini auto expand, hari lain auto collapse
-// - FIX avg_cost isolation: production_stock & stock (toko) punya avg_cost sendiri
-//   tidak ikut berubah saat gudang beli lagi dengan harga berbeda
-// - FIX to_store: mutasi gudang→toko sekarang update db.stock dengan material_id
+// CHANGELOG v3:
+// - Region isolation: semua data gudang tagged by region (malang/bali)
+// - Sync filter by region — gudang Malang tidak lihat data Bali
+// - avg_cost isolation tetap berlaku
+// - to_store fix tetap berlaku
 
 import { useState, useEffect, createContext, useContext, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -31,14 +31,14 @@ const KATEGORI_GUDANG = [
 ]
 
 const KATEGORI_BIAYA = [
-  { value: 'beban_bahan_baku',    label: 'Bahan Baku',   desc: 'Pembelian bahan produksi' },
-  { value: 'beban_tenaga_kerja',  label: 'Tenaga Kerja', desc: 'Gaji, upah harian' },
-  { value: 'beban_sewa',          label: 'Sewa',         desc: 'Sewa tempat, kontrak' },
-  { value: 'beban_utilitas',      label: 'Utilitas',     desc: 'Listrik, air, gas' },
-  { value: 'beban_packaging',     label: 'Packaging',    desc: 'Dus, plastik, stiker' },
-  { value: 'beban_transport',     label: 'Transport',    desc: 'Ongkir, bensin' },
-  { value: 'beban_pemasaran',     label: 'Pemasaran',    desc: 'Promosi, iklan' },
-  { value: 'beban_lainnya',       label: 'Lainnya',      desc: 'Pengeluaran lain-lain' },
+  { value: 'beban_bahan_baku',   label: 'Bahan Baku',   desc: 'Pembelian bahan produksi' },
+  { value: 'beban_tenaga_kerja', label: 'Tenaga Kerja', desc: 'Gaji, upah harian' },
+  { value: 'beban_sewa',         label: 'Sewa',         desc: 'Sewa tempat, kontrak' },
+  { value: 'beban_utilitas',     label: 'Utilitas',     desc: 'Listrik, air, gas' },
+  { value: 'beban_packaging',    label: 'Packaging',    desc: 'Dus, plastik, stiker' },
+  { value: 'beban_transport',    label: 'Transport',    desc: 'Ongkir, bensin' },
+  { value: 'beban_pemasaran',    label: 'Pemasaran',    desc: 'Promosi, iklan' },
+  { value: 'beban_lainnya',      label: 'Lainnya',      desc: 'Pengeluaran lain-lain' },
 ]
 
 const METODE_BAYAR = [
@@ -46,6 +46,12 @@ const METODE_BAYAR = [
   { value: 'transfer', label: 'Transfer' },
   { value: 'kredit',   label: 'Kredit / Tempo' },
 ]
+
+// ── Helper: ambil region dari user ───────────────────────────
+function useRegion(): string {
+  const { user } = useAuthStore()
+  return (user as any)?.region || 'malang'
+}
 
 async function generateMutationNumber() {
   const ds = new Date().toISOString().slice(0,10).replace(/-/g,'')
@@ -100,6 +106,7 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
 
 export default function GudangPage() {
   const { user } = useAuthStore()
+  const region   = useRegion()
   const [tab, setTab] = useState<Tab>('stok')
   const [syncing, setSyncing] = useState(false)
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
@@ -110,19 +117,19 @@ export default function GudangPage() {
       const pulls = await Promise.all([
         supabase.from('materials').select('*'),
         supabase.from('suppliers').select('*'),
-        supabase.from('warehouse_stock').select('*'),
-        supabase.from('purchases').select('*').order('created_at', { ascending: false }).limit(200),
+        supabase.from('warehouse_stock').select('*').eq('region', region),
+        supabase.from('purchases').select('*').eq('region', region).order('created_at', { ascending: false }).limit(200),
         supabase.from('purchase_items').select('*'),
-        supabase.from('warehouse_mutations').select('*').order('created_at', { ascending: false }).limit(200),
+        supabase.from('warehouse_mutations').select('*').eq('region', region).order('created_at', { ascending: false }).limit(200),
         supabase.from('warehouse_mutation_items').select('*'),
         supabase.from('partners').select('*'),
-        supabase.from('warehouse_expenses').select('*').order('created_at', { ascending: false }).limit(200),
+        supabase.from('warehouse_expenses').select('*').eq('region', region).order('created_at', { ascending: false }).limit(200),
       ])
       if (pulls[0].data !== null) {
         await db.materials.bulkPut(pulls[0].data || [])
         const serverIds = new Set((pulls[0].data || []).map((m: any) => m.id))
         const localMats = await db.materials.toArray()
-        const toDelete = localMats.filter(m => !serverIds.has(m.id)).map(m => m.id)
+        const toDelete  = localMats.filter(m => !serverIds.has(m.id)).map(m => m.id)
         if (toDelete.length) await db.materials.bulkDelete(toDelete)
       }
       if (pulls[1].data?.length) await db.suppliers.bulkPut(pulls[1].data)
@@ -146,7 +153,10 @@ export default function GudangPage() {
   return (
     <div className="flex flex-col h-full bg-white">
       <div className="px-4 pt-4 pb-0 flex items-center justify-between flex-shrink-0">
-        <h1 className="text-lg font-semibold text-gray-900">Gudang</h1>
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900">Gudang</h1>
+          <p className="text-xs text-gray-400 capitalize">{region}</p>
+        </div>
         <div className="flex items-center gap-2">
           {toolbarActions}
           <button onClick={syncData} disabled={syncing} className="p-2 rounded-full text-gray-400">
@@ -216,7 +226,8 @@ function GroupHeader({ label, total, count, expanded, onToggle }: {
 function StokTab({ userId }: { userId: string }) {
   const { user } = useAuthStore()
   const isOwnerManager = user?.role === 'owner' || user?.role === 'manager'
-  const setToolbar = useContext(ToolbarCtx)
+  const isOwner        = user?.role === 'owner'
+  const setToolbar     = useContext(ToolbarCtx)
   const [showForm,    setShowForm]    = useState(false)
   const [showOpening, setShowOpening] = useState(false)
   const [editMat,     setEditMat]     = useState<Material | null>(null)
@@ -320,7 +331,7 @@ function StokTab({ userId }: { userId: string }) {
         )}
       </div>
 
-      {showForm    && isOwnerManager && <MaterialForm material={editMat} onClose={() => { setShowForm(false); setEditMat(null) }} />}
+      {showForm    && isOwnerManager && <MaterialForm material={editMat} isOwner={isOwner} onClose={() => { setShowForm(false); setEditMat(null) }} />}
       {showOpening && isOwnerManager && <OpeningStockForm onClose={() => setShowOpening(false)} />}
     </div>
   )
@@ -626,7 +637,7 @@ function BiayaTab({ userId }: { userId: string }) {
   )
 }
 
-// ── MODAL BASE ─────────────────────────────────────────────────
+// ── MODAL BASE ────────────────────────────────────────────────
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -645,20 +656,18 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
 }
 
 // ── FORM: Bahan ───────────────────────────────────────────────
-function MaterialForm({ material, onClose }: { material: Material | null; onClose: () => void }) {
-  const { user } = useAuthStore()
-  const isOwner = user?.role === 'owner'
-  const [name,       setName]      = useState(material?.name || '')
-  const [category,   setCat]       = useState(material?.category || 'bahan_baku')
-  const [unit,       setUnit]      = useState(material?.unit || '')
-  const [unitCost,   setCost]      = useState(String(material?.unit_cost || '0'))
-  const [minStock,   setMin]       = useState(String(material?.min_stock || '0'))
-  const [customUnit, setCustom]    = useState(material ? !SATUAN.map(s => s.toLowerCase()).includes((material.unit || '').toLowerCase()) : false)
-  const [isActive,   setIsActive]  = useState(material?.is_active ?? true)
-  const [saving,     setSaving]    = useState(false)
+function MaterialForm({ material, isOwner, onClose }: { material: Material | null; isOwner: boolean; onClose: () => void }) {
+  const [name,       setName]     = useState(material?.name || '')
+  const [category,   setCat]      = useState(material?.category || 'bahan_baku')
+  const [unit,       setUnit]     = useState(material?.unit || '')
+  const [unitCost,   setCost]     = useState(String(material?.unit_cost || '0'))
+  const [minStock,   setMin]      = useState(String(material?.min_stock || '0'))
+  const [customUnit, setCustom]   = useState(material ? !SATUAN.map(s => s.toLowerCase()).includes((material.unit || '').toLowerCase()) : false)
+  const [isActive,   setIsActive] = useState(material?.is_active ?? true)
+  const [saving,     setSaving]   = useState(false)
 
   async function handleDelete() {
-    if (!material || !confirm(`Hapus "${material.name}" permanen?`)) return
+    if (!material || !isOwner || !confirm(`Hapus "${material.name}" permanen?`)) return
     try {
       await supabase.from('warehouse_mutation_items').delete().eq('material_id', material.id)
       await supabase.from('purchase_items').delete().eq('material_id', material.id)
@@ -745,11 +754,13 @@ function MaterialForm({ material, onClose }: { material: Material | null; onClos
 
 // ── FORM: Opening Stock ───────────────────────────────────────
 function OpeningStockForm({ onClose }: { onClose: () => void }) {
+  const { user }  = useAuthStore()
+  const region    = (user as any)?.region || 'malang'
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
-  const [items,   setItems]  = useState([{ material_id: '', qty: '', unit_cost: '' }])
-  const [date,    setDate]   = useState(new Date().toISOString().slice(0,10))
-  const [notes,   setNotes]  = useState('Saldo awal migrasi')
-  const [saving,  setSaving] = useState(false)
+  const [items,  setItems]  = useState([{ material_id: '', qty: '', unit_cost: '' }])
+  const [date,   setDate]   = useState(new Date().toISOString().slice(0,10))
+  const [notes,  setNotes]  = useState('Saldo awal migrasi')
+  const [saving, setSaving] = useState(false)
 
   function updateItem(i: number, f: string, v: string) {
     setItems(p => p.map((item, idx) => {
@@ -769,9 +780,16 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
     setSaving(true)
     try {
       for (const item of valid) {
-        const qty = Number(item.qty), cost = Number(item.unit_cost) || 0
-        const ws  = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
-        const wsd: WarehouseStock = { id: ws?.id || generateId(), material_id: item.material_id, qty_on_hand: qty, last_updated: now() }
+        const qty  = Number(item.qty)
+        const cost = Number(item.unit_cost) || 0
+        const ws   = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
+        const wsd: any = {
+          id: ws?.id || generateId(),
+          material_id: item.material_id,
+          qty_on_hand: qty,
+          region,
+          last_updated: now(),
+        }
         await db.warehouse_stock.put(wsd)
         await supabase.from('warehouse_stock').upsert(wsd)
         if (cost > 0) {
@@ -779,8 +797,14 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
           await supabase.from('materials').update({ unit_cost: cost, avg_cost: cost }).eq('id', item.material_id)
         }
         const mutId = generateId()
-        const mut = { id: mutId, mutation_type: 'opening_stock', destination_name: 'Saldo Awal', notes: notes || 'Stok awal', status: 'confirmed', created_by: 'system', created_at: `${date}T00:00:00.000Z`, confirmed_at: now(), confirmed_by: 'system' }
-        await db.warehouse_mutations.add(mut as any)
+        const mut: any = {
+          id: mutId, mutation_type: 'opening_stock', destination_name: 'Saldo Awal',
+          notes: notes || 'Stok awal', status: 'confirmed', region,
+          created_by: user?.id || 'system',
+          created_at: `${date}T00:00:00.000Z`,
+          confirmed_at: now(), confirmed_by: user?.id || 'system',
+        }
+        await db.warehouse_mutations.add(mut)
         await supabase.from('warehouse_mutations').insert(mut)
         const mi = { id: generateId(), mutation_id: mutId, material_id: item.material_id, qty, unit_cost: cost }
         await db.warehouse_mutation_items.add(mi)
@@ -835,6 +859,8 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
 
 // ── FORM: Pembelian ───────────────────────────────────────────
 function PembelianForm({ userId, onClose }: { userId: string; onClose: () => void }) {
+  const { user }  = useAuthStore()
+  const region    = (user as any)?.region || 'malang'
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const suppliers = useLiveQuery(() => db.suppliers.filter(s => s.is_active).toArray(), [])
 
@@ -873,20 +899,40 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
     try {
       const poNumber = await generatePONumber()
       const purchId  = generateId()
-      const purch: any = { id: purchId, po_number: poNumber, supplier_id: supplierId || undefined, invoice_no: invoiceNo || undefined, total_amount: total, payment_method: payMethod, transfer_to: transferTo || undefined, due_date: dueDate || undefined, status: 'received', notes: notes || undefined, created_by: userId, created_at: now() }
+      // REGION: tag pembelian dengan region gudang
+      const purch: any = {
+        id: purchId, po_number: poNumber,
+        supplier_id: supplierId || undefined,
+        invoice_no: invoiceNo || undefined,
+        total_amount: total, payment_method: payMethod,
+        transfer_to: transferTo || undefined,
+        due_date: dueDate || undefined,
+        status: 'received', notes: notes || undefined,
+        region,                    // ← tag region
+        created_by: userId, created_at: now(),
+      }
       await db.purchases.add(purch)
       await supabase.from('purchases').insert(purch)
+
       for (const item of valid) {
         const uc = getUnitCost(item)
         const pi = { id: generateId(), purchase_id: purchId, material_id: item.material_id, qty: Number(item.qty), unit_cost: uc, subtotal: Number(item.qty) * uc, qty_returned: 0 }
         await db.purchase_items.add(pi)
         await supabase.from('purchase_items').insert(pi)
-        // Update stok gudang
+
+        // Update stok gudang — tag region
         const ws  = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
-        const wsd: WarehouseStock = { id: ws?.id || generateId(), material_id: item.material_id, qty_on_hand: (ws?.qty_on_hand || 0) + Number(item.qty), last_updated: now() }
+        const wsd: any = {
+          id: ws?.id || generateId(),
+          material_id: item.material_id,
+          qty_on_hand: (ws?.qty_on_hand || 0) + Number(item.qty),
+          region,                  // ← tag region
+          last_updated: now(),
+        }
         await db.warehouse_stock.put(wsd)
         await supabase.from('warehouse_stock').upsert(wsd)
-        // Update moving average HANYA di gudang (materials) — produksi & toko tidak ikut berubah
+
+        // Update moving average HANYA di gudang (materials)
         if (uc > 0) {
           const mat = await db.materials.get(item.material_id)
           if (mat) {
@@ -895,19 +941,8 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
             const newQty   = prevQty + Number(item.qty)
             const newCost  = prevCost + Number(item.qty) * uc
             const avg      = newQty > 0 ? newCost / newQty : uc
-            await db.materials.update(item.material_id, {
-              unit_cost: avg,
-              avg_cost: avg,
-              total_qty_purchased: newQty,
-              total_cost_purchased: newCost,
-              updated_at: now(),
-            })
-            await supabase.from('materials').update({
-              unit_cost: avg,
-              avg_cost: avg,
-              total_qty_purchased: newQty,
-              total_cost_purchased: newCost,
-            }).eq('id', item.material_id)
+            await db.materials.update(item.material_id, { unit_cost: avg, avg_cost: avg, total_qty_purchased: newQty, total_cost_purchased: newCost, updated_at: now() })
+            await supabase.from('materials').update({ unit_cost: avg, avg_cost: avg, total_qty_purchased: newQty, total_cost_purchased: newCost }).eq('id', item.material_id)
           }
         }
       }
@@ -995,9 +1030,16 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
 
 // ── FORM: Mutasi ──────────────────────────────────────────────
 function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }) {
+  const { user }  = useAuthStore()
+  const region    = (user as any)?.region || 'malang'
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const partners  = useLiveQuery(() => db.partners.filter(p => p.is_active).toArray(), [])
-  const stores    = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
+  const stores    = useLiveQuery(async () => {
+    // Hanya tampilkan toko yang satu region
+    const all = await db.stores.filter(s => s.is_active).toArray()
+    return all.filter(s => (s as any).region === region || !(s as any).region)
+  }, [region])
+
   const [type,   setType]   = useState<'to_production'|'to_store'|'to_partner'|'internal_use'|'adjustment'>('to_production')
   const [destId, setDest]   = useState('')
   const [notes,  setNotes]  = useState('')
@@ -1022,25 +1064,22 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
         type === 'to_partner'    ? partners?.find(p => p.id === destId)?.name || '' :
         type === 'internal_use'  ? 'Pemakaian Internal' : ''
 
-      const mutId = generateId()
+      const mutId     = generateId()
       const mutNumber = await generateMutationNumber()
+      // REGION: tag mutasi dengan region gudang
       const mut: any = {
         id: mutId, mutation_number: mutNumber, mutation_type: type,
         destination_id: destId || undefined, destination_name: destName || undefined,
-        notes: notes || undefined, status: 'confirmed',
+        notes: notes || undefined, status: 'confirmed', region,
         created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId,
       }
       await db.warehouse_mutations.add(mut)
       await supabase.from('warehouse_mutations').insert(mut)
 
       for (const item of valid) {
-        const mat = await db.materials.get(item.material_id)
-
-        // Snapshot avg_cost gudang saat mutasi dibuat
-        // Nilai ini TIDAK akan berubah meski gudang beli lagi dengan harga berbeda
+        const mat          = await db.materials.get(item.material_id)
         const snapshotCost = mat?.avg_cost || mat?.unit_cost || 0
 
-        // Simpan mutation item dengan snapshot cost
         const mi: WarehouseMutationItem = {
           id: generateId(), mutation_id: mutId,
           material_id: item.material_id, qty: Number(item.qty),
@@ -1058,72 +1097,55 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
           await db.warehouse_stock.update(ws.id, { qty_on_hand: newQty, last_updated: now() })
           await supabase.from('warehouse_stock').update({ qty_on_hand: newQty }).eq('id', ws.id)
         } else if (type === 'adjustment') {
-          const wsd: WarehouseStock = { id: generateId(), material_id: item.material_id, qty_on_hand: Number(item.qty), last_updated: now() }
+          const wsd: any = { id: generateId(), material_id: item.material_id, qty_on_hand: Number(item.qty), region, last_updated: now() }
           await db.warehouse_stock.add(wsd)
           await supabase.from('warehouse_stock').insert(wsd)
         }
 
-        // ── TUJUAN: PRODUKSI ────────────────────────────────
+        // → PRODUKSI: tag region
         if (type === 'to_production') {
-          const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
+          const ps       = await db.production_stock.where('material_id').equals(item.material_id).first()
           const prevQty  = ps?.qty_on_hand || 0
-          const prevCost = ps?.avg_cost    || 0
+          const prevCost = (ps as any)?.avg_cost || 0
           const inQty    = Number(item.qty)
-          // Moving average produksi dihitung sendiri — independent dari gudang
-          const newTotalQty = prevQty + inQty
-          const newAvgCost  = newTotalQty > 0
-            ? (prevQty * prevCost + inQty * snapshotCost) / newTotalQty
-            : snapshotCost
+          const newQty   = prevQty + inQty
+          const newAvg   = newQty > 0 ? (prevQty * prevCost + inQty * snapshotCost) / newQty : snapshotCost
           const psd: any = {
             id: ps?.id || generateId(),
             material_id: item.material_id,
-            qty_on_hand: newTotalQty,
-            avg_cost: newAvgCost,
+            qty_on_hand: newQty,
+            avg_cost: newAvg,
+            region,               // ← tag region
             last_updated: now(),
           }
           await db.production_stock.put(psd)
           await supabase.from('production_stock').upsert(psd)
         }
 
-        // ── TUJUAN: TOKO ────────────────────────────────────
+        // → TOKO: update stock toko
         if (type === 'to_store' && destId) {
-          // Cari stok toko: coba by material_id dulu (data baru), fallback filter manual
           const existingStock = await db.stock
-            .where('material_id')
-            .equals(item.material_id)
-            .filter(s => s.store_id === destId)
+            .filter(s => s.store_id === destId && (
+              (s as any).material_id === item.material_id ||
+              s.ingredient_id === item.material_id
+            ))
             .first()
-            || await db.stock
-              .filter(s => s.store_id === destId && (s as any).material_id === item.material_id)
-              .first()
 
           const prevQty  = existingStock?.qty_on_hand ?? 0
           const prevCost = (existingStock as any)?.avg_cost ?? 0
           const inQty    = Number(item.qty)
-          // Moving average toko dihitung sendiri — independent dari gudang
-          const newTotalQty = prevQty + inQty
-          const newAvgCost  = newTotalQty > 0
-            ? (prevQty * prevCost + inQty * snapshotCost) / newTotalQty
-            : snapshotCost
+          const newQty   = prevQty + inQty
+          const newAvg   = newQty > 0 ? (prevQty * prevCost + inQty * snapshotCost) / newQty : snapshotCost
 
           if (existingStock) {
-            await db.stock.update(existingStock.id, {
-              qty_on_hand: newTotalQty,
-              avg_cost: newAvgCost,
-              last_updated: now(),
-            } as any)
-            await supabase.from('stock')
-              .update({ qty_on_hand: newTotalQty, avg_cost: newAvgCost, last_updated: now() })
-              .eq('id', existingStock.id)
+            await db.stock.update(existingStock.id, { qty_on_hand: newQty, avg_cost: newAvg, last_updated: now() } as any)
+            await supabase.from('stock').update({ qty_on_hand: newQty, avg_cost: newAvg }).eq('id', existingStock.id)
           } else {
-            // Buat record baru — ingredient_id diisi material_id sebagai jembatan
             const newStock: any = {
-              id: generateId(),
-              store_id: destId,
-              ingredient_id: item.material_id,   // jembatan: pakai material_id
+              id: generateId(), store_id: destId,
+              ingredient_id: item.material_id,
               material_id: item.material_id,
-              qty_on_hand: inQty,
-              avg_cost: snapshotCost,
+              qty_on_hand: inQty, avg_cost: snapshotCost,
               last_updated: now(),
             }
             await db.stock.add(newStock)
@@ -1170,124 +1192,19 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
       )}
       {type === 'to_partner' && (
         <div>
-          <Label required>Franchise</Label>
+          <Label required>Franchise / Kota Lain</Label>
           <select className="input" value={destId} onChange={e => setDest(e.target.value)}>
-            <option value="">Pilih franchise</option>
+            <option value="">Pilih tujuan</option>
             {partners?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
+          <p className="text-xs text-gray-400 mt-1">Termasuk pengiriman ke Bali (dianggap franchise)</p>
         </div>
       )}
       <div>
         <Label required>Item</Label>
         <div className="space-y-2">
           {items.map((item, i) => {
-            const mat = materials?.find(m => m.id === item.material_id)
+            const mat         = materials?.find(m => m.id === item.material_id)
             const displayCost = mat?.avg_cost || mat?.unit_cost || 0
             return (
-              <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
-                <select className="input text-sm" value={item.material_id}
-                  onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,material_id:e.target.value} : x))}>
-                  <option value="">Pilih bahan</option>
-                  {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
-                </select>
-                <div className="flex items-center gap-2">
-                  <input className="input text-sm flex-1" type="number" placeholder={`Qty (${mat?.unit || ''})`}
-                    value={item.qty}
-                    onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,qty:e.target.value} : x))} />
-                  {mat && item.qty && (
-                    <span className="text-xs text-gray-400 flex-shrink-0">
-                      {formatRupiah(Number(item.qty) * displayCost)}
-                      <span className="block text-gray-300">@ {formatRupiah(displayCost)}/{mat.unit}</span>
-                    </span>
-                  )}
-                </div>
-                {items.length > 1 && (
-                  <button onClick={() => setItems(p => p.filter((_,idx) => idx !== i))} className="text-xs text-red-400">Hapus item</button>
-                )}
-              </div>
-            )
-          })}
-        </div>
-        <button onClick={() => setItems(p => [...p, {material_id:'',qty:''}])} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
-      </div>
-      {totalNilai > 0 && (
-        <div className="flex items-center justify-between py-2 bg-gray-50 rounded-xl px-3">
-          <span className="text-sm text-gray-600">Total Nilai</span>
-          <span className="text-sm font-semibold">{formatRupiah(totalNilai)}</span>
-        </div>
-      )}
-      <div><Label>Catatan</Label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opsional" /></div>
-      <div className="flex gap-3">
-        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
-      </div>
-    </Modal>
-  )
-}
-
-// ── FORM: Biaya ───────────────────────────────────────────────
-function BiayaForm({ userId, onClose }: { userId: string; onClose: () => void }) {
-  const [name,       setName]   = useState('')
-  const [amount,     setAmount] = useState('')
-  const [category,   setCat]    = useState('beban_lainnya')
-  const [payMethod,  setPay]    = useState('tunai')
-  const [transferTo, setTrans]  = useState('')
-  const [dueDate,    setDue]    = useState('')
-  const [notes,      setNotes]  = useState('')
-  const [saving,     setSaving] = useState(false)
-
-  async function handleSave() {
-    if (!name.trim()) return toast.error('Keterangan wajib diisi')
-    if (!amount || Number(amount) <= 0) return toast.error('Jumlah wajib diisi')
-    setSaving(true)
-    try {
-      const expNumber = await generateExpenseNumber()
-      const data: any = {
-        id: generateId(), expense_number: expNumber, name: name.trim(),
-        amount: Number(amount), expense_date: now().slice(0,10),
-        category, payment_method: payMethod,
-        transfer_to: transferTo || undefined, due_date: dueDate || undefined,
-        notes: notes || undefined, created_by: userId, created_at: now(),
-      }
-      await db.warehouse_expenses.add(data)
-      await supabase.from('warehouse_expenses').insert(data)
-      toast.success('Biaya dicatat')
-      onClose()
-    } catch (e) { console.error(e); toast.error('Gagal menyimpan') }
-    finally { setSaving(false) }
-  }
-
-  return (
-    <Modal title="Catat Biaya" onClose={onClose}>
-      <div><Label required>Keterangan</Label><input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Bayar listrik Mei 2026" autoFocus /></div>
-      <div><Label required>Jumlah (Rp)</Label><input className="input" type="number" value={amount} onChange={e => setAmount(e.target.value)} /></div>
-      <div>
-        <Label required>Kategori</Label>
-        <div className="grid grid-cols-2 gap-2">
-          {KATEGORI_BIAYA.map(c => (
-            <button key={c.value} onClick={() => setCat(c.value)}
-              className={`px-3 py-2 rounded-xl text-left border ${category === c.value ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
-              <p className="text-xs font-medium">{c.label}</p>
-              <p className={`text-[10px] leading-tight mt-0.5 ${category === c.value ? 'text-gray-300' : 'text-gray-400'}`}>{c.desc}</p>
-            </button>
-          ))}
-        </div>
-      </div>
-      <div><Label required>Metode Bayar</Label>
-        <div className="flex gap-2">
-          {METODE_BAYAR.map(m => (
-            <button key={m.value} onClick={() => setPay(m.value)}
-              className={`flex-1 py-2 rounded-xl text-xs font-medium border ${payMethod === m.value ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>{m.label}</button>
-          ))}
-        </div>
-      </div>
-      {payMethod === 'transfer' && <div><Label>Transfer ke</Label><input className="input" value={transferTo} onChange={e => setTrans(e.target.value)} placeholder="BCA 1234567890" /></div>}
-      {payMethod === 'kredit'   && <div><Label>Jatuh Tempo</Label><input className="input" type="date" value={dueDate} onChange={e => setDue(e.target.value)} /></div>}
-      <div><Label>Catatan</Label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} /></div>
-      <div className="flex gap-3">
-        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
-      </div>
-    </Modal>
-  )
-}
+              <div key={i}

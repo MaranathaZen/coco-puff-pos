@@ -69,13 +69,17 @@ export default function UnifiedStokPage() {
   const role  = user?.role || 'kasir'
   const tabs  = TAB_ACCESS[role] || ['toko']
   const [tab,     setTab]     = useState<StokTab>(tabs[0])
+  // Reset header actions saat ganti tab
+  const handleTabChange = (newTab: StokTab) => { setTab(newTab); setHeaderActions(null) }
   const [syncing, setSyncing] = useState(false)
   const isOwnerManager = ['owner','manager'].includes(role)
+  const [headerActions, setHeaderActions] = useState<React.ReactNode>(null)
 
   async function syncAll() {
     setSyncing(true)
     try {
       const [mats, ws, ps, fgs, prods, stocks, cats, stores] = await Promise.all([
+        // stores dipull pertama agar filter toko langsung tersedia
         supabase.from('materials').select('*'),
         supabase.from('warehouse_stock').select('*'),
         supabase.from('production_stock').select('*'),
@@ -108,9 +112,12 @@ export default function UnifiedStokPage() {
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
         <h1 className="text-lg font-semibold text-gray-900">Stok</h1>
-        <button onClick={syncAll} disabled={syncing} className="p-2 text-gray-400 rounded-full">
-          <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
-        </button>
+        <div className="flex items-center gap-2">
+          {headerActions}
+          <button onClick={syncAll} disabled={syncing} className="p-2 text-gray-400 rounded-full">
+            <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
+          </button>
+        </div>
       </div>
       {tabConfig.length > 1 && (
         <div className="bg-white border-b border-gray-100 flex flex-shrink-0">
@@ -123,9 +130,9 @@ export default function UnifiedStokPage() {
         </div>
       )}
       <div className="flex-1 overflow-auto bg-gray-50">
-        {tab === 'gudang'   && <StokGudangView isOwnerManager={isOwnerManager} isOwner={role === 'owner'} />}
-        {tab === 'produksi' && <StokProduksiView isOwnerManager={isOwnerManager} />}
-        {tab === 'toko'     && <StokTokoView storeId={user?.store_id || ''} role={role} isOwnerManager={isOwnerManager} />}
+        {tab === 'gudang'   && <StokGudangView isOwnerManager={isOwnerManager} isOwner={role === 'owner'} setHeaderActions={setHeaderActions} />}
+        {tab === 'produksi' && <StokProduksiView isOwnerManager={isOwnerManager} setHeaderActions={setHeaderActions} />}
+        {tab === 'toko'     && <StokTokoView storeId={user?.store_id || ''} role={role} isOwnerManager={isOwnerManager} setHeaderActions={setHeaderActions} />}
       </div>
     </div>
   )
@@ -141,12 +148,29 @@ const KAT_FILTERS = [
 ]
 
 // ── STOK GUDANG ───────────────────────────────────────────────
-function StokGudangView({ isOwnerManager, isOwner }: { isOwnerManager: boolean; isOwner: boolean }) {
+function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: { isOwnerManager: boolean; isOwner: boolean; setHeaderActions: (n: React.ReactNode) => void }) {
   const [search,      setSearch]      = useState('')
   const [filterKat,   setFilterKat]   = useState('semua')
   const [showForm,    setShowForm]    = useState(false)
   const [showOpening, setShowOpening] = useState(false)
   const [editMat,     setEditMat]     = useState<Material | null>(null)
+
+  useEffect(() => {
+    if (!isOwnerManager) { setHeaderActions(null); return }
+    setHeaderActions(
+      <div className="flex items-center gap-1.5">
+        <button onClick={() => setShowOpening(true)}
+          className="flex items-center gap-1 text-xs font-medium text-blue-600 border border-blue-200 bg-blue-50 px-2.5 py-1.5 rounded-lg">
+          <Package size={12} /> Stok Awal
+        </button>
+        <button onClick={() => { setEditMat(null); setShowForm(true) }}
+          className="flex items-center gap-1 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg">
+          <Plus size={12} /> Tambah
+        </button>
+      </div>
+    )
+    return () => setHeaderActions(null)
+  }, [isOwnerManager])
 
   const data = useLiveQuery(async () => {
     const mats   = await db.materials.filter(m => m.is_active).toArray()
@@ -166,18 +190,7 @@ function StokGudangView({ isOwnerManager, isOwner }: { isOwnerManager: boolean; 
 
   return (
     <div className="p-4 space-y-3">
-      {isOwnerManager && (
-        <div className="flex gap-2 justify-end">
-          <button onClick={() => setShowOpening(true)}
-            className="flex items-center gap-1.5 text-xs font-medium text-blue-600 border border-blue-200 bg-blue-50 px-3 py-2 rounded-lg">
-            <Package size={13} /> Stok Awal
-          </button>
-          <button onClick={() => { setEditMat(null); setShowForm(true) }}
-            className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-3 py-2 rounded-lg">
-            <Plus size={13} /> Tambah Bahan
-          </button>
-        </div>
-      )}
+
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400">Nilai Stok</p>
@@ -235,13 +248,30 @@ function StokGudangView({ isOwnerManager, isOwner }: { isOwnerManager: boolean; 
 }
 
 // ── STOK PRODUKSI ─────────────────────────────────────────────
-function StokProduksiView({ isOwnerManager }: { isOwnerManager: boolean }) {
+function StokProduksiView({ isOwnerManager, setHeaderActions }: { isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void }) {
   const [search,    setSearch]    = useState('')
   const [filterKat, setFilterKat] = useState('semua')
   const [showFgsForm,  setShowFgsForm]  = useState(false)
   const [showPsForm,   setShowPsForm]   = useState(false)
   const [editFgs, setEditFgs] = useState<any>(null)
   const [editPs,  setEditPs]  = useState<any>(null)
+
+  useEffect(() => {
+    if (!isOwnerManager) { setHeaderActions(null); return }
+    setHeaderActions(
+      <div className="flex items-center gap-1.5">
+        <button onClick={() => { setEditFgs(null); setShowFgsForm(true) }}
+          className="flex items-center gap-1 text-xs font-medium text-blue-600 border border-blue-200 bg-blue-50 px-2.5 py-1.5 rounded-lg">
+          <Package size={12} /> Produk Jadi
+        </button>
+        <button onClick={() => { setEditPs(null); setShowPsForm(true) }}
+          className="flex items-center gap-1 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg">
+          <Plus size={12} /> Stok Bahan
+        </button>
+      </div>
+    )
+    return () => setHeaderActions(null)
+  }, [isOwnerManager])
 
   const data = useLiveQuery(async () => {
     const ps   = await db.production_stock.toArray()
@@ -281,14 +311,7 @@ function StokProduksiView({ isOwnerManager }: { isOwnerManager: boolean }) {
       <div>
         <div className="flex items-center justify-between mb-1.5">
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Produk Siap Kirim</p>
-          {isOwnerManager && (
-            <div className="flex gap-1.5">
-              <button onClick={() => { setEditFgs(null); setShowFgsForm(true) }}
-                className="flex items-center gap-1 text-xs font-medium text-blue-600 border border-blue-200 bg-blue-50 px-2.5 py-1.5 rounded-lg">
-                <Package size={12} /> Stok Awal
-              </button>
-            </div>
-          )}
+
         </div>
         {data?.fgs && data.fgs.length > 0 ? (
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
@@ -321,12 +344,7 @@ function StokProduksiView({ isOwnerManager }: { isOwnerManager: boolean }) {
       <div>
         <div className="flex items-center justify-between mb-1.5">
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Stok Bahan</p>
-          {isOwnerManager && (
-            <button onClick={() => { setEditPs(null); setShowPsForm(true) }}
-              className="flex items-center gap-1 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg">
-              <Plus size={12} /> Stok Awal Bahan
-            </button>
-          )}
+
         </div>
         <input value={search} onChange={e => setSearch(e.target.value)}
           className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none mb-2"
@@ -465,13 +483,13 @@ function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
 }
 
 // ── STOK TOKO ─────────────────────────────────────────────────
-function StokTokoView({ storeId, role, isOwnerManager }: { storeId: string; role: string; isOwnerManager: boolean }) {
+function StokTokoView({ storeId, role, isOwnerManager, setHeaderActions }: { storeId: string; role: string; isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void }) {
   const canSeeAllStores = ['owner','manager','gudang','produksi'].includes(role)
 
   const stores = useLiveQuery(() =>
     db.stores.filter(s => {
       if (!s.is_active) return false
-      if ((s as any).is_virtual) return false
+      // Filter berdasarkan ID (lebih reliable dari is_virtual yang mungkin belum sync)
       if (s.id.includes('gudang') || s.id.includes('produksi')) return false
       return true
     }).toArray()
@@ -507,6 +525,7 @@ function StokTokoView({ storeId, role, isOwnerManager }: { storeId: string; role
           key={activeStoreId}
           storeId={activeStoreId}
           isOwnerManager={isOwnerManager}
+          setHeaderActions={setHeaderActions}
         />
       )}
       {!activeStoreId && (
@@ -516,11 +535,22 @@ function StokTokoView({ storeId, role, isOwnerManager }: { storeId: string; role
   )
 }
 
-function StokTokoContent({ storeId, isOwnerManager }: { storeId: string; isOwnerManager: boolean }) {
+function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: { storeId: string; isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void }) {
   const [search,        setSearch]        = useState('')
   const [filterTokoKat, setFilterTokoKat] = useState('semua')
   const [showStokAwal,  setShowStokAwal]  = useState(false)
   const [editStock,     setEditStock]     = useState<any>(null)
+
+  useEffect(() => {
+    if (!isOwnerManager) { setHeaderActions(null); return }
+    setHeaderActions(
+      <button onClick={() => setShowStokAwal(true)}
+        className="flex items-center gap-1 text-xs font-medium text-blue-600 border border-blue-200 bg-blue-50 px-2.5 py-1.5 rounded-lg">
+        <Package size={12} /> Stok Awal
+      </button>
+    )
+    return () => setHeaderActions(null)
+  }, [isOwnerManager])
 
   const data = useLiveQuery(async () => {
     if (!storeId) return []
@@ -574,14 +604,7 @@ function StokTokoContent({ storeId, isOwnerManager }: { storeId: string; isOwner
 
   return (
     <div className="flex-1 overflow-auto p-4 space-y-3">
-      {isOwnerManager && (
-        <div className="flex justify-end">
-          <button onClick={() => setShowStokAwal(true)}
-            className="flex items-center gap-1.5 text-xs font-medium text-blue-600 border border-blue-200 bg-blue-50 px-3 py-2 rounded-lg">
-            <Package size={13} /> Stok Awal Toko
-          </button>
-        </div>
-      )}
+
 
       {filtered.length > 0 && totalNilai > 0 && (
         <div className="bg-white rounded-xl border border-gray-100 p-3">

@@ -144,10 +144,10 @@ function PembelianList({ userId, role, storeId }: { userId: string; role: string
 
   const isOwnerManager = ['owner','manager','gudang'].includes(role)
 
-  // Toko real + Gudang untuk filter (owner/manager/gudang saja)
+  // Toko real + Gudang (exclude produksi) untuk filter
   const stores = useLiveQuery(() =>
     isOwnerManager
-      ? db.stores.filter(s => s.is_active).toArray()
+      ? db.stores.filter(s => s.is_active && !s.id.includes('produksi')).toArray()
       : Promise.resolve([])
   , [isOwnerManager])
 
@@ -411,7 +411,13 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
         <div>
           <Label>Input Sebagai</Label>
           <select className="input" value={inputAsStore} onChange={e => setInputAsStore(e.target.value)}>
-            {allStores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {allStores
+              .filter(s => !s.id.includes('produksi'))
+              .map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.name.replace(' Malang','').replace(' Bali','')}
+                </option>
+              ))}
           </select>
         </div>
       )}

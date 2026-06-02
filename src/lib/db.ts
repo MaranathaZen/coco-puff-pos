@@ -17,7 +17,6 @@ export interface Material {
   category: 'bahan_baku' | 'bahan_setengah_jadi' | 'packaging' | 'non_produksi'
   unit: string; unit_cost: number; min_stock: number
   is_active: boolean; created_at: string; updated_at: string
-  // Moving average cost tracking (gudang)
   avg_cost?: number
   total_qty_purchased?: number
   total_cost_purchased?: number
@@ -37,13 +36,9 @@ export interface WarehouseStock {
   id: string; material_id: string; qty_on_hand: number; last_updated: string
 }
 
-// FIX: tambah avg_cost — isolated dari gudang, hanya berubah saat terima mutasi baru
 export interface ProductionStock {
-  id: string
-  material_id: string
-  qty_on_hand: number
-  avg_cost?: number   // snapshot harga saat diterima dari gudang, tidak ikut berubah saat gudang beli lagi
-  last_updated: string
+  id: string; material_id: string; qty_on_hand: number
+  avg_cost?: number; last_updated: string
 }
 
 export interface FinishedGoodsStock {
@@ -115,9 +110,7 @@ export interface WarehouseExpense {
   id: string; name: string; amount: number
   expense_number?: string
   expense_date: string; category: string
-  payment_method?: string
-  transfer_to?: string
-  due_date?: string
+  payment_method?: string; transfer_to?: string; due_date?: string
   notes?: string; created_by: string; created_at: string
 }
 
@@ -127,22 +120,14 @@ export interface MenuRoleConfig {
 }
 
 export interface StoreRecipe {
-  id: string
-  store_id: string
-  product_id: string
-  product_name: string
-  is_active: boolean
-  created_at: string
-  updated_at: string
+  id: string; store_id: string; product_id: string
+  product_name: string; is_active: boolean
+  created_at: string; updated_at: string
 }
 
 export interface StoreRecipeItem {
-  id: string
-  recipe_id: string
-  material_id: string
-  qty_used: number
-  source: 'warehouse' | 'production' | 'store'
-  notes?: string
+  id: string; recipe_id: string; material_id: string
+  qty_used: number; source: 'warehouse' | 'production' | 'store'; notes?: string
 }
 
 export class CocoPuffDB extends Dexie {
@@ -210,7 +195,7 @@ export class CocoPuffDB extends Dexie {
       partners:                  'id, name, is_active',
       warehouse_stock:           'id, material_id',
       production_stock:          'id, material_id',
-      finished_goods_stock:      'id, product_id',
+      finished_goods_stock:      'id, product_id, product_name',
       purchases:                 'id, supplier_id, status, created_at',
       purchase_items:            'id, purchase_id, material_id',
       purchase_returns:          'id, purchase_id, material_id, created_at',
@@ -228,38 +213,44 @@ export class CocoPuffDB extends Dexie {
     this.version(2).stores({ ...base, packages: 'id, is_active, store_id' })
     this.version(3).stores({ ...base, ...v3v4shared })
     this.version(4).stores({
-      ...base,
-      ...v3v4shared,
+      ...base, ...v3v4shared,
       warehouse_expenses: 'id, category, expense_date, created_at',
       menu_role_config:   'id, role, menu_path, [role+menu_path]',
     })
     this.version(5).stores({
-      ...base,
-      ...v3v4shared,
+      ...base, ...v3v4shared,
       warehouse_expenses: 'id, category, expense_date, created_at',
       menu_role_config:   'id, role, menu_path, [role+menu_path]',
       purchases:          'id, supplier_id, status, created_at, po_number',
     })
     this.version(6).stores({
-      ...base,
-      ...v3v4shared,
+      ...base, ...v3v4shared,
       warehouse_expenses:  'id, category, expense_date, created_at',
       menu_role_config:    'id, role, menu_path, [role+menu_path]',
       purchases:           'id, supplier_id, status, created_at, po_number',
       store_recipes:       'id, store_id, product_id, [store_id+product_id], is_active',
       store_recipe_items:  'id, recipe_id, material_id',
     })
-    // v7: tambah index material_id di stock agar mutasi gudang→toko bisa query by material
+    // v7: tambah index material_id di stock
     this.version(7).stores({
-      ...base,
-      ...v3v4shared,
+      ...base, ...v3v4shared,
       warehouse_expenses:  'id, category, expense_date, created_at',
       menu_role_config:    'id, role, menu_path, [role+menu_path]',
       purchases:           'id, supplier_id, status, created_at, po_number',
       store_recipes:       'id, store_id, product_id, [store_id+product_id], is_active',
       store_recipe_items:  'id, recipe_id, material_id',
-      // FIX: tambah index material_id di stock sebagai jembatan gudang→toko
       stock:               'id, store_id, ingredient_id, [store_id+ingredient_id], material_id',
+    })
+    // v8: tambah index product_name di finished_goods_stock + compound index store+material di stock
+    this.version(8).stores({
+      ...base, ...v3v4shared,
+      warehouse_expenses:  'id, category, expense_date, created_at',
+      menu_role_config:    'id, role, menu_path, [role+menu_path]',
+      purchases:           'id, supplier_id, status, created_at, po_number',
+      store_recipes:       'id, store_id, product_id, [store_id+product_id], is_active',
+      store_recipe_items:  'id, recipe_id, material_id',
+      stock:               'id, store_id, ingredient_id, [store_id+ingredient_id], material_id, [store_id+material_id]',
+      finished_goods_stock: 'id, product_id, product_name',
     })
   }
 }

@@ -611,7 +611,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
               last_updated: now(),
             } as any)
             const { error: updateErr } = await supabase.from('stock').update({
-              
+              qty_on_hand: newQty,   // FIX: qty_on_hand wajib ada
               avg_cost: newAvg,
               last_updated: now(),
             }).eq('id', existingStock.id)

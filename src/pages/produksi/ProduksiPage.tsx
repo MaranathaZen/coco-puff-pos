@@ -423,16 +423,31 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
       }
 
       const existing2 = await db.finished_goods_stock.filter(f => f.product_name === productName.trim()).first()
+      const fgsId     = existing2?.id || generateId()
+      const fgsProdId = existing2?.product_id || `fgs-${generateId().slice(0,8)}`
+      const newFgsQty = (existing2?.qty_on_hand || 0) + finalYield
       const fgsData: any = {
-        id:           existing2?.id || generateId(),
-        product_id:   existing2?.product_id || `prod-${generateId().slice(0,8)}`,
+        id:           fgsId,
+        product_id:   fgsProdId,
         product_name: productName.trim(),
-        qty_on_hand:  (existing2?.qty_on_hand || 0) + finalYield,
+        qty_on_hand:  newFgsQty,
         hpp_per_unit: hppPerUnit,
         last_updated: now(),
       }
+      // Simpan ke Dexie
       await db.finished_goods_stock.put(fgsData)
-      await supabase.from('finished_goods_stock').upsert(fgsData)
+      // Simpan ke Supabase — coba upsert dulu, fallback ke insert+update
+      if (existing2) {
+        // Update existing
+        const { error: fgsErr } = await supabase.from('finished_goods_stock')
+          .update({ qty_on_hand: newFgsQty, hpp_per_unit: hppPerUnit, last_updated: now() })
+          .eq('id', fgsId)
+        if (fgsErr) console.error('[FGS UPDATE ERROR]', fgsErr)
+      } else {
+        // Insert baru
+        const { error: fgsErr } = await supabase.from('finished_goods_stock').insert(fgsData)
+        if (fgsErr) console.error('[FGS INSERT ERROR]', fgsErr)
+      }
 
       toast.success(`Produksi ${logNumber} dicatat: ${totalYield} ${selectedRecipe?.yield_unit || 'pcs'}`)
       onClose()

@@ -203,13 +203,12 @@ export default function Layout() {
                 </NavLink>
               )
             })}
-            {moreMenus.length > 0 && (
-              <button onClick={() => setShowMore(true)}
-                className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${isMoreActive ? 'text-gray-900' : 'text-gray-400'}`}>
-                <MoreHorizontal size={20} strokeWidth={isMoreActive ? 2 : 1.5} />
-                <span>Lainnya</span>
-              </button>
-            )}
+            {/* Selalu tampilkan tombol Lainnya — untuk logout + menu overflow */}
+            <button onClick={() => setShowMore(true)}
+              className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${isMoreActive ? 'text-gray-900' : 'text-gray-400'}`}>
+              <MoreHorizontal size={20} strokeWidth={isMoreActive ? 2 : 1.5} />
+              <span>Lainnya</span>
+            </button>
           </div>
         </div>
       </div>

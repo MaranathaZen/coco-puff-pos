@@ -236,7 +236,7 @@ function PembelianList({ userId, role, storeId }: { userId: string; role: string
           {stores.map(s => (
             <button key={s.id} onClick={() => setFilterStore(s.id)}
               className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore===s.id?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
-              {s.name}
+              {s.name.replace(' Malang','').replace(' Bali','')}
             </button>
           ))}
         </div>

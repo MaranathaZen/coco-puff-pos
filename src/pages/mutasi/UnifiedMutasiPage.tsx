@@ -144,8 +144,9 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
   })
 
   const isOwnerManager = ['owner','manager'].includes(role)
+  // Include semua toko aktif termasuk gudang dan produksi untuk filter mutasi
   const stores = useLiveQuery(() =>
-    db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+    db.stores.filter(s => s.is_active).toArray()
   , [])
 
   useEffect(() => {

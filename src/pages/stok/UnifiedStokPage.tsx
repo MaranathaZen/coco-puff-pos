@@ -495,13 +495,21 @@ function StokTokoView({ storeId, role, isOwnerManager, setHeaderActions }: { sto
     }).toArray()
   , [])
 
+  // Inisialisasi selectedStore: ambil toko pertama dari stores atau storeId
+  const firstStoreId = stores && stores.length > 0 ? stores[0].id : ''
   const [selectedStore, setSelectedStore] = useState('')
 
+  // Set default selectedStore saat stores pertama kali load
   useEffect(() => {
     if (!canSeeAllStores) {
       setSelectedStore(storeId)
-    } else if (stores && stores.length > 0 && !selectedStore) {
-      setSelectedStore(stores[0].id)
+    } else if (stores && stores.length > 0) {
+      // Hanya set jika belum ada pilihan atau pilihan sekarang tidak valid
+      setSelectedStore(prev => {
+        if (!prev) return stores[0].id
+        const stillValid = stores.some(s => s.id === prev)
+        return stillValid ? prev : stores[0].id
+      })
     }
   }, [stores, canSeeAllStores, storeId])
 
@@ -540,6 +548,15 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: { storeI
   const [filterTokoKat, setFilterTokoKat] = useState('semua')
   const [showStokAwal,  setShowStokAwal]  = useState(false)
   const [editStock,     setEditStock]     = useState<any>(null)
+
+  // Auto-fetch stok dari Supabase saat toko berubah
+  // Ini memastikan data selalu fresh tanpa perlu klik sync manual
+  useEffect(() => {
+    if (!storeId) return
+    supabase.from('stock').select('*').eq('store_id', storeId).then(({ data }) => {
+      if (data?.length) db.stock.bulkPut(data).catch(() => {})
+    })
+  }, [storeId])
 
   useEffect(() => {
     if (!isOwnerManager) { setHeaderActions(null); return }

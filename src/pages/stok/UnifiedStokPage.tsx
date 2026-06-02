@@ -10,7 +10,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now } from '@/lib/db'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
-import { Warehouse, FlaskConical, Store, RefreshCw, AlertCircle, Plus, Package, X, Trash2, Edit2 } from 'lucide-react'
+import { Warehouse, FlaskConical, Store, RefreshCw, AlertCircle, Plus, Package, X, Trash2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 import type { Material, WarehouseStock } from '@/lib/db'
@@ -316,21 +316,16 @@ function StokProduksiView({ isOwnerManager, setHeaderActions }: { isOwnerManager
         {data?.fgs && data.fgs.length > 0 ? (
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             {data.fgs.map((f, idx) => (
-              <div key={f.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+              <div key={f.id}
+                onClick={() => { if(isOwnerManager) { setEditFgs(f); setShowFgsForm(true) } }}
+                className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${isOwnerManager ? 'cursor-pointer active:bg-gray-50' : ''}`}>
                 <div className="flex-1">
                   <p className="text-sm font-medium text-gray-900">{f.product_name}</p>
                   {(f as any).hpp_per_unit > 0 && <p className="text-xs text-gray-400">HPP {formatRupiah((f as any).hpp_per_unit)}/pcs</p>}
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="text-right">
-                    <p className="text-sm font-bold text-blue-600">{f.qty_on_hand} pcs</p>
-                    <p className="text-xs text-gray-400">{formatRupiah(f.qty_on_hand * ((f as any).hpp_per_unit || 0))}</p>
-                  </div>
-                  {isOwnerManager && (
-                    <button onClick={() => { setEditFgs(f); setShowFgsForm(true) }} className="p-1.5 text-gray-400 rounded-lg">
-                      <Edit2 size={13} />
-                    </button>
-                  )}
+                <div className="text-right">
+                  <p className="text-sm font-bold text-blue-600">{f.qty_on_hand} pcs</p>
+                  <p className="text-xs text-gray-400">{formatRupiah(f.qty_on_hand * ((f as any).hpp_per_unit || 0))}</p>
                 </div>
               </div>
             ))}
@@ -368,11 +363,6 @@ function StokProduksiView({ isOwnerManager, setHeaderActions }: { isOwnerManager
                   <p className="text-sm font-semibold text-gray-900">{s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.material?.unit}</span></p>
                   <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand * s.displayAvgCost)}</p>
                 </div>
-                {isOwnerManager && (
-                  <button onClick={() => { setEditPs(s); setShowPsForm(true) }} className="p-1.5 text-gray-400 rounded-lg">
-                    <Edit2 size={13} />
-                  </button>
-                )}
               </div>
             </div>
           ))}
@@ -661,11 +651,6 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: { storeI
                 </p>
                 {s.avg_cost > 0 && <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand*s.avg_cost)}</p>}
               </div>
-              {isOwnerManager && (
-                <button onClick={() => setEditStock(s)} className="p-1.5 text-gray-400 rounded-lg">
-                  <Edit2 size={13} />
-                </button>
-              )}
             </div>
           </div>
         ))}

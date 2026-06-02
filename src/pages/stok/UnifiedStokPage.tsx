@@ -582,18 +582,24 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
   const [filterTokoKat, setFilterTokoKat] = useState('semua')
   const canSeeAllStores = ['owner','manager','gudang','produksi'].includes(role)
   const stores = useLiveQuery(() =>
-    db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+    db.stores.filter(s => {
+      if (!s.is_active) return false
+      // Filter toko virtual - cek is_virtual atau dari store_id
+      if ((s as any).is_virtual) return false
+      if (s.id.includes('gudang') || s.id.includes('produksi')) return false
+      return true
+    }).toArray()
   , [])
-  // Auto-select toko pertama jika user adalah gudang/owner/manager (store_id mereka adalah toko virtual)
-  const defaultStore = canSeeAllStores ? '' : storeId
-  const [selectedStore, setSelectedStore] = useState(defaultStore)
+  const [selectedStore, setSelectedStore] = useState('')
 
-  // Saat stores load, auto-select toko pertama jika belum ada yang dipilih
+  // Auto-select: kasir → toko sendiri, gudang/owner/manager → toko pertama dari list
   useEffect(() => {
-    if (canSeeAllStores && !selectedStore && stores && stores.length > 0) {
+    if (!canSeeAllStores) {
+      setSelectedStore(storeId)
+    } else if (stores && stores.length > 0 && !selectedStore) {
       setSelectedStore(stores[0].id)
     }
-  }, [stores, canSeeAllStores, selectedStore])
+  }, [stores, canSeeAllStores, storeId])
 
   const activeStoreId = canSeeAllStores ? selectedStore : storeId
 

@@ -145,12 +145,13 @@ function BiayaList({ userId, role, storeId }: { userId: string; role: string; st
   }))
 
   const isOwnerManager = ['owner','manager','gudang'].includes(role)
-  const [filterStore,  setFilterStore]  = useState('semua')
+  const [filterStore,  setFilterStore]  = useState(() => role === 'gudang' ? storeId : 'semua')
 
   // Toko real untuk filter
+  // Include semua toko termasuk gudang untuk filter biaya
   const stores = useLiveQuery(() =>
     isOwnerManager
-      ? db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+      ? db.stores.filter(s => s.is_active).toArray()
       : Promise.resolve([])
   , [isOwnerManager])
 
@@ -294,12 +295,19 @@ function BiayaList({ userId, role, storeId }: { userId: string; role: string; st
       {filtered.length === 0 && (
         <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">Belum ada catatan biaya</div>
       )}
-      {showForm && <BiayaForm userId={userId} storeId={storeId} onClose={() => setShowForm(false)} />}
+      {showForm && <BiayaForm userId={userId} storeId={storeId} role={role} onClose={() => setShowForm(false)} />}
     </div>
   )
 }
 
-function BiayaForm({ userId, storeId, onClose }: { userId: string; storeId: string; onClose: () => void }) {
+function BiayaForm({ userId, storeId, role, onClose }: { userId: string; storeId: string; role: string; onClose: () => void }) {
+  const isOwnerManager = ['owner','manager'].includes(role)
+  const allStores = useLiveQuery(() =>
+    isOwnerManager ? db.stores.filter(s => s.is_active).toArray() : Promise.resolve([])
+  , [isOwnerManager])
+  const [inputAsStore, setInputAsStore] = useState(storeId)
+  const activeStoreId = isOwnerManager ? inputAsStore : storeId
+
   const [name,       setName]       = useState('')
   const [amount,     setAmount]     = useState('')
   const [category,   setCat]        = useState('beban_lainnya')
@@ -317,7 +325,7 @@ function BiayaForm({ userId, storeId, onClose }: { userId: string; storeId: stri
       const expNumber = await generateExpenseNumber()
       const data: any = {
         id: generateId(), expense_number: expNumber,
-        store_id: storeId, name: name.trim(),
+        store_id: activeStoreId, name: name.trim(),
         amount: Number(amount), expense_date: now().slice(0,10),
         category, payment_method: payMethod,
         transfer_to: transferTo || undefined,
@@ -336,6 +344,14 @@ function BiayaForm({ userId, storeId, onClose }: { userId: string; storeId: stri
 
   return (
     <Modal title="Catat Biaya" onClose={onClose}>
+      {isOwnerManager && allStores && allStores.length > 0 && (
+        <div>
+          <Label>Input Sebagai</Label>
+          <select className="input" value={inputAsStore} onChange={e => setInputAsStore(e.target.value)}>
+            {allStores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+      )}
       <div><Label required>Keterangan</Label>
         <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Bayar listrik Mei 2026" autoFocus />
       </div>

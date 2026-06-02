@@ -331,6 +331,17 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
 
 // ── FORM MUTASI ───────────────────────────────────────────────
 function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: string; storeId: string; onClose: () => void }) {
+  const isOwnerManager = ['owner','manager'].includes(role)
+  // Untuk owner/manager: bisa pilih "input sebagai" role apa
+  const allStores  = useLiveQuery(() =>
+    isOwnerManager ? db.stores.filter(s => s.is_active).toArray() : Promise.resolve([])
+  , [isOwnerManager])
+  const [inputAsRole,  setInputAsRole]  = useState(role)
+  const [inputAsStore, setInputAsStore] = useState(storeId)
+  // Role efektif yang dipakai untuk logika mutasi
+  const effectiveRole    = isOwnerManager ? inputAsRole  : role
+  const effectiveStoreId = isOwnerManager ? inputAsStore : storeId
+
   const materials  = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const partners   = useLiveQuery(() => db.partners.filter(p => p.is_active).toArray(), [])
   // Filter toko virtual (gudang/produksi) dari dropdown tujuan
@@ -339,7 +350,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
   , [])
 
   const warehouseStocks = useLiveQuery(async () => {
-    if (!['owner','manager','gudang'].includes(role)) return []
+    if (!['owner','manager','gudang'].includes(effectiveRole)) return []
     const ws   = await db.warehouse_stock.toArray()
     const mats = await db.materials.filter(m => m.is_active).toArray()
     const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
@@ -356,7 +367,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
   }, [role])
 
   const prodStocks = useLiveQuery(async () => {
-    if (role !== 'produksi') return []
+    if (effectiveRole !== 'produksi') return []
     const ps   = await db.production_stock.toArray()
     const mats = await db.materials.toArray()
     const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
@@ -374,13 +385,13 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
   }, [role])
 
   const fgStocks = useLiveQuery(async () => {
-    if (role !== 'produksi') return []
+    if (effectiveRole !== 'produksi') return []
     return await db.finished_goods_stock.filter(f => f.qty_on_hand > 0).toArray()
   }, [role])
 
   const storeStocks = useLiveQuery(async () => {
-    if (role !== 'kasir') return []
-    const stocks = await db.stock.where('store_id').equals(storeId).toArray()
+    if (effectiveRole !== 'kasir') return []
+    const stocks = await db.stock.where('store_id').equals(effectiveStoreId).toArray()
     const prods  = await db.products.toArray()
     const mats   = await db.materials.toArray()
     const pMap   = Object.fromEntries(prods.map(p => [p.id, p]))
@@ -418,7 +429,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
     return result
   }, [storeId, role])
 
-  const availableTypes = ROLE_TYPES[role] || ROLE_TYPES.gudang
+  const availableTypes = ROLE_TYPES[effectiveRole] || ROLE_TYPES.gudang
   const [type,   setType]   = useState(availableTypes[0])
   const [destId, setDest]   = useState('')
   const [notes,  setNotes]  = useState('')
@@ -426,8 +437,8 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
   const [saving, setSaving] = useState(false)
 
   function getOptions(): { id: string; name: string; unit: string; qty: number | null; avg_cost?: number }[] {
-    if (role === 'kasir') return (storeStocks || [])
-    if (role === 'produksi') {
+    if (effectiveRole === 'kasir') return (storeStocks || [])
+    if (effectiveRole === 'produksi') {
       if (type === 'to_store' || type === 'to_partner') {
         // Kirim ke toko/franchise: hanya produk jadi
         return (fgStocks || []).map((f: any) => ({
@@ -456,7 +467,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
   }
 
   function getSnapshotCost(materialId: string): number {
-    if (role === 'produksi') {
+    if (effectiveRole === 'produksi') {
       const fg = (fgStocks || []).find((f: any) => (f.product_id ?? f.id) === materialId)
       if (fg) return (fg as any).hpp_per_unit || 0
       const ps = (prodStocks || []).find(s => s.id === materialId)
@@ -468,8 +479,8 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
   }
 
   function getAvailableQty(materialId: string): number {
-    if (role === 'kasir') return (storeStocks || []).find(s => s.id === materialId)?.qty || 0
-    if (role === 'produksi') {
+    if (effectiveRole === 'kasir') return (storeStocks || []).find(s => s.id === materialId)?.qty || 0
+    if (effectiveRole === 'produksi') {
       if (type === 'to_store' || type === 'to_partner') {
         const fg = (fgStocks || []).find((f: any) => (f.product_id ?? f.id) === materialId)
         return fg?.qty_on_hand || 0
@@ -505,7 +516,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
     try {
       const destName =
         type === 'to_production' ? 'Produksi' :
-        type === 'to_store'      ? stores?.find(s => s.id === destId)?.name || '' :
+        type === 'to_store'      ? (stores?.find(s => s.id === destId)?.name || '') :
         type === 'to_partner'    ? partners?.find(p => p.id === destId)?.name || '' :
         type === 'internal_use'  ? 'Pemakaian Internal' : ''
 
@@ -515,7 +526,8 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
         id: mutId, mutation_number: mutNumber, mutation_type: type,
         destination_id: destId || undefined, destination_name: destName || undefined,
         notes: notes || undefined, status: 'confirmed',
-        created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId,
+        created_by: userId, acting_store_id: effectiveStoreId,
+        created_at: now(), confirmed_at: now(), confirmed_by: userId,
       }
       await db.warehouse_mutations.add(mut)
       await supabase.from('warehouse_mutations').insert(mut)
@@ -533,9 +545,9 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
         await supabase.from('warehouse_mutation_items').insert(mi)
 
         // ── Kurangi stok ASAL ──────────────────────────────
-        if (role === 'kasir') {
+        if (effectiveRole === 'kasir') {
           const ss = await db.stock.filter(s =>
-            s.store_id === storeId && (
+            s.store_id === effectiveStoreId && (
               (s as any).material_id === item.material_id ||
               s.ingredient_id === item.material_id
             )
@@ -547,7 +559,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
             await db.stock.update(ss.id, { qty_on_hand: newQty, last_updated: now() } as any)
             await supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', ss.id)
           }
-        } else if (role === 'produksi') {
+        } else if (effectiveRole === 'produksi') {
           const isFg = (type === 'to_store' || type === 'to_partner') &&
             (fgStocks || []).some((f: any) => (f.product_id ?? f.id) === item.material_id)
           if (isFg) {
@@ -680,6 +692,39 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
 
   return (
     <Modal title="Catat Mutasi" onClose={onClose}>
+      {isOwnerManager && (
+        <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 space-y-2">
+          <p className="text-xs font-medium text-blue-700">Input Sebagai</p>
+          <div className="grid grid-cols-2 gap-2">
+            {(['gudang','produksi','kasir'] as const).map(r => (
+              <button key={r} onClick={() => {
+                setInputAsRole(r)
+                // Auto-set store sesuai role
+                if (r === 'gudang') {
+                  const g = allStores?.find(s => s.id.includes('gudang'))
+                  if (g) setInputAsStore(g.id)
+                } else if (r === 'produksi') {
+                  const p = allStores?.find(s => s.id.includes('produksi'))
+                  if (p) setInputAsStore(p.id)
+                } else {
+                  const realStore = allStores?.find(s => !(s as any).is_virtual && !s.id.includes('gudang') && !s.id.includes('produksi'))
+                  if (realStore) setInputAsStore(realStore.id)
+                }
+              }}
+                className={`py-1.5 rounded-lg text-xs font-medium border capitalize ${inputAsRole===r?'bg-blue-700 text-white border-blue-700':'border-blue-200 text-blue-600'}`}>
+                {r}
+              </button>
+            ))}
+          </div>
+          {inputAsRole === 'kasir' && allStores && (
+            <select className="input text-xs" value={inputAsStore} onChange={e => setInputAsStore(e.target.value)}>
+              {allStores.filter(s => !(s as any).is_virtual && !s.id.includes('gudang') && !s.id.includes('produksi')).map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
       <div>
         <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
           Tujuan <span className="text-red-500 font-bold">*</span>
@@ -699,7 +744,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Toko Tujuan *</label>
           <select className={`input ${!destId ? 'border-red-200' : ''}`} value={destId} onChange={e => setDest(e.target.value)}>
             <option value="">-- Pilih toko</option>
-            {stores?.filter(s => s.id !== storeId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {stores?.filter(s => s.id !== effectiveStoreId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
       )}

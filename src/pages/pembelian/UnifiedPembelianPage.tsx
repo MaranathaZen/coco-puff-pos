@@ -137,19 +137,22 @@ function PembelianList({ userId, role, storeId }: { userId: string; role: string
   const [showForm,     setShowForm]     = useState(false)
   const [groupMode,    setGroupMode]    = useState<Period>('hari')
   const [search,       setSearch]       = useState('')
-  const [filterStore,  setFilterStore]  = useState('semua')
+  const [filterStore,  setFilterStore]  = useState(() => role === 'gudang' ? storeId : 'semua')
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
     [new Date().toISOString().slice(0, 10)]: true
   }))
 
   const isOwnerManager = ['owner','manager','gudang'].includes(role)
 
-  // Toko real untuk filter (owner/manager/gudang saja)
+  // Toko real + Gudang untuk filter (owner/manager/gudang saja)
   const stores = useLiveQuery(() =>
     isOwnerManager
-      ? db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+      ? db.stores.filter(s => s.is_active).toArray()
       : Promise.resolve([])
   , [isOwnerManager])
+
+  // Default filter: gudang jika role gudang, semua jika owner/manager
+  const defaultFilter = role === 'gudang' ? storeId : 'semua'
 
   useEffect(() => {
     setToolbar(
@@ -308,12 +311,19 @@ function PembelianList({ userId, role, storeId }: { userId: string; role: string
           {isOwnerManager && filterStore !== 'semua' ? 'Belum ada pembelian untuk toko ini' : 'Belum ada pembelian'}
         </div>
       )}
-      {showForm && <PembelianForm userId={userId} storeId={storeId} onClose={() => setShowForm(false)} />}
+      {showForm && <PembelianForm userId={userId} storeId={storeId} role={role} onClose={() => setShowForm(false)} />}
     </div>
   )
 }
 
-function PembelianForm({ userId, storeId, onClose }: { userId: string; storeId: string; onClose: () => void }) {
+function PembelianForm({ userId, storeId, role, onClose }: { userId: string; storeId: string; role: string; onClose: () => void }) {
+  const isOwnerManager = ['owner','manager'].includes(role)
+  const allStores = useLiveQuery(() =>
+    isOwnerManager ? db.stores.filter(s => s.is_active).toArray() : Promise.resolve([])
+  , [isOwnerManager])
+  const [inputAsStore, setInputAsStore] = useState(storeId)
+  const activeStoreId = isOwnerManager ? inputAsStore : storeId
+
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const suppliers = useLiveQuery(() => db.suppliers.filter(s => s.is_active !== false).toArray(), [])
 
@@ -355,7 +365,7 @@ function PembelianForm({ userId, storeId, onClose }: { userId: string; storeId: 
       const poNumber = await generatePONumber()
       const purchId  = generateId()
       const purch: any = {
-        id: purchId, po_number: poNumber, store_id: storeId,
+        id: purchId, po_number: poNumber, store_id: activeStoreId,
         supplier_id: supplierId || undefined, invoice_no: invoiceNo || undefined,
         total_amount: total, payment_method: payMethod,
         transfer_to: transferTo || undefined, due_date: dueDate || undefined,
@@ -397,6 +407,14 @@ function PembelianForm({ userId, storeId, onClose }: { userId: string; storeId: 
 
   return (
     <Modal title="Pembelian Baru" onClose={onClose}>
+      {isOwnerManager && allStores && allStores.length > 0 && (
+        <div>
+          <Label>Input Sebagai</Label>
+          <select className="input" value={inputAsStore} onChange={e => setInputAsStore(e.target.value)}>
+            {allStores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <div><Label>Supplier</Label>
           <select className="input" value={supplierId} onChange={e => setSupp(e.target.value)}>

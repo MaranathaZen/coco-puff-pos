@@ -278,9 +278,12 @@ function PaketTab({ storeId }: { storeId: string }) {
   )
 }
 
-// ── PRODUK PER TOKO TAB ──────────────────────────────────────
+// ── PRODUK PER TOKO TAB v2 ──────────────────────────────────
 function ProdukTokoTab() {
-  const products = useLiveQuery(() => db.products.filter(p => p.is_active).orderBy('name').toArray(), [])
+  const products = useLiveQuery(async () => {
+    const all = await db.products.filter(p => p.is_active).toArray()
+    return all.sort((a, b) => a.name.localeCompare(b.name))
+  }, [])
   const stores   = useLiveQuery(() => db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray(), [])
   const prices   = useLiveQuery(() => db.store_product_prices.toArray(), [])
   const [saving, setSaving] = useState(false)

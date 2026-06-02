@@ -334,8 +334,8 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
       const data: any = {
         id: prodId, category_id: categoryId, name: name.trim(),
         sku: sku||undefined, base_price: Number(price), unit: unit||'pcs',
-        auto_package: autoPkg, pkg_qty: autoPkg?Number(pkgQty):null,
-        pkg_unit: autoPkg?(pkgUnit||'dus'):null,
+        auto_package: autoPkg, pkg_qty: autoPkg?Number(pkgQty):0,
+        pkg_unit: autoPkg?(pkgUnit||'dus'):'',
         is_active: isActive, created_at: product?.created_at||now(), updated_at: now(),
       }
       await db.products.put(data)

@@ -6,13 +6,12 @@
 
 import { useState, useMemo, useEffect, useContext, createContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, generateId, now } from '@/lib/db'
+import { db, generateId, now, type WarehouseStock } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
 import { Plus, RefreshCw, X } from 'lucide-react'
 import toast from 'react-hot-toast'
-import type { WarehouseStock } from '@/lib/db'
 
 const ToolbarCtx = createContext<(node: React.ReactNode) => void>(() => {})
 type Period = 'hari' | 'bulan'

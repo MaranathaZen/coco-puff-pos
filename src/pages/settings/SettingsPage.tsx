@@ -85,7 +85,6 @@ export default function SettingsPage() {
 // ── USERS TAB ─────────────────────────────────────────────────
 function UsersTab({ currentUser }: { currentUser: User }) {
   const isOwner  = currentUser.role === 'owner'
-  const region   = getUserRegion(currentUser)
   const [showForm,    setShowForm]    = useState(false)
   const [editUser,    setEdit]        = useState<User | null>(null)
   const [filterStore, setFilterStore] = useState('semua')
@@ -98,7 +97,7 @@ function UsersTab({ currentUser }: { currentUser: User }) {
     if (isOwner) {
       const storeIds = new Set((stores || []).map(s => s.id))
       const all = await db.users.toArray()
-      return all.filter(u => storeIds.has(u.store_id)).sort((a, b) => a.name.localeCompare(b.name))
+      return all.filter(u => storeIds.has(u.store_id) || isOwner).sort((a, b) => a.name.localeCompare(b.name))
     }
     return db.users.where('store_id').equals(currentUser.store_id).toArray()
   }, [isOwner, currentUser.store_id, stores])

@@ -1,7 +1,7 @@
 // src/pages/cashier/CloseOrderPage.tsx
-// CHANGELOG:
-// - Hapus card summary omzet + laporan masuk (owner/gudang view)
-// - Tampilkan langsung daftar close order per toko
+// CHANGELOG v2:
+// - Filter toko virtual (gudang/produksi) dari tampilan
+// - Filter by region — gudang Malang tidak lihat data Bali
 // - Auto expand hari ini
 
 import { useState, useMemo, useEffect } from 'react'
@@ -26,13 +26,14 @@ const PAY_METHODS = [
 
 export default function CloseOrderPage() {
   const { user } = useAuthStore()
+  const region         = (user as any)?.region || 'malang'
   const isOwnerManager = ['owner','manager','gudang'].includes(user?.role || '')
-  const [period, setPeriod]       = useState<Period>('hari')
-  const [filterStore, setFilterStore] = useState('semua')
-  const [syncing, setSyncing]     = useState(false)
+  const [period,       setPeriod]       = useState<Period>('hari')
+  const [filterStore,  setFilterStore]  = useState('semua')
+  const [syncing,      setSyncing]      = useState(false)
   const [closeReports, setCloseReports] = useState<any[]>([])
   const [expandedReports, setExpandedReports] = useState<Record<string, boolean>>({})
-  const [expandedDays, setExpandedDays]       = useState<Record<string, boolean>>(() => ({
+  const [expandedDays,    setExpandedDays]    = useState<Record<string, boolean>>(() => ({
     [new Date().toISOString().slice(0,10)]: true
   }))
 
@@ -82,7 +83,14 @@ export default function CloseOrderPage() {
     return { start: start.toISOString(), end: end.toISOString() }
   }, [period])
 
-  const stores = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
+  // Filter: hanya toko real (bukan virtual) + region yang sama
+  const stores = useLiveQuery(() =>
+    db.stores.filter(s =>
+      s.is_active &&
+      !(s as any).is_virtual &&
+      ((s as any).region === region || !(s as any).region)
+    ).toArray()
+  , [region])
 
   const shifts = useLiveQuery(async () => {
     const allShifts = await db.shifts.toArray()
@@ -101,11 +109,15 @@ export default function CloseOrderPage() {
   }, [dateRange])
 
   const filteredShifts = useMemo(() => {
-    if (!shifts) return []
-    let list = isOwnerManager ? shifts : shifts.filter(s => s.store_id === user?.store_id)
+    if (!shifts || !stores) return []
+    // Ambil store_id yang valid (real stores di region ini)
+    const validStoreIds = new Set(stores.map(s => s.id))
+    let list = isOwnerManager
+      ? shifts.filter(s => validStoreIds.has(s.store_id))  // hanya shift dari toko valid
+      : shifts.filter(s => s.store_id === user?.store_id)
     if (filterStore !== 'semua') list = list.filter(s => s.store_id === filterStore)
     return list
-  }, [shifts, isOwnerManager, user?.store_id, filterStore])
+  }, [shifts, stores, isOwnerManager, user?.store_id, filterStore])
 
   const byStore = useMemo(() => {
     if (!stores) return []
@@ -127,7 +139,10 @@ export default function CloseOrderPage() {
     <div className="flex flex-col h-full bg-gray-50">
       <div className="bg-white border-b border-gray-100 px-4 pt-4 pb-3 flex-shrink-0">
         <div className="flex items-center justify-between mb-3">
-          <h1 className="text-lg font-semibold text-gray-900">Close Order</h1>
+          <div>
+            <h1 className="text-lg font-semibold text-gray-900">Close Order</h1>
+            <p className="text-xs text-gray-400 capitalize">{region}</p>
+          </div>
           <button onClick={syncData} disabled={syncing} className="p-2 text-gray-400 rounded-full">
             <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
           </button>
@@ -168,7 +183,6 @@ export default function CloseOrderPage() {
 
           return (
             <div key={store.id}>
-              {/* Store label */}
               {isOwnerManager && (
                 <div className="flex items-center gap-1.5 px-1 mb-1.5">
                   <Store size={13} className="text-gray-400" />
@@ -177,9 +191,8 @@ export default function CloseOrderPage() {
                 </div>
               )}
 
-              {/* Close order reports */}
               {storeReports.map(report => {
-                const reportKey = `report-${report.id}`
+                const reportKey  = `report-${report.id}`
                 const isExpanded = expandedReports[reportKey] !== undefined ? expandedReports[reportKey] : report.report_date === today
                 return (
                   <div key={report.id} className="bg-white rounded-xl border border-green-100 overflow-hidden mb-2">
@@ -210,7 +223,6 @@ export default function CloseOrderPage() {
                     </button>
                     {isExpanded && (
                       <div className="border-t border-gray-100 bg-gray-50">
-                        {/* Penjualan per metode */}
                         <div className="px-4 py-3 border-b border-gray-100">
                           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Penjualan per Metode</p>
                           <div className="space-y-1">
@@ -226,7 +238,6 @@ export default function CloseOrderPage() {
                             })}
                           </div>
                         </div>
-                        {/* Laporan kas */}
                         <div className="px-4 py-3 border-b border-gray-100">
                           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Laporan Kas</p>
                           <div className="space-y-1">
@@ -262,7 +273,6 @@ export default function CloseOrderPage() {
                 )
               })}
 
-              {/* Shifts by day */}
               {sortedDays.map(day => {
                 const dayShifts  = shiftsByDay[day]
                 const dayTotal   = dayShifts.reduce((s,sh)=>s+sh.total,0)

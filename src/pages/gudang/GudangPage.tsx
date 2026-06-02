@@ -47,12 +47,6 @@ const METODE_BAYAR = [
   { value: 'kredit',   label: 'Kredit / Tempo' },
 ]
 
-// ── Helper: ambil region dari user ───────────────────────────
-function useRegion(): string {
-  const { user } = useAuthStore()
-  return (user as any)?.region || 'malang'
-}
-
 async function generateMutationNumber() {
   const ds = new Date().toISOString().slice(0,10).replace(/-/g,'')
   const prefix = `MUT-${ds}-`
@@ -106,7 +100,6 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
 
 export default function GudangPage() {
   const { user } = useAuthStore()
-  const region   = useRegion()
   const [tab, setTab] = useState<Tab>('stok')
   const [syncing, setSyncing] = useState(false)
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
@@ -117,13 +110,13 @@ export default function GudangPage() {
       const pulls = await Promise.all([
         supabase.from('materials').select('*'),
         supabase.from('suppliers').select('*'),
-        supabase.from('warehouse_stock').select('*').eq('region', region),
-        supabase.from('purchases').select('*').eq('region', region).order('created_at', { ascending: false }).limit(200),
+        supabase.from('warehouse_stock').select('*'),
+        supabase.from('purchases').select('*').order('created_at', { ascending: false }).limit(200),
         supabase.from('purchase_items').select('*'),
-        supabase.from('warehouse_mutations').select('*').eq('region', region).order('created_at', { ascending: false }).limit(200),
+        supabase.from('warehouse_mutations').select('*').order('created_at', { ascending: false }).limit(200),
         supabase.from('warehouse_mutation_items').select('*'),
         supabase.from('partners').select('*'),
-        supabase.from('warehouse_expenses').select('*').eq('region', region).order('created_at', { ascending: false }).limit(200),
+        supabase.from('warehouse_expenses').select('*').order('created_at', { ascending: false }).limit(200),
       ])
       if (pulls[0].data !== null) {
         await db.materials.bulkPut(pulls[0].data || [])
@@ -153,10 +146,7 @@ export default function GudangPage() {
   return (
     <div className="flex flex-col h-full bg-white">
       <div className="px-4 pt-4 pb-0 flex items-center justify-between flex-shrink-0">
-        <div>
-          <h1 className="text-lg font-semibold text-gray-900">Gudang</h1>
-          <p className="text-xs text-gray-400 capitalize">{region}</p>
-        </div>
+        <h1 className="text-lg font-semibold text-gray-900">Gudang</h1>
         <div className="flex items-center gap-2">
           {toolbarActions}
           <button onClick={syncData} disabled={syncing} className="p-2 rounded-full text-gray-400">
@@ -755,7 +745,6 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
 // ── FORM: Opening Stock ───────────────────────────────────────
 function OpeningStockForm({ onClose }: { onClose: () => void }) {
   const { user }  = useAuthStore()
-  const region    = (user as any)?.region || 'malang'
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const [items,  setItems]  = useState([{ material_id: '', qty: '', unit_cost: '' }])
   const [date,   setDate]   = useState(new Date().toISOString().slice(0,10))
@@ -783,11 +772,10 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
         const qty  = Number(item.qty)
         const cost = Number(item.unit_cost) || 0
         const ws   = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
-        const wsd: any = {
+        const wsd: WarehouseStock = {
           id: ws?.id || generateId(),
           material_id: item.material_id,
           qty_on_hand: qty,
-          region,
           last_updated: now(),
         }
         await db.warehouse_stock.put(wsd)
@@ -799,7 +787,7 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
         const mutId = generateId()
         const mut: any = {
           id: mutId, mutation_type: 'opening_stock', destination_name: 'Saldo Awal',
-          notes: notes || 'Stok awal', status: 'confirmed', region,
+          notes: notes || 'Stok awal', status: 'confirmed',
           created_by: user?.id || 'system',
           created_at: `${date}T00:00:00.000Z`,
           confirmed_at: now(), confirmed_by: user?.id || 'system',
@@ -860,7 +848,6 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
 // ── FORM: Pembelian ───────────────────────────────────────────
 function PembelianForm({ userId, onClose }: { userId: string; onClose: () => void }) {
   const { user }  = useAuthStore()
-  const region    = (user as any)?.region || 'malang'
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const suppliers = useLiveQuery(() => db.suppliers.filter(s => s.is_active).toArray(), [])
 
@@ -908,7 +895,6 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
         transfer_to: transferTo || undefined,
         due_date: dueDate || undefined,
         status: 'received', notes: notes || undefined,
-        region,                    // ← tag region
         created_by: userId, created_at: now(),
       }
       await db.purchases.add(purch)
@@ -926,7 +912,6 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
           id: ws?.id || generateId(),
           material_id: item.material_id,
           qty_on_hand: (ws?.qty_on_hand || 0) + Number(item.qty),
-          region,                  // ← tag region
           last_updated: now(),
         }
         await db.warehouse_stock.put(wsd)
@@ -1031,7 +1016,6 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
 // ── FORM: Mutasi ──────────────────────────────────────────────
 function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }) {
   const { user }  = useAuthStore()
-  const region    = (user as any)?.region || 'malang'
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const partners  = useLiveQuery(() => db.partners.filter(p => p.is_active).toArray(), [])
   const stores    = useLiveQuery(async () => {
@@ -1070,7 +1054,7 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
       const mut: any = {
         id: mutId, mutation_number: mutNumber, mutation_type: type,
         destination_id: destId || undefined, destination_name: destName || undefined,
-        notes: notes || undefined, status: 'confirmed', region,
+        notes: notes || undefined, status: 'confirmed',
         created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId,
       }
       await db.warehouse_mutations.add(mut)
@@ -1097,7 +1081,7 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
           await db.warehouse_stock.update(ws.id, { qty_on_hand: newQty, last_updated: now() })
           await supabase.from('warehouse_stock').update({ qty_on_hand: newQty }).eq('id', ws.id)
         } else if (type === 'adjustment') {
-          const wsd: any = { id: generateId(), material_id: item.material_id, qty_on_hand: Number(item.qty), region, last_updated: now() }
+          const wsd: WarehouseStock = { id: generateId(), material_id: item.material_id, qty_on_hand: Number(item.qty), last_updated: now() }
           await db.warehouse_stock.add(wsd)
           await supabase.from('warehouse_stock').insert(wsd)
         }
@@ -1115,7 +1099,6 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
             material_id: item.material_id,
             qty_on_hand: newQty,
             avg_cost: newAvg,
-            region,               // ← tag region
             last_updated: now(),
           }
           await db.production_stock.put(psd)
@@ -1197,7 +1180,6 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
             <option value="">Pilih tujuan</option>
             {partners?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          <p className="text-xs text-gray-400 mt-1">Termasuk pengiriman ke Bali (dianggap franchise)</p>
         </div>
       )}
       <div>

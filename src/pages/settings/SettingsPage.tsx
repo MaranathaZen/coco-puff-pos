@@ -82,11 +82,6 @@ export default function SettingsPage() {
   )
 }
 
-// ── Helper: ambil region dari user ───────────────────────────
-function getUserRegion(user: User): string {
-  return (user as any).region || 'malang'
-}
-
 // ── USERS TAB ─────────────────────────────────────────────────
 function UsersTab({ currentUser }: { currentUser: User }) {
   const isOwner  = currentUser.role === 'owner'
@@ -95,12 +90,9 @@ function UsersTab({ currentUser }: { currentUser: User }) {
   const [editUser,    setEdit]        = useState<User | null>(null)
   const [filterStore, setFilterStore] = useState('semua')
 
-  const stores = useLiveQuery(async () => {
-    const all = await db.stores.filter(s => s.is_active).toArray()
-    // Owner hanya lihat toko di region-nya
-    if (isOwner) return all.filter(s => (s as any).region === region || !(s as any).region)
-    return all
-  }, [isOwner, region])
+  const stores = useLiveQuery(() =>
+    db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+  , [])
 
   const users = useLiveQuery(async () => {
     if (isOwner) {
@@ -354,23 +346,20 @@ function MenuConfigTab() {
 
 // ── TOKO TAB — owner bisa tambah toko baru ────────────────────
 function TokoTab({ currentUser }: { currentUser: User }) {
-  const region   = getUserRegion(currentUser)
   const [stores,    setStores]  = useState<any[]>([])
   const [editStore, setEdit]    = useState<any|null>(null)
   const [showForm,  setForm]    = useState(false)
   const [isNew,     setIsNew]   = useState(false)
   const [loading,   setLoading] = useState(true)
+  const region = 'malang'  // default region untuk sistem ini
 
   useEffect(() => {
     async function load() {
-      const { data } = await supabase.from('stores').select('*').eq('region', region).order('created_at')
+      const { data } = await supabase.from('stores').select('*').order('created_at')
       if (data) {
-        // Filter toko virtual (gudang/produksi) — tidak perlu tampil di manajemen toko
-        const realStores = data.filter((s: any) =>
-          !s.id.includes('gudang') && !s.id.includes('produksi')
-        )
+        const realStores = data.filter((s: any) => !s.is_virtual)
         setStores(realStores)
-        await db.stores.bulkPut(data) // tetap simpan semua ke Dexie
+        await db.stores.bulkPut(data)
       }
       setLoading(false)
     }
@@ -528,13 +517,9 @@ function ChangePasswordTab({ userId, storeId }: { userId: string; storeId: strin
 // ── PPN TAB ───────────────────────────────────────────────────
 function PPNTab({ currentUser }: { currentUser: User }) {
   const isOwner  = currentUser.role === 'owner'
-  const region   = getUserRegion(currentUser)
-  const stores   = useLiveQuery(async () => {
-    const all = await db.stores.filter(s => s.is_active).toArray()
-    const regional = isOwner ? all.filter(s => (s as any).region === region || !(s as any).region) : all
-    // Filter toko virtual (gudang/produksi) dari selector PPN
-    return regional.filter(s => !s.id.includes('gudang') && !s.id.includes('produksi'))
-  }, [isOwner, region])
+  const stores   = useLiveQuery(() =>
+    db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+  , [])
   const [selectedStoreId, setSelectedStoreId] = useState(currentUser.store_id)
   const [enabled, setEnabled] = useState(false)
   const [rate,    setRate]    = useState('11')
@@ -631,13 +616,9 @@ interface PromoItem {
 
 function PromoTab({ currentUser }: { currentUser: User }) {
   const isOwner  = currentUser.role === 'owner'
-  const region   = getUserRegion(currentUser)
-  const stores   = useLiveQuery(async () => {
-    const all = await db.stores.filter(s => s.is_active).toArray()
-    const regional = isOwner ? all.filter(s => (s as any).region === region || !(s as any).region) : all
-    // Filter toko virtual (gudang/produksi) dari selector Promo
-    return regional.filter(s => !s.id.includes('gudang') && !s.id.includes('produksi'))
-  }, [isOwner, region])
+  const stores   = useLiveQuery(() =>
+    db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+  , [])
   const [selectedStoreId, setSelectedStoreId] = useState(currentUser.store_id)
   const [promos,   setPromos]   = useState<PromoItem[]>([])
   const [loading,  setLoading]  = useState(true)
@@ -837,11 +818,10 @@ function PromoForm({ storeId, promo, onClose, onSaved }: { storeId: string; prom
 
 // ── TUTUP TAHUN TAB ───────────────────────────────────────────
 function TutupTahunTab({ currentUser }: { currentUser: User }) {
-  const region = getUserRegion(currentUser)
-  const stores = useLiveQuery(async () => {
-    const all = await db.stores.filter(s => s.is_active).toArray()
-    return all.filter(s => (s as any).region === region || !(s as any).region)
-  }, [region])
+  const region = 'malang'
+  const stores = useLiveQuery(() =>
+    db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+  , [])
 
   const currentYear = new Date().getFullYear()
   const [selectedYear, setSelectedYear] = useState(currentYear - 1)
@@ -1255,7 +1235,6 @@ function Label({ children }: { children: React.ReactNode }) {
 function UserForm({ user, currentUser, stores, onClose }: {
   user: User|null; currentUser: User; stores: any[]; onClose: () => void
 }) {
-  const region    = getUserRegion(currentUser)
   const [name,     setName]   = useState(user?.name||'')
   const [username, setUname]  = useState(user?.username||'')
   const [password, setPass]   = useState('')
@@ -1277,7 +1256,6 @@ function UserForm({ user, currentUser, stores, onClose }: {
         id: user?.id||generateId(), store_id: finalStoreId, name, username,
         password_hash: password ? await hashPassword(password) : (user as any)!.password_hash,
         role, is_active: isActive, created_at: user?.created_at||now(),
-        region,  // simpan region agar owner baru bisa filter toko
       }
       await db.users.put(data)
       await supabase.from('users').upsert(data)

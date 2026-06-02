@@ -144,15 +144,9 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
   })
 
   const isOwnerManager = ['owner','manager'].includes(role)
-  const { user: authUser } = useAuthStore()
-  const region = (authUser as any)?.region || 'malang'
   const stores = useLiveQuery(() =>
-    db.stores.filter(s =>
-      s.is_active &&
-      !(s as any).is_virtual &&
-      ((s as any).region === region || !(s as any).region)
-    ).toArray()
-  , [region])
+    db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+  , [])
 
   useEffect(() => {
     setToolbar(

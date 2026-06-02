@@ -1,8 +1,8 @@
 /**
- * Sync offline-first — v3
- * - Filter data by region berdasarkan user yang login
- * - Gudang, produksi, stok semua isolated per region
- * - Realtime tetap berjalan untuk semua tabel
+ * Sync offline-first — v4 clean (tanpa region)
+ * - Pull data dari Supabase ke IndexedDB
+ * - Push sync_queue ke Supabase di background
+ * - Realtime untuk update instan antar device
  */
 
 import { supabase } from '@/lib/supabase'
@@ -15,19 +15,9 @@ let realtimeChannel: RealtimeChannel | null = null
 let isSyncing      = false
 let isPulling      = false
 let currentStoreId = ''
-let currentRegion  = 'malang'
 
 export function setCurrentStoreId(storeId: string) {
   currentStoreId = storeId
-}
-export function setCurrentRegion(region: string) {
-  currentRegion = region
-}
-
-// Deteksi region dari store_id
-export function detectRegion(storeId: string): string {
-  if (storeId?.includes('bali')) return 'bali'
-  return 'malang'
 }
 
 const TABLE_MAP: Record<string, keyof typeof db> = {
@@ -68,7 +58,7 @@ function startRealtime(storeId: string) {
   }
 
   realtimeChannel = supabase
-    .channel('coco-puff-realtime-v3')
+    .channel('coco-puff-realtime')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'materials' },                payload => handleRealtimeChange('materials', payload))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers' },                payload => handleRealtimeChange('suppliers', payload))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'partners' },                 payload => handleRealtimeChange('partners', payload))
@@ -98,7 +88,7 @@ function startRealtime(storeId: string) {
     .subscribe((status) => {
       console.log(`[REALTIME] Status: ${status}`)
       if (status === 'SUBSCRIBED') {
-        console.log('[REALTIME] Connected — pull ulang untuk catch up')
+        console.log('[REALTIME] Connected — pull ulang')
         pullFromSupabase(storeId)
       }
     })
@@ -111,8 +101,6 @@ async function handleRealtimeChange(tableName: string, payload: any) {
   if (!table) return
   try {
     const { eventType, new: newRecord, old: oldRecord } = payload
-    // Filter realtime untuk data regional — skip kalau bukan region kita
-    if (newRecord?.region && newRecord.region !== currentRegion) return
     if (eventType === 'INSERT' || eventType === 'UPDATE') {
       if (newRecord?.id) await table.put(newRecord)
     } else if (eventType === 'DELETE') {
@@ -124,13 +112,12 @@ async function handleRealtimeChange(tableName: string, payload: any) {
 }
 
 export async function pullFromSupabase(storeId?: string) {
-  const sid    = storeId || currentStoreId
-  const region = currentRegion
+  const sid = storeId || currentStoreId
   if (!sid || isPulling) return
   isPulling = true
 
   try {
-    // ── Data MASTER — global, tidak filter region ─────────
+    // Data master — global
     const [cats, prods, mats, sups, parts, stores, recipes, pkgs, menuCfg, users] = await Promise.all([
       supabase.from('categories').select('*'),
       supabase.from('products').select('*'),
@@ -155,7 +142,7 @@ export async function pullFromSupabase(storeId?: string) {
     await replaceTable(db.menu_role_config,   menuCfg.data)
     await replaceTable(db.users,              users.data)
 
-    // ── Data REGIONAL — filter by region ──────────────────
+    // Data operasional
     const [
       prices, promos, stock, wstock, pstock, fgstock,
       wmuts, wmutItems, pmuts, pmutItems, recipeItems,
@@ -166,55 +153,49 @@ export async function pullFromSupabase(storeId?: string) {
       supabase.from('store_product_prices').select('*').eq('store_id', sid),
       supabase.from('promotions').select('*').eq('store_id', sid),
       supabase.from('stock').select('*').eq('store_id', sid),
-      supabase.from('warehouse_stock').select('*').eq('region', region),
-      supabase.from('production_stock').select('*').eq('region', region),
-      supabase.from('finished_goods_stock').select('*').eq('region', region),
-      supabase.from('warehouse_mutations').select('*').eq('region', region).order('created_at', { ascending: false }).limit(200),
+      supabase.from('warehouse_stock').select('*'),
+      supabase.from('production_stock').select('*'),
+      supabase.from('finished_goods_stock').select('*'),
+      supabase.from('warehouse_mutations').select('*').order('created_at', { ascending: false }).limit(200),
       supabase.from('warehouse_mutation_items').select('*'),
-      supabase.from('production_mutations').select('*').eq('region', region).order('created_at', { ascending: false }).limit(200),
+      supabase.from('production_mutations').select('*').order('created_at', { ascending: false }).limit(200),
       supabase.from('production_mutation_items').select('*'),
       supabase.from('production_recipe_items').select('*'),
-      supabase.from('warehouse_expenses').select('*').eq('region', region).order('created_at', { ascending: false }).limit(200),
-      supabase.from('purchases').select('*').eq('region', region).order('created_at', { ascending: false }).limit(200),
+      supabase.from('warehouse_expenses').select('*').order('created_at', { ascending: false }).limit(200),
+      supabase.from('purchases').select('*').order('created_at', { ascending: false }).limit(200),
       supabase.from('purchase_items').select('*'),
       supabase.from('store_recipes').select('*').eq('store_id', sid),
       supabase.from('store_recipe_items').select('*'),
-      supabase.from('production_logs').select('*').eq('region', region).order('created_at', { ascending: false }).limit(200),
+      supabase.from('production_logs').select('*').order('created_at', { ascending: false }).limit(200),
       supabase.from('production_log_materials').select('*'),
     ])
 
-    await replaceTable(db.store_product_prices,   prices.data)
-    await replaceTable(db.promotions,             promos.data)
-    await replaceTable(db.stock,                  stock.data)
-    await replaceTable(db.warehouse_stock,        wstock.data)
-    await replaceTable(db.production_stock,       pstock.data)
-    await replaceTable(db.finished_goods_stock,   fgstock.data)
-    await replaceTable(db.store_recipes,          storeRecipes.data)
-    await replaceTable(db.store_recipe_items,     storeRecipeItems.data)
+    await replaceTable(db.store_product_prices,    prices.data)
+    await replaceTable(db.promotions,              promos.data)
+    await replaceTable(db.stock,                   stock.data)
+    await replaceTable(db.warehouse_stock,         wstock.data)
+    await replaceTable(db.production_stock,        pstock.data)
+    await replaceTable(db.finished_goods_stock,    fgstock.data)
+    await replaceTable(db.store_recipes,           storeRecipes.data)
+    await replaceTable(db.store_recipe_items,      storeRecipeItems.data)
     await replaceTable(db.production_recipe_items, recipeItems.data)
 
-    // Filter mutation items hanya untuk mutations yang kita punya
-    const wMutIds   = new Set((wmuts.data || []).map((m: any) => m.id))
-    const pMutIds   = new Set((pmuts.data || []).map((m: any) => m.id))
-    const logIds    = new Set((prodLogs.data || []).map((l: any) => l.id))
-    const purchIds  = new Set((purchases.data || []).map((p: any) => p.id))
+    const wMutIds  = new Set((wmuts.data  || []).map((m: any) => m.id))
+    const pMutIds  = new Set((pmuts.data  || []).map((m: any) => m.id))
+    const logIds   = new Set((prodLogs.data || []).map((l: any) => l.id))
+    const purchIds = new Set((purchases.data || []).map((p: any) => p.id))
 
-    const filteredWMutItems   = (wmutItems.data  || []).filter((i: any) => wMutIds.has(i.mutation_id))
-    const filteredPMutItems   = (pmutItems.data  || []).filter((i: any) => pMutIds.has(i.mutation_id))
-    const filteredLogMats     = (prodLogMats.data || []).filter((i: any) => logIds.has(i.log_id))
-    const filteredPurchItems  = (purchItems.data  || []).filter((i: any) => purchIds.has(i.purchase_id))
+    if (wmuts.data?.length)     await db.warehouse_mutations.bulkPut(wmuts.data)
+    if (wmutItems.data?.length) await db.warehouse_mutation_items.bulkPut((wmutItems.data || []).filter((i: any) => wMutIds.has(i.mutation_id)))
+    if (pmuts.data?.length)     await db.production_mutations.bulkPut(pmuts.data)
+    if (pmutItems.data?.length) await db.production_mutation_items.bulkPut((pmutItems.data || []).filter((i: any) => pMutIds.has(i.mutation_id)))
+    if (wexpenses.data?.length) await db.warehouse_expenses.bulkPut(wexpenses.data)
+    if (purchases.data?.length) await db.purchases.bulkPut(purchases.data)
+    if (purchItems.data?.length) await db.purchase_items.bulkPut((purchItems.data || []).filter((i: any) => purchIds.has(i.purchase_id)))
+    if (prodLogs.data?.length)  await db.production_logs.bulkPut(prodLogs.data)
+    if (prodLogMats.data?.length) await db.production_log_materials.bulkPut((prodLogMats.data || []).filter((i: any) => logIds.has(i.log_id)))
 
-    if (wmuts.data?.length)           await db.warehouse_mutations.bulkPut(wmuts.data)
-    if (filteredWMutItems.length)     await db.warehouse_mutation_items.bulkPut(filteredWMutItems)
-    if (pmuts.data?.length)           await db.production_mutations.bulkPut(pmuts.data)
-    if (filteredPMutItems.length)     await db.production_mutation_items.bulkPut(filteredPMutItems)
-    if (wexpenses.data?.length)       await db.warehouse_expenses.bulkPut(wexpenses.data)
-    if (purchases.data?.length)       await db.purchases.bulkPut(purchases.data)
-    if (filteredPurchItems.length)    await db.purchase_items.bulkPut(filteredPurchItems)
-    if (prodLogs.data?.length)        await db.production_logs.bulkPut(prodLogs.data)
-    if (filteredLogMats.length)       await db.production_log_materials.bulkPut(filteredLogMats)
-
-    console.log(`[SYNC] Pull selesai — toko: ${sid} region: ${region}`)
+    console.log(`[SYNC] Pull selesai — toko: ${sid}`)
   } catch (e) {
     console.warn('[SYNC] Pull gagal (offline?):', e)
   } finally {
@@ -260,11 +241,8 @@ export async function pushToSupabase() {
   }
 }
 
-export function startSyncWorker(storeId: string, region?: string) {
-  const detectedRegion = region || detectRegion(storeId)
+export function startSyncWorker(storeId: string) {
   setCurrentStoreId(storeId)
-  setCurrentRegion(detectedRegion)
-
   if (pushInterval && currentStoreId === storeId) return
   stopSyncWorker()
 
@@ -275,7 +253,7 @@ export function startSyncWorker(storeId: string, region?: string) {
   document.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('online', handleOnline)
 
-  console.log(`[SYNC] Worker v3 started — toko: ${storeId} region: ${detectedRegion}`)
+  console.log(`[SYNC] Worker started — toko: ${storeId}`)
 }
 
 export function stopSyncWorker() {

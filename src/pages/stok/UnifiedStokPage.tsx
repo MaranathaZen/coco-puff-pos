@@ -74,12 +74,11 @@ export default function UnifiedStokPage() {
 
   async function syncAll() {
     setSyncing(true)
-    const region = (user as any)?.region || 'malang'
     try {
       const [mats, ws, ps, fgs, prods, stocks, cats] = await Promise.all([
         supabase.from('materials').select('*'),
-        supabase.from('warehouse_stock').select('*').eq('region', region),
-        supabase.from('production_stock').select('*').eq('region', region),
+        supabase.from('warehouse_stock').select('*'),
+        supabase.from('production_stock').select('*'),
         supabase.from('finished_goods_stock').select('*').eq('region', region),
         supabase.from('products').select('*').eq('is_active', true),
         supabase.from('stock').select('*'),
@@ -581,15 +580,9 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
   const [search,        setSearch]        = useState('')
   const [filterTokoKat, setFilterTokoKat] = useState('semua')
   const canSeeAllStores = ['owner','manager','gudang','produksi'].includes(role)
-  const { user: authUser } = useAuthStore()
-  const region = (authUser as any)?.region || 'malang'
   const stores = useLiveQuery(() =>
-    db.stores.filter(s =>
-      s.is_active &&
-      !(s as any).is_virtual &&
-      ((s as any).region === region || !(s as any).region)
-    ).toArray()
-  , [region])
+    db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+  , [])
   const [selectedStore, setSelectedStore] = useState(storeId)
   const activeStoreId = canSeeAllStores ? selectedStore : storeId
 

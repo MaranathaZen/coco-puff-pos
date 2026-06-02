@@ -26,7 +26,6 @@ const PAY_METHODS = [
 
 export default function CloseOrderPage() {
   const { user } = useAuthStore()
-  const region         = (user as any)?.region || 'malang'
   const isOwnerManager = ['owner','manager','gudang'].includes(user?.role || '')
   const [period,       setPeriod]       = useState<Period>('hari')
   const [filterStore,  setFilterStore]  = useState('semua')
@@ -83,14 +82,10 @@ export default function CloseOrderPage() {
     return { start: start.toISOString(), end: end.toISOString() }
   }, [period])
 
-  // Filter: hanya toko real (bukan virtual) + region yang sama
+  // Filter: hanya toko real (bukan virtual)
   const stores = useLiveQuery(() =>
-    db.stores.filter(s =>
-      s.is_active &&
-      !(s as any).is_virtual &&
-      ((s as any).region === region || !(s as any).region)
-    ).toArray()
-  , [region])
+    db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+  , [])
 
   const shifts = useLiveQuery(async () => {
     const allShifts = await db.shifts.toArray()
@@ -139,10 +134,7 @@ export default function CloseOrderPage() {
     <div className="flex flex-col h-full bg-gray-50">
       <div className="bg-white border-b border-gray-100 px-4 pt-4 pb-3 flex-shrink-0">
         <div className="flex items-center justify-between mb-3">
-          <div>
-            <h1 className="text-lg font-semibold text-gray-900">Close Order</h1>
-            <p className="text-xs text-gray-400 capitalize">{region}</p>
-          </div>
+          <h1 className="text-lg font-semibold text-gray-900">Close Order</h1>
           <button onClick={syncData} disabled={syncing} className="p-2 text-gray-400 rounded-full">
             <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
           </button>

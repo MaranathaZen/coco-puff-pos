@@ -1,9 +1,5 @@
 /**
- * Auth store — v2
- * CHANGELOG:
- * - login() return User | null
- * - Tambah region ke user object saat login (dari DB)
- * - forceLogout dengan delay agar toast sempat tampil
+ * Auth store — v3 clean (tanpa region)
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
@@ -18,7 +14,6 @@ interface AuthState {
   activeShift: Shift | null
   isLoading:   boolean
   error:       string | null
-
   login:       (username: string, password: string) => Promise<User | null>
   logout:      () => void
   forceLogout: () => void
@@ -45,7 +40,7 @@ async function openShift(user: User): Promise<Shift> {
   }
   await db.shifts.add(shift)
   try { await supabase.from('shifts').insert(shift) }
-  catch { console.warn('[SHIFT] Gagal sync ke Supabase, akan retry nanti') }
+  catch { console.warn('[SHIFT] Gagal sync ke Supabase') }
   return shift
 }
 
@@ -72,48 +67,18 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null })
         try {
           const hashed = await hashPassword(password)
-
-          const dbUser = await db.users
+          const user   = await db.users
             .filter(u => u.username?.toLowerCase() === username.toLowerCase() && u.is_active)
             .first()
 
-          if (!dbUser) {
+          if (!user) {
             set({ error: 'Username tidak ditemukan', isLoading: false })
             return null
           }
-          if (dbUser.password_hash !== hashed) {
+          if (user.password_hash !== hashed) {
             set({ error: 'PIN atau password salah', isLoading: false })
             return null
           }
-
-          // FIX: ambil region dari DB — field region ada di Supabase
-          // tapi mungkin belum ada di Dexie local (schema lama)
-          // Coba ambil dari Supabase langsung untuk pastikan region terbaru
-          let region = (dbUser as any).region || ''
-          if (!region) {
-            try {
-              const { data } = await supabase
-                .from('users')
-                .select('region')
-                .eq('id', dbUser.id)
-                .single()
-              region = data?.region || 'malang'
-            } catch {
-              region = 'malang'
-            }
-          }
-
-          // Deteksi region dari store_id sebagai fallback
-          if (!region) {
-            const storeId = dbUser.store_id || ''
-            region = storeId.includes('bali') ? 'bali' : 'malang'
-          }
-
-          // Inject region ke user object
-          const user = { ...dbUser, region } as User
-
-          // Update region di Dexie lokal supaya next login tidak perlu fetch Supabase
-          await db.users.update(dbUser.id, { region } as any)
 
           const store = await db.stores.get(user.store_id) || null
 

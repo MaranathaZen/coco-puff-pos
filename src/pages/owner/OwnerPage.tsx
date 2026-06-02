@@ -1,8 +1,4 @@
 // src/pages/owner/OwnerPage.tsx
-// CHANGELOG v2:
-// - Filter toko virtual (gudang/produksi) dari dashboard
-// - Filter by region — owner Malang hanya lihat toko Malang
-
 import { useState, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useNavigate } from 'react-router-dom'
@@ -21,7 +17,6 @@ type Period = 'hari' | 'minggu' | 'bulan'
 export default function OwnerPage() {
   const { user }    = useAuthStore()
   const navigate    = useNavigate()
-  const region      = (user as any)?.region || 'malang'
   const [period,  setPeriod]  = useState<Period>('hari')
   const [syncing, setSyncing] = useState(false)
 
@@ -41,14 +36,10 @@ export default function OwnerPage() {
     return { start: start.toISOString(), end: end.toISOString() }
   }, [period])
 
-  // FIX: filter toko virtual + filter by region
+  // Hanya toko real (bukan virtual gudang/produksi)
   const stores = useLiveQuery(() =>
-    db.stores.filter(s =>
-      s.is_active &&
-      !(s as any).is_virtual &&
-      ((s as any).region === region || !(s as any).region)
-    ).toArray()
-  , [region])
+    db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+  , [])
 
   const transactions = useLiveQuery(async () =>
     db.transactions.filter(t =>
@@ -113,7 +104,7 @@ export default function OwnerPage() {
         <div className="flex items-center justify-between mb-3">
           <div>
             <h1 className="text-lg font-semibold text-gray-900">Dashboard</h1>
-            <p className="text-xs text-gray-400 capitalize">{user?.name} · {user?.role} · {region}</p>
+            <p className="text-xs text-gray-400 capitalize">{user?.name} · {user?.role}</p>
           </div>
           <button onClick={handleSync} disabled={syncing} className="p-2 rounded-full text-gray-400">
             <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
@@ -130,7 +121,6 @@ export default function OwnerPage() {
       </div>
 
       <div className="flex-1 overflow-auto p-4 space-y-4">
-        {/* KPI */}
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-white rounded-xl border border-gray-100 p-4">
             <div className="flex items-center gap-2 mb-1">
@@ -149,7 +139,6 @@ export default function OwnerPage() {
           </div>
         </div>
 
-        {/* Per toko */}
         {storeStats.length > 0 && (
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 border-b border-gray-50">
@@ -182,7 +171,6 @@ export default function OwnerPage() {
           </div>
         )}
 
-        {/* Quick Actions */}
         <div className="space-y-3">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Aksi Cepat</p>
           {quickActions.map(group => (

@@ -304,22 +304,24 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
           dine_in:   String((p as any).price_dine_in  || ''),
           take_away: String((p as any).price_take_away || ''),
           online:    String((p as any).price_online    || ''),
-          is_active: p.is_active !== false,  // default true
+          is_active: (p as any).is_active !== false,
         }
       }
       setStorePrices(map)
     })
   }, [product])
 
-  function updateStorePrice(storeId: string, field: string, value: string) {
-    setStorePrices(prev => ({
-      ...prev,
-      [storeId]: {
-        ...prev[storeId],
-        is_active: prev[storeId]?.is_active !== false,  // default true
-        [field]: field === 'is_active' ? value === 'true' : value
+  function updateStorePrice(storeId: string, field: string, value: string | boolean) {
+    setStorePrices(prev => {
+      const current = prev[storeId] || { dine_in: '', take_away: '', online: '', is_active: true }
+      return {
+        ...prev,
+        [storeId]: {
+          ...current,
+          [field]: value,
+        }
       }
-    }))
+    })
   }
 
   async function handleSave() {
@@ -415,7 +417,7 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
                   <p className="text-xs font-medium text-gray-700">{s.name}</p>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] text-gray-400">{isActive ? 'Aktif' : 'Nonaktif'}</span>
-                    <button onClick={() => updateStorePrice(s.id, 'is_active', String(!isActive))}
+                    <button onClick={() => updateStorePrice(s.id, 'is_active', !isActive)}
                       className={`w-9 h-5 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
                       <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[18px]' : 'left-0.5'}`} />
                     </button>

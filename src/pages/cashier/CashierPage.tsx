@@ -146,7 +146,7 @@ export default function CashierPage() {
     const prices = await db.store_product_prices.where('store_id').equals(STORE_ID).toArray()
     const priceMap = Object.fromEntries(prices.map(o => [o.product_id, o]))
     // Produk yang di-nonaktifkan untuk toko ini (is_active = false)
-    const disabledProductIds = new Set(prices.filter(p => p.is_active === false).map(p => p.product_id))
+    const disabledProductIds = new Set(prices.filter(p => (p as any).is_active === false).map(p => p.product_id))
     const nowStr = new Date().toISOString()
     const promos = await db.promotions.where('store_id').equals(STORE_ID)
       .filter(p => p.is_active && p.valid_from <= nowStr && p.valid_until >= nowStr)

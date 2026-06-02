@@ -52,7 +52,19 @@ const ORDER_TYPES: { id: OrderType; label: string; icon: React.ReactNode }[] = [
 
 export default function CashierPage() {
   const { user, activeShift } = useAuthStore()
-  const STORE_ID = user?.store_id || ''
+  const isOwnerManager = ['owner','manager'].includes(user?.role || '')
+  const defaultStoreId = user?.store_id || ''
+
+  // Owner/manager bisa input kasir untuk toko manapun
+  const allStores = useLiveQuery(() =>
+    isOwnerManager
+      ? db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray()
+      : Promise.resolve([])
+  , [isOwnerManager])
+
+  const [selectedStoreId, setSelectedStoreId] = useState(defaultStoreId)
+  const STORE_ID = isOwnerManager ? selectedStoreId : defaultStoreId
+
   const { items, addItem, removeItem, updateQty, clearCart, total, subtotal, totalDiscount } = useCartStore()
 
   const ppnSetting = useLiveQuery(async () => {
@@ -92,6 +104,10 @@ export default function CashierPage() {
   }, [orderType, onlinePlatform])
 
   useEffect(() => { syncProducts() }, [])
+  useEffect(() => {
+    // Re-sync saat toko berubah
+    if (STORE_ID) syncProducts()
+  }, [STORE_ID])
 
   async function syncProducts(showMsg = false) {
     setIsSyncing(true)
@@ -313,6 +329,17 @@ export default function CashierPage() {
 
       {/* Header: Tab + Order Type */}
       <div className="bg-white border-b border-gray-100 flex-shrink-0">
+        {/* Store selector untuk owner/manager */}
+        {isOwnerManager && allStores && allStores.length > 1 && (
+          <div className="flex gap-1.5 px-3 pt-2 overflow-x-auto scrollbar-hide">
+            {allStores.map(s => (
+              <button key={s.id} onClick={() => { setSelectedStoreId(s.id); clearCart(); setCartPakets([]) }}
+                className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${selectedStoreId===s.id?'bg-gray-900 text-white':'bg-gray-100 text-gray-600'}`}>
+                {s.name}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex border-b border-gray-50">
           {([
             { id: 'pos',     label: 'Kasir'   },

@@ -107,7 +107,14 @@ export default function ProduksiPage() {
     if (hasLocalData !== undefined) setIsInitialLoad(false)
   }, [hasLocalData])
 
-  async function syncData() {
+  async function generateLogNumber(): Promise<string> {
+  const ds = new Date().toISOString().slice(0,10).replace(/-/g,'')
+  const prefix = `PROD-${ds}-`
+  const existing = await db.production_logs.filter(l => (l as any).log_number?.startsWith(prefix)).toArray()
+  return `${prefix}${String(existing.length + 1).padStart(3,'0')}`
+}
+
+async function syncData() {
     setIsSyncing(true)
     try {
       // FIX Bug 3: parallel fetch semua sekaligus, bukan sequential
@@ -306,8 +313,7 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-mono text-blue-600 mb-0.5">
-                          {(log as any).log_number ||
-                            `PROD-${log.created_at.slice(0,10).replace(/-/g,'')}-${log.id.slice(-4).toUpperCase()}`}
+                          {(log as any).log_number || `PROD-${log.created_at.slice(0,10).replace(/-/g,'')}-${log.id.slice(-4).toUpperCase()}`}
                           <CopyBtn text={log.id} />
                         </p>
                         <p className="text-sm font-medium text-gray-900">{log.recipe?.name || '—'}</p>

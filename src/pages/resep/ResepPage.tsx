@@ -12,7 +12,7 @@ import { formatRupiah } from '@/lib/utils'
 import { Plus, X, ChevronRight, FlaskConical, Store } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-type Tab = 'produksi' | 'toko'
+type Tab = 'produksi' | 'produksi_toko' | 'toko'
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
@@ -42,10 +42,11 @@ export default function ResepPage() {
     <div className="flex flex-col h-full bg-gray-50">
       <div className="bg-white px-4 pt-4 pb-0 flex-shrink-0">
         <h1 className="text-lg font-semibold text-gray-900 mb-3">Resep</h1>
-        <div className="flex gap-4 border-b border-gray-100">
+        <div className="flex gap-4 border-b border-gray-100 overflow-x-auto scrollbar-hide">
           {([
-            { id: 'produksi', label: 'Resep Produksi', icon: FlaskConical },
-            { id: 'toko',     label: 'Resep Toko (BOM)', icon: Store },
+            { id: 'produksi',      label: 'Resep Produksi',      icon: FlaskConical },
+            { id: 'produksi_toko', label: 'Resep Produksi Toko', icon: FlaskConical },
+            { id: 'toko',          label: 'Resep Toko (BOM)',    icon: Store },
           ] as const).map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
               className={`flex items-center gap-1.5 pb-3 text-sm font-medium border-b-2 transition-colors ${tab===t.id?'border-gray-900 text-gray-900':'border-transparent text-gray-400'}`}>
@@ -55,8 +56,9 @@ export default function ResepPage() {
         </div>
       </div>
       <div className="flex-1 overflow-auto">
-        {tab === 'produksi' && <ResepProduksiTab />}
-        {tab === 'toko'     && <ResepTokoTab storeId={user?.store_id || ''} />}
+        {tab === 'produksi'      && <ResepProduksiTab />}
+        {tab === 'produksi_toko' && <ResepProduksiTokoTab storeId={user?.store_id || ''} />}
+        {tab === 'toko'          && <ResepTokoTab storeId={user?.store_id || ''} />}
       </div>
     </div>
   )
@@ -236,6 +238,207 @@ function ResepProduksiForm({ recipe, isOwner, onClose }: { recipe: any; isOwner:
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         {recipe && isOwner && <button onClick={handleDelete} disabled={saving} className="px-4 py-3 rounded-xl border border-red-200 text-sm font-medium text-red-500">Hapus</button>}
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── RESEP PRODUKSI TOKO ──────────────────────────────────────
+// Resep untuk buat produk setengah jadi di toko (Fla, Teh, dll)
+// Bahan dari stok toko, hasil masuk ke stok toko sebagai bahan setengah jadi
+function ResepProduksiTokoTab({ storeId }: { storeId: string }) {
+  const { user } = useAuthStore()
+  const isOwner        = user?.role === 'owner'
+  const isOwnerManager = ['owner','manager'].includes(user?.role || '')
+
+  // Hanya toko real
+  const stores = useLiveQuery(() =>
+    db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray()
+  , [])
+
+  const [activeStoreId, setActiveStoreId] = useState(storeId)
+  const [showForm,   setShowForm]   = useState(false)
+  const [editRecipe, setEditRecipe] = useState<any>(null)
+
+  useEffect(() => {
+    if (storeId.includes('gudang') || storeId.includes('produksi')) {
+      if (stores && stores.length > 0) setActiveStoreId(stores[0].id)
+    }
+  }, [stores, storeId])
+
+  // Resep produksi toko: store di production_recipes dengan field store_id
+  const recipes = useLiveQuery(async () => {
+    // Pakai store_recipes dengan type 'production' sebagai marker
+    const r     = await db.store_recipes.filter(r => r.store_id === activeStoreId && (r as any).recipe_type === 'production').toArray()
+    const items = await db.store_recipe_items.toArray()
+    const mats  = await db.materials.toArray()
+    const mMap  = Object.fromEntries(mats.map(m => [m.id, m]))
+    return r.map(recipe => ({
+      ...recipe,
+      items: items.filter(i => i.recipe_id === recipe.id).map(i => ({ ...i, material: mMap[i.material_id] }))
+    }))
+  }, [activeStoreId])
+
+  return (
+    <div className="p-4 space-y-3">
+      <div className="bg-cyan-50 border border-cyan-100 rounded-xl p-3 space-y-1">
+        <p className="text-xs text-cyan-700 font-semibold">Resep Produksi Toko</p>
+        <p className="text-xs text-cyan-600">Resep untuk membuat Fla, Teh, dll di toko dari bahan baku.</p>
+        <p className="text-xs text-cyan-500">Bahan berkurang dari <strong>stok toko</strong>. Hasil dicatat sebagai bahan setengah jadi.</p>
+      </div>
+
+      {isOwner && stores && stores.length > 1 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+          {stores.map(s => (
+            <button key={s.id} onClick={() => setActiveStoreId(s.id)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${activeStoreId===s.id?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {isOwnerManager && (
+        <div className="flex justify-end">
+          <button onClick={() => { setEditRecipe(null); setShowForm(true) }}
+            className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-3 py-2 rounded-lg">
+            <Plus size={13} /> Resep Baru
+          </button>
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        {recipes?.map((r, idx) => (
+          <button key={r.id} onClick={() => isOwnerManager && (setEditRecipe(r), setShowForm(true))}
+            className={`w-full text-left px-4 py-3 ${idx!==0?'border-t border-gray-50':''} active:bg-gray-50`}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">{(r as any).product_name}</p>
+                <p className="text-xs text-gray-400">{r.items.length} bahan · {r.is_active?'✓ Aktif':'✗ Nonaktif'}</p>
+              </div>
+              <ChevronRight size={14} className="text-gray-300" />
+            </div>
+            {r.items.length > 0 && (
+              <div className="mt-1.5 space-y-0.5">
+                {r.items.map(i => (
+                  <div key={i.id} className="flex justify-between text-xs text-gray-400">
+                    <span>{i.material?.name}</span>
+                    <span>{i.qty_used} {i.material?.unit}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </button>
+        ))}
+        {recipes?.length === 0 && (
+          <div className="py-12 text-center">
+            <FlaskConical size={28} className="text-gray-200 mx-auto mb-2" />
+            <p className="text-sm text-gray-400">Belum ada resep produksi toko</p>
+          </div>
+        )}
+      </div>
+
+      {showForm && isOwnerManager && (
+        <ResepProduksiTokoForm recipe={editRecipe} storeId={activeStoreId}
+          onClose={() => { setShowForm(false); setEditRecipe(null) }} />
+      )}
+    </div>
+  )
+}
+
+function ResepProduksiTokoForm({ recipe, storeId, onClose }: { recipe: any; storeId: string; onClose: () => void }) {
+  const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
+  const [productName, setProductName] = useState(recipe?.product_name || '')
+  const [batchYield,  setBatchYield]  = useState(String((recipe as any)?.batch_yield || '1'))
+  const [yieldUnit,   setYieldUnit]   = useState((recipe as any)?.yield_unit || 'liter')
+  const [isActive,    setIsActive]    = useState(recipe?.is_active ?? true)
+  const [items, setItems] = useState<{id?:string;material_id:string;qty:string}[]>([{material_id:'',qty:''}])
+  const [saving,  setSaving]  = useState(false)
+  const [loading, setLoading] = useState(!!recipe)
+
+  useEffect(() => {
+    if (!recipe) return
+    db.store_recipe_items.where('recipe_id').equals(recipe.id).toArray().then(existing => {
+      if (existing.length) setItems(existing.map(i => ({ id:i.id, material_id:i.material_id, qty:String(i.qty_used) })))
+      setLoading(false)
+    })
+  }, [recipe?.id])
+
+  async function handleSave() {
+    if (!productName.trim()) return toast.error('Nama produk wajib diisi')
+    const valid = items.filter(i => i.material_id && Number(i.qty) > 0)
+    if (!valid.length) return toast.error('Tambahkan minimal 1 bahan')
+    setSaving(true)
+    try {
+      const recipeId = recipe?.id || generateId()
+      const data: any = {
+        id: recipeId, store_id: storeId,
+        product_id: `prod-toko-${recipeId.slice(0,8)}`,
+        product_name: productName.trim(),
+        recipe_type: 'production',  // marker untuk resep produksi toko
+        batch_yield: Number(batchYield),
+        yield_unit: yieldUnit,
+        is_active: isActive,
+        created_at: recipe?.created_at || now(), updated_at: now()
+      }
+      await db.store_recipes.put(data)
+      await supabase.from('store_recipes').upsert(data)
+      await db.store_recipe_items.where('recipe_id').equals(recipeId).delete()
+      await supabase.from('store_recipe_items').delete().eq('recipe_id', recipeId)
+      for (const item of valid) {
+        const ri: any = { id:item.id||generateId(), recipe_id:recipeId, material_id:item.material_id, qty_used:Number(item.qty), source:'store' }
+        await db.store_recipe_items.add(ri)
+        await supabase.from('store_recipe_items').insert(ri)
+      }
+      toast.success(recipe?'Resep diupdate':'Resep ditambahkan'); onClose()
+    } catch (e) { toast.error('Gagal menyimpan'); console.error(e) }
+    finally { setSaving(false) }
+  }
+
+  if (loading) return <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"><div className="bg-white rounded-2xl p-8 text-sm text-gray-400">Memuat...</div></div>
+
+  return (
+    <Modal title={recipe?'Edit Resep Produksi Toko':'Resep Produksi Toko Baru'} onClose={onClose}>
+      <div className="bg-cyan-50 border border-cyan-100 rounded-xl px-3 py-2">
+        <p className="text-xs text-cyan-700">Resep ini untuk membuat bahan setengah jadi di toko. Contoh: Fla Coklat = susu + coklat + tepung.</p>
+      </div>
+      <div><Label required>Nama Produk yang Dihasilkan</Label>
+        <input className="input" value={productName} onChange={e=>setProductName(e.target.value)} autoFocus placeholder="Fla Coklat, Fla Vanilla, Teh, dll" />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label required>Hasil per Batch</Label><input className="input" type="number" value={batchYield} onChange={e=>setBatchYield(e.target.value)} /></div>
+        <div><Label required>Satuan</Label><input className="input" value={yieldUnit} onChange={e=>setYieldUnit(e.target.value)} placeholder="liter, ml, pcs" /></div>
+      </div>
+      <div><Label required>Bahan per Batch</Label>
+        <div className="space-y-2">
+          {items.map((item, i) => {
+            const mat = materials?.find(m => m.id === item.material_id)
+            return (
+              <div key={i} className="bg-gray-50 rounded-xl p-3 space-y-2">
+                <select className="input text-sm" value={item.material_id}
+                  onChange={e=>setItems(p=>p.map((x,idx)=>idx===i?{...x,material_id:e.target.value}:x))}>
+                  <option value="" disabled>-- Pilih bahan *</option>
+                  {materials?.map(m=><option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
+                </select>
+                <input className="input text-sm" type="number" step="0.01" min="0"
+                  placeholder={`Qty per batch (${mat?.unit||''})`}
+                  value={item.qty} onChange={e=>setItems(p=>p.map((x,idx)=>idx===i?{...x,qty:e.target.value}:x))} />
+                {items.length>1 && <button onClick={()=>setItems(p=>p.filter((_,idx)=>idx!==i))} className="text-xs text-red-400">Hapus</button>}
+              </div>
+            )
+          })}
+        </div>
+        <button onClick={()=>setItems(p=>[...p,{material_id:'',qty:''}])} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Bahan</button>
+      </div>
+      <div className="flex items-center justify-between py-2 border-t border-gray-100">
+        <div><p className="text-sm text-gray-700">Resep Aktif</p></div>
+        <button onClick={()=>setIsActive(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive?'bg-gray-900':'bg-gray-200'}`}>
+          <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive?'left-[22px]':'left-0.5'}`} />
+        </button>
+      </div>
+      <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
       </div>

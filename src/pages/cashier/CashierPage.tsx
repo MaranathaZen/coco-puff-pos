@@ -143,15 +143,19 @@ export default function CashierPage() {
     const prods = await db.products
       .filter(p => p.is_active && (selectedCat === 'all' || p.category_id === selectedCat))
       .toArray()
-    const prices = await db.store_product_prices.where('store_id').equals(STORE_ID).filter(p => p.is_active).toArray()
+    const prices = await db.store_product_prices.where('store_id').equals(STORE_ID).toArray()
     const priceMap = Object.fromEntries(prices.map(o => [o.product_id, o]))
+    // Produk yang di-nonaktifkan untuk toko ini (is_active = false)
+    const disabledProductIds = new Set(prices.filter(p => p.is_active === false).map(p => p.product_id))
     const nowStr = new Date().toISOString()
     const promos = await db.promotions.where('store_id').equals(STORE_ID)
       .filter(p => p.is_active && p.valid_from <= nowStr && p.valid_until >= nowStr)
       .toArray()
     const promoMap = Object.fromEntries(promos.map(p => [p.product_id, p]))
 
-    return prods.map(p => {
+    return prods
+      .filter(p => !disabledProductIds.has(p.id))  // skip produk nonaktif untuk toko ini
+      .map(p => {
       const priceRecord = priceMap[p.id]
       // Pilih harga berdasarkan order type
       let basePrice = p.base_price
@@ -173,7 +177,7 @@ export default function CashierPage() {
       }
       return { ...p, base_price: basePrice, effective_price: effectivePrice, promo_discount: promoDiscount, promo_name: promoName, promo_id: promo?.id || '' }
     })
-  }, [selectedCat, STORE_ID, orderType])
+  }, [selectedCat, STORE_ID, orderType])  // eslint-disable-line
 
   const [pakets, setPakets] = useState<PaketItem[]>([])
   useLiveQuery(async () => {

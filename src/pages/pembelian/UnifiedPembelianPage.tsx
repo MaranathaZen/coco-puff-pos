@@ -4,7 +4,7 @@
 // - kasir: hanya pembelian toko sendiri (read-only)
 // - auto expand hari ini
 
-import { useState, useMemo, useEffect, useContext, createContext } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now, type WarehouseStock } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
@@ -13,7 +13,6 @@ import { formatRupiah } from '@/lib/utils'
 import { Plus, RefreshCw, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-const ToolbarCtx = createContext<(node: React.ReactNode) => void>(() => {})
 type Period = 'hari' | 'bulan'
 
 function groupKey(d: string, m: Period) { return m === 'hari' ? d.slice(0,10) : d.slice(0,7) }
@@ -122,17 +121,15 @@ export default function UnifiedPembelianPage() {
           </button>
         </div>
       </div>
-      <ToolbarCtx.Provider value={setToolbarActions}>
-        <div className="flex-1 overflow-auto bg-gray-50">
-          <PembelianList userId={user!.id} role={user!.role} storeId={user!.store_id || ''} />
-        </div>
-      </ToolbarCtx.Provider>
+      <div className="flex-1 overflow-auto bg-gray-50">
+        <PembelianList userId={user!.id} role={user!.role} storeId={user!.store_id || ''} setToolbarActions={setToolbarActions} />
+      </div>
     </div>
   )
 }
 
-function PembelianList({ userId, role, storeId }: { userId: string; role: string; storeId: string }) {
-  const setToolbar = useContext(ToolbarCtx)
+function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: string; role: string; storeId: string; setToolbarActions: (n: React.ReactNode) => void }) {
+  const setToolbar = setToolbarActions
   const [showForm,     setShowForm]     = useState(false)
   const [groupMode,    setGroupMode]    = useState<Period>('hari')
   const [search,       setSearch]       = useState('')

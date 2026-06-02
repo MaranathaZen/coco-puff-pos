@@ -17,7 +17,7 @@ import toast from 'react-hot-toast'
 import type { User, Role } from '@/types'
 import type { Supplier, Partner, MenuRoleConfig } from '@/lib/db'
 
-type Tab = 'users' | 'supplier' | 'mitra' | 'menu' | 'toko' | 'password' | 'ppn' | 'promo' | 'reset' | 'tutup_tahun'
+type Tab = 'users' | 'supplier' | 'mitra' | 'toko' | 'password' | 'ppn' | 'promo' | 'reset' | 'tutup_tahun'
 
 const ALL_MENUS = [
   { path: '/kasir',          label: 'Kasir'       },
@@ -44,7 +44,7 @@ export default function SettingsPage() {
     { id: 'users',       label: 'User'        },
     { id: 'supplier',    label: 'Supplier'    },
     { id: 'mitra',       label: 'Franchise'   },
-    { id: 'menu',        label: 'Menu',        ownerOnly: true },
+    // { id: 'menu', label: 'Menu' }, // Dihapus - menu diatur per role otomatis
     { id: 'toko',        label: 'Toko',        ownerOnly: true },
     { id: 'password',    label: 'Password'    },
     { id: 'ppn',         label: 'PPN',         ownerOnly: true },
@@ -70,7 +70,7 @@ export default function SettingsPage() {
         {tab === 'users'       && <UsersTab currentUser={user!} />}
         {tab === 'supplier'    && <SupplierTab />}
         {tab === 'mitra'       && <MitraTab />}
-        {tab === 'menu'        && <MenuConfigTab />}
+        {/* tab menu dihapus */}
         {tab === 'toko'        && <TokoTab currentUser={user!} />}
         {tab === 'password'    && <ChangePasswordTab userId={user!.id} storeId={user!.store_id} />}
         {tab === 'ppn'         && <PPNTab currentUser={user!} />}
@@ -90,7 +90,7 @@ function UsersTab({ currentUser }: { currentUser: User }) {
   const [filterStore, setFilterStore] = useState('semua')
 
   const stores = useLiveQuery(() =>
-    db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+    db.stores.filter(s => s.is_active).toArray()
   , [])
 
   const users = useLiveQuery(async () => {
@@ -528,14 +528,30 @@ function PPNTab({ currentUser }: { currentUser: User }) {
 
   useEffect(() => {
     setLoaded(false)
-    const saved = localStorage.getItem(`ppn_config_${selectedStoreId}`)
-    if (saved) {
-      try {
-        const cfg = JSON.parse(saved)
-        setEnabled(cfg.enabled ?? false); setRate(String(cfg.rate ?? 11)); setMode(cfg.mode ?? 'include')
-      } catch {}
-    } else { setEnabled(false); setRate('11'); setMode('include') }
-    setLoaded(true)
+    // Load dari Supabase dulu, fallback ke localStorage
+    supabase.from('stores').select('ppn_enabled, ppn_rate, ppn_mode').eq('id', selectedStoreId).single()
+      .then(({ data }) => {
+        if (data && data.ppn_rate > 0) {
+          setEnabled(data.ppn_enabled ?? false)
+          setRate(String(data.ppn_rate ?? 11))
+          setMode(data.ppn_mode ?? 'include')
+        } else {
+          // fallback localStorage
+          const saved = localStorage.getItem(`ppn_config_${selectedStoreId}`)
+          if (saved) {
+            try {
+              const cfg = JSON.parse(saved)
+              setEnabled(cfg.enabled ?? false); setRate(String(cfg.rate ?? 11)); setMode(cfg.mode ?? 'include')
+            } catch {}
+          }
+        }
+        setLoaded(true)
+      })
+      .catch(() => {
+        const saved = localStorage.getItem(`ppn_config_${selectedStoreId}`)
+        if (saved) { try { const cfg = JSON.parse(saved); setEnabled(cfg.enabled??false); setRate(String(cfg.rate??11)); setMode(cfg.mode??'include') } catch {} }
+        setLoaded(true)
+      })
   }, [selectedStoreId])
 
   async function handleSave() {
@@ -779,14 +795,14 @@ function PromoForm({ storeId, promo, onClose, onSaved }: { storeId: string; prom
 
   return (
     <Modal title={promo?'Edit Promo':'Tambah Promo'} onClose={onClose}>
-      <div><Label>Nama Promo</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus /></div>
-      <div><Label>Produk</Label>
+      <div><Label required>Nama Promo</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus /></div>
+      <div><Label required>Produk</Label>
         <select className="input" value={productId} onChange={e=>setProd(e.target.value)}>
           <option value="">-- Pilih produk *</option>
           {products?.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
       </div>
-      <div><Label>Tipe Promo</Label>
+      <div><Label required>Tipe Promo</Label>
         <div className="grid grid-cols-3 gap-2">
           {([{id:'percent',label:'Diskon %'},{id:'fixed',label:'Disc Nominal'},{id:'buy1get1',label:'Buy 1 Get 1'}] as const).map(t=>(
             <button key={t.id} onClick={()=>setType(t.id)} className={`py-2 rounded-xl text-xs font-medium border transition-colors ${type===t.id?'bg-gray-900 text-white border-gray-900':'border-gray-200 text-gray-600'}`}>{t.label}</button>
@@ -794,14 +810,14 @@ function PromoForm({ storeId, promo, onClose, onSaved }: { storeId: string; prom
         </div>
       </div>
       {type!=='buy1get1'&&(
-        <div><Label>{type==='percent'?'Diskon (%)':'Diskon (Rp)'}</Label>
+        <div><Label required>{type==='percent'?'Diskon (%)':'Diskon (Rp)'}</Label>
           <input className="input" inputMode="decimal" value={value} onChange={e=>setValue(e.target.value.replace(/[^0-9.]/g,''))} placeholder={type==='percent'?'10':'5000'} />
         </div>
       )}
       <div><Label>Min. Qty</Label><input className="input" inputMode="decimal" value={minQty} onChange={e=>setMinQty(e.target.value.replace(/[^0-9]/g,''))} placeholder="1" /></div>
       <div className="grid grid-cols-2 gap-3">
-        <div><Label>Dari</Label><input className="input" type="date" value={from} onChange={e=>setFrom(e.target.value)} /></div>
-        <div><Label>Sampai</Label><input className="input" type="date" value={until} onChange={e=>setUntil(e.target.value)} /></div>
+        <div><Label required>Dari</Label><input className="input" type="date" value={from} onChange={e=>setFrom(e.target.value)} /></div>
+        <div><Label required>Sampai</Label><input className="input" type="date" value={until} onChange={e=>setUntil(e.target.value)} /></div>
       </div>
       <div className="flex items-center justify-between py-2 border-t border-gray-100">
         <p className="text-sm text-gray-700">Aktif</p>
@@ -819,7 +835,7 @@ function PromoForm({ storeId, promo, onClose, onSaved }: { storeId: string; prom
 function TutupTahunTab({ currentUser }: { currentUser: User }) {
   const region = 'malang'
   const stores = useLiveQuery(() =>
-    db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+    db.stores.filter(s => s.is_active).toArray()
   , [])
 
   const currentYear = new Date().getFullYear()
@@ -1130,6 +1146,8 @@ function TutupTahunTab({ currentUser }: { currentUser: User }) {
 
 // ── RESET TAB ─────────────────────────────────────────────────
 function ResetDataTab() {
+  // Reset untuk: persiapan go-live dari sistem lama ke POS baru
+  // Menghapus semua data transaksi, pembelian, biaya, mutasi, produksi, close order
   const [resetting, setResetting] = useState(false)
   const [done,      setDone]      = useState<string[]>([])
 
@@ -1145,6 +1163,68 @@ function ResetDataTab() {
       await db.warehouse_expenses.clear(); await db.warehouse_stock.clear()
       setDone(prev=>[...prev,'Selesai'])
       toast.success('Data gudang direset')
+    } catch (e) { toast.error('Gagal: '+String(e)) }
+    finally { setResetting(false) }
+  }
+
+  async function resetToko() {
+    setResetting(true); setDone([])
+    try {
+      setDone(prev=>[...prev,'Menghapus dari server...'])
+      for (const t of ['transaction_items','transactions','shifts','stock']) {
+        await supabase.from(t).delete().gte('created_at','2000-01-01')
+      }
+      await db.transaction_items.clear(); await db.transactions.clear()
+      await db.shifts.clear(); await db.stock.clear()
+      setDone(prev=>[...prev,'Selesai'])
+      toast.success('Data toko direset')
+    } catch (e) { toast.error('Gagal: '+String(e)) }
+    finally { setResetting(false) }
+  }
+
+  async function resetSettings() {
+    setResetting(true); setDone([])
+    try {
+      setDone(prev=>[...prev,'Mereset setting...'])
+      for (const t of ['promotions']) {
+        await supabase.from(t).delete().gte('created_at','2000-01-01')
+      }
+      await db.promotions.clear()
+      // Reset PPN di semua toko
+      await supabase.from('stores').update({ ppn_enabled: false, ppn_rate: 11, ppn_mode: 'include' }).gte('id','')
+      setDone(prev=>[...prev,'Selesai'])
+      toast.success('Setting direset')
+    } catch (e) { toast.error('Gagal: '+String(e)) }
+    finally { setResetting(false) }
+  }
+
+  async function resetSemua() {
+    if (!confirm('Reset SEMUA data? Ini tidak bisa dibatalkan!')) return
+    setResetting(true); setDone([])
+    try {
+      const tables = [
+        'transaction_items','transactions','shifts',
+        'warehouse_mutation_items','warehouse_mutations',
+        'purchase_items','purchases','warehouse_expenses','warehouse_stock',
+        'production_log_materials','production_logs',
+        'production_mutation_items','production_mutations',
+        'production_stock','finished_goods_stock','stock','promotions',
+      ]
+      setDone(prev=>[...prev,'Menghapus dari server...'])
+      for (const t of tables) {
+        try { await supabase.from(t).delete().gte('created_at','2000-01-01') } catch {}
+      }
+      setDone(prev=>[...prev,'Membersihkan lokal...'])
+      await db.transaction_items.clear(); await db.transactions.clear(); await db.shifts.clear()
+      await db.warehouse_mutation_items.clear(); await db.warehouse_mutations.clear()
+      await db.purchase_items.clear(); await db.purchases.clear()
+      await db.warehouse_expenses.clear(); await db.warehouse_stock.clear()
+      await db.production_log_materials.clear(); await db.production_logs.clear()
+      await db.production_mutation_items.clear(); await db.production_mutations.clear()
+      await db.production_stock.clear(); await db.finished_goods_stock.clear()
+      await db.stock.clear(); await db.promotions.clear()
+      setDone(prev=>[...prev,'✅ Selesai — semua data direset'])
+      toast.success('Semua data direset')
     } catch (e) { toast.error('Gagal: '+String(e)) }
     finally { setResetting(false) }
   }
@@ -1174,6 +1254,8 @@ function ResetDataTab() {
       {[
         { label:'Reset Data Gudang',   sub:'Pembelian, mutasi, biaya, stok gudang', fn:resetGudang },
         { label:'Reset Data Produksi', sub:'Log produksi, stok produksi & produk jadi', fn:resetProduksi },
+        { label:'Reset Data Toko',     sub:'Transaksi kasir, shift, stok toko', fn:resetToko },
+        { label:'Reset Setting',       sub:'Promo, PPN', fn:resetSettings },
       ].map(btn => (
         <div key={btn.label} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-50">
@@ -1187,6 +1269,19 @@ function ResetDataTab() {
           </div>
         </div>
       ))}
+      {/* Reset Semua */}
+      <div className="bg-red-50 border border-red-200 rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-red-100">
+          <p className="text-sm font-bold text-red-800">Reset Semua Data</p>
+          <p className="text-xs text-red-600 mt-0.5">Hapus semua transaksi, stok, pembelian, biaya, produksi, promo. Master data (bahan, produk, supplier, resep) tetap aman.</p>
+        </div>
+        <div className="px-4 py-3">
+          <button onClick={resetSemua} disabled={resetting} className="w-full py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold disabled:opacity-50">
+            {resetting?'Mereset...':'Reset Semua Data (Go-Live)'}
+          </button>
+        </div>
+      </div>
+
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-50">
           <p className="text-sm font-medium text-gray-900">Bersihkan Data Lokal Device</p>
@@ -1314,7 +1409,7 @@ function SupplierForm({ supplier, onClose }: { supplier: Supplier|null; onClose:
   }
   return (
     <Modal title={supplier?'Edit Supplier':'Tambah Supplier'} onClose={onClose}>
-      <div><Label>Nama Supplier</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus /></div>
+      <div><Label required>Nama Supplier</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus /></div>
       <div><Label>No. Telepon</Label><input className="input" type="tel" value={phone} onChange={e=>setPhone(e.target.value)} /></div>
       <div><Label>Alamat</Label><input className="input" value={address} onChange={e=>setAddr(e.target.value)} placeholder="Opsional" /></div>
       <div className="flex items-center justify-between py-2 border-t border-gray-100">
@@ -1342,7 +1437,7 @@ function MitraForm({ partner, onClose }: { partner: Partner|null; onClose: () =>
   }
   return (
     <Modal title={partner?'Edit Mitra':'Tambah Franchise'} onClose={onClose}>
-      <div><Label>Nama Franchise</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus /></div>
+      <div><Label required>Nama Franchise</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus /></div>
       <div className="grid grid-cols-2 gap-3">
         <div><Label>Kota</Label><input className="input" value={city} onChange={e=>setCity(e.target.value)} /></div>
         <div><Label>Kontak</Label><input className="input" type="tel" value={contact} onChange={e=>setContact(e.target.value)} /></div>

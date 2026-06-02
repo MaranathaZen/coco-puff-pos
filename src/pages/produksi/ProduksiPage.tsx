@@ -176,7 +176,7 @@ export default function ProduksiPage() {
           {/* FIX Bug 3: tampil skeleton hanya saat benar-benar tidak ada data lokal */}
           {isInitialLoad && hasLocalData === undefined
             ? <LoadingSkeleton />
-            : <CatatProduksiTab userId={user!.id} />
+            : <CatatProduksiTab userId={user!.id} isOwnerManager={isOwnerManager} />
           }
         </div>
       </ToolbarCtx.Provider>
@@ -205,7 +205,7 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
   )
 }
 
-function CatatProduksiTab({ userId }: { userId: string }) {
+function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerManager?: boolean }) {
   const setToolbar = useContext(ToolbarCtx)
   const [showForm,       setShowForm]       = useState(false)
   const [groupMode,      setGroupMode]      = useState<'hari'|'bulan'|'tahun'>('hari')
@@ -355,12 +355,20 @@ function CatatProduksiTab({ userId }: { userId: string }) {
         })
       })()}
 
-      {showForm && <ProduksiForm userId={userId} onClose={() => setShowForm(false)} />}
+      {showForm && <ProduksiForm userId={userId} isOwnerManager={isOwnerManager} onClose={() => setShowForm(false)} />}
     </div>
   )
 }
 
-function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void }) {
+function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isOwnerManager?: boolean; onClose: () => void }) {
+  // Owner/manager bisa input produksi atas nama divisi produksi atau toko lain
+  const allStores = useLiveQuery(() =>
+    isOwnerManager
+      ? db.stores.filter(s => s.is_active).toArray()
+      : Promise.resolve([])
+  , [isOwnerManager])
+  const defaultInputStore = ''  // kosong = divisi produksi
+  const [inputAsStore, setInputAsStore] = useState(defaultInputStore)
   const recipes = useLiveQuery(() => db.production_recipes.filter(r => r.is_active).toArray(), [])
 
   const [recipeId,    setRecipeId]    = useState('')
@@ -465,6 +473,17 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
 
   return (
     <Modal title="Catat Produksi" onClose={onClose}>
+      {isOwnerManager && allStores && allStores.length > 0 && (
+        <div>
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Input Sebagai</label>
+          <select className="input" value={inputAsStore} onChange={e => setInputAsStore(e.target.value)}>
+            <option value="">Divisi Produksi</option>
+            {allStores.filter(s => !s.id.includes('gudang')).map(s => (
+              <option key={s.id} value={s.id}>{s.name.replace(' Malang','').replace(' Bali','')}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div>
         <Label required>Resep</Label>
         <select className="input" value={recipeId} onChange={e => setRecipeId(e.target.value)}>

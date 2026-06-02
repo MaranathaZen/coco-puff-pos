@@ -136,7 +136,7 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
   const [showForm,  setShowForm]  = useState(false)
   const [groupMode, setGroupMode] = useState<Period>('hari')
   const [filterType,  setFilterType]  = useState('semua')
-  const [filterStore, setFilterStore] = useState('semua')
+  const [filterStore, setFilterStore] = useState('')
   const [search,      setSearch]      = useState('')
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
     const today = new Date().toISOString().slice(0,10)
@@ -148,6 +148,15 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
   const stores = useLiveQuery(() =>
     db.stores.filter(s => s.is_active).toArray()
   , [])
+
+  // Auto-select gudang sebagai default filter
+  useEffect(() => {
+    if (stores && stores.length > 0 && !filterStore) {
+      const gudang = stores.find(s => s.id.includes('gudang'))
+      if (gudang) setFilterStore(gudang.id)
+      else setFilterStore(stores[0].id)
+    }
+  }, [stores])
 
   useEffect(() => {
     setToolbar(
@@ -223,14 +232,15 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
 
       {isOwnerManager && stores && stores.length > 1 && (
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-          <button onClick={() => setFilterStore('semua')}
-            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore==='semua'?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
-            Semua Toko
-          </button>
-          {stores.map(s => (
+          {/* Urutan: Gudang → Produksi → Toko real */}
+          {[
+            ...((stores||[]).filter(s => s.id.includes('gudang'))),
+            ...((stores||[]).filter(s => s.id.includes('produksi'))),
+            ...((stores||[]).filter(s => !s.id.includes('gudang') && !s.id.includes('produksi'))),
+          ].map(s => (
             <button key={s.id} onClick={() => setFilterStore(s.id)}
               className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore===s.id?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
-              {s.name}
+              {s.name.replace(' Malang','').replace(' Bali','')}
             </button>
           ))}
         </div>

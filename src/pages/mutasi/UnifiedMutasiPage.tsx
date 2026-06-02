@@ -692,37 +692,24 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
 
   return (
     <Modal title="Catat Mutasi" onClose={onClose}>
-      {isOwnerManager && (
-        <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 space-y-2">
-          <p className="text-xs font-medium text-blue-700">Input Sebagai</p>
-          <div className="grid grid-cols-2 gap-2">
-            {(['gudang','produksi','kasir'] as const).map(r => (
-              <button key={r} onClick={() => {
-                setInputAsRole(r)
-                // Auto-set store sesuai role
-                if (r === 'gudang') {
-                  const g = allStores?.find(s => s.id.includes('gudang'))
-                  if (g) setInputAsStore(g.id)
-                } else if (r === 'produksi') {
-                  const p = allStores?.find(s => s.id.includes('produksi'))
-                  if (p) setInputAsStore(p.id)
-                } else {
-                  const realStore = allStores?.find(s => !(s as any).is_virtual && !s.id.includes('gudang') && !s.id.includes('produksi'))
-                  if (realStore) setInputAsStore(realStore.id)
-                }
-              }}
-                className={`py-1.5 rounded-lg text-xs font-medium border capitalize ${inputAsRole===r?'bg-blue-700 text-white border-blue-700':'border-blue-200 text-blue-600'}`}>
-                {r}
-              </button>
+      {isOwnerManager && allStores && allStores.length > 0 && (
+        <div>
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Input Sebagai</label>
+          <select className="input" value={inputAsStore} onChange={e => {
+            const store = allStores.find(s => s.id === e.target.value)
+            setInputAsStore(e.target.value)
+            // Set role berdasarkan toko yang dipilih
+            if (!store) return
+            if (store.id.includes('gudang')) setInputAsRole('gudang')
+            else if (store.id.includes('produksi')) setInputAsRole('produksi')
+            else setInputAsRole('kasir')
+          }}>
+            {allStores.map(s => (
+              <option key={s.id} value={s.id}>
+                {s.name.replace(' Malang','').replace(' Bali','')}
+              </option>
             ))}
-          </div>
-          {inputAsRole === 'kasir' && allStores && (
-            <select className="input text-xs" value={inputAsStore} onChange={e => setInputAsStore(e.target.value)}>
-              {allStores.filter(s => !(s as any).is_virtual && !s.id.includes('gudang') && !s.id.includes('produksi')).map(s => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          )}
+          </select>
         </div>
       )}
       <div>

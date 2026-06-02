@@ -1,16 +1,16 @@
 // src/pages/stok/UnifiedStokPage.tsx
-// CHANGELOG v2:
-// - FIX Bug 4: StokProduksiView baca avg_cost dari production_stock, bukan materials
-// - FIX Bug 4: StokTokoView tampilkan avg_cost dari stock record
-// - FIX Bug 4: StokGudangView tetap baca dari materials.avg_cost (benar)
-// - Nilai stok dihitung dari avg_cost masing-masing lokasi
+// CHANGELOG v3:
+// - Tab Produksi: tambah button Stok Awal + Tambah + Edit (owner/manager)
+// - Tab Toko: tambah button Stok Awal + Edit qty (owner/manager)
+// - StokTokoView: fix reactive saat ganti toko (key prop)
+// - Label Gudang Malang → Gudang di filter pembelian/biaya
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now } from '@/lib/db'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
-import { Warehouse, FlaskConical, Store, RefreshCw, AlertCircle, Plus, Package, X, Trash2 } from 'lucide-react'
+import { Warehouse, FlaskConical, Store, RefreshCw, AlertCircle, Plus, Package, X, Trash2, Edit2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 import type { Material, WarehouseStock } from '@/lib/db'
@@ -31,7 +31,6 @@ const KAT_LABEL: Record<string, string> = {
   packaging:           'Packaging',
   non_produksi:        'Non-Produksi',
 }
-
 function formatKategori(raw: string | undefined): string {
   if (!raw) return ''
   if (KAT_LABEL[raw]) return KAT_LABEL[raw]
@@ -52,7 +51,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
       <div className="bg-white rounded-2xl w-full max-w-md shadow-lg max-h-[92vh] flex flex-col">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
           <h3 className="font-semibold text-gray-900">{title}</h3>
-          <button onClick={onClose} className="p-1 text-gray-400 rounded-full hover:bg-gray-100"><X size={18} /></button>
+          <button onClick={onClose} className="p-1 text-gray-400 rounded-full"><X size={18} /></button>
         </div>
         <div className="overflow-auto flex-1 px-5 py-4 space-y-4">{children}</div>
       </div>
@@ -60,7 +59,9 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   )
 }
 function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
-  return <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">{children}{required && <span className="text-red-400 ml-0.5">*</span>}</label>
+  return <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+    {children}{required && <span className="text-red-500 font-bold ml-0.5">*</span>}
+  </label>
 }
 
 export default function UnifiedStokPage() {
@@ -69,13 +70,12 @@ export default function UnifiedStokPage() {
   const tabs  = TAB_ACCESS[role] || ['toko']
   const [tab,     setTab]     = useState<StokTab>(tabs[0])
   const [syncing, setSyncing] = useState(false)
-
   const isOwnerManager = ['owner','manager'].includes(role)
 
   async function syncAll() {
     setSyncing(true)
     try {
-      const [mats, ws, ps, fgs, prods, stocks, cats] = await Promise.all([
+      const [mats, ws, ps, fgs, prods, stocks, cats, stores] = await Promise.all([
         supabase.from('materials').select('*'),
         supabase.from('warehouse_stock').select('*'),
         supabase.from('production_stock').select('*'),
@@ -83,15 +83,16 @@ export default function UnifiedStokPage() {
         supabase.from('products').select('*').eq('is_active', true),
         supabase.from('stock').select('*'),
         supabase.from('categories').select('*'),
+        supabase.from('stores').select('*'),
       ])
-      // Gunakan bulkPut (bukan clear+bulkPut) agar data lokal tidak hilang jika Supabase return kosong
-      if (mats.data?.length)   await db.materials.bulkPut(mats.data)
-      if (ws.data?.length)     await db.warehouse_stock.bulkPut(ws.data)
-      if (ps.data?.length)     await db.production_stock.bulkPut(ps.data)
-      if (fgs.data?.length)    await db.finished_goods_stock.bulkPut(fgs.data)
-      if (prods.data !== null) { await db.products.clear(); if (prods.data.length) await db.products.bulkPut(prods.data) }
-      if (stocks.data !== null) { await db.stock.clear(); if (stocks.data.length) await db.stock.bulkPut(stocks.data) }
-      if (cats.data !== null)  { await db.categories.clear(); if (cats.data.length) await db.categories.bulkPut(cats.data) }
+      if (mats.data?.length)  await db.materials.bulkPut(mats.data)
+      if (ws.data?.length)    await db.warehouse_stock.bulkPut(ws.data)
+      if (ps.data?.length)    await db.production_stock.bulkPut(ps.data)
+      if (fgs.data?.length)   await db.finished_goods_stock.bulkPut(fgs.data)
+      if (stores.data?.length) await db.stores.bulkPut(stores.data)
+      if (prods.data !== null)  { await db.products.clear();    if (prods.data.length)  await db.products.bulkPut(prods.data)    }
+      if (stocks.data !== null) { await db.stock.clear();       if (stocks.data.length) await db.stock.bulkPut(stocks.data)      }
+      if (cats.data !== null)   { await db.categories.clear();  if (cats.data.length)   await db.categories.bulkPut(cats.data)   }
       toast.success('Stok diperbarui')
     } catch { toast.error('Gagal sync') }
     finally { setSyncing(false) }
@@ -111,7 +112,6 @@ export default function UnifiedStokPage() {
           <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
         </button>
       </div>
-
       {tabConfig.length > 1 && (
         <div className="bg-white border-b border-gray-100 flex flex-shrink-0">
           {tabConfig.map(t => (
@@ -122,11 +122,10 @@ export default function UnifiedStokPage() {
           ))}
         </div>
       )}
-
       <div className="flex-1 overflow-auto bg-gray-50">
         {tab === 'gudang'   && <StokGudangView isOwnerManager={isOwnerManager} isOwner={role === 'owner'} />}
-        {tab === 'produksi' && <StokProduksiView />}
-        {tab === 'toko'     && <StokTokoView storeId={user?.store_id || ''} role={role} />}
+        {tab === 'produksi' && <StokProduksiView isOwnerManager={isOwnerManager} />}
+        {tab === 'toko'     && <StokTokoView storeId={user?.store_id || ''} role={role} isOwnerManager={isOwnerManager} />}
       </div>
     </div>
   )
@@ -153,12 +152,7 @@ function StokGudangView({ isOwnerManager, isOwner }: { isOwnerManager: boolean; 
     const mats   = await db.materials.filter(m => m.is_active).toArray()
     const stocks = await db.warehouse_stock.toArray()
     const sMap   = Object.fromEntries(stocks.map(s => [s.material_id, s.qty_on_hand]))
-    // Gudang: avg_cost dari materials (benar — ini sumber kebenaran gudang)
-    const items  = mats.map(m => ({
-      ...m,
-      qty:      sMap[m.id] ?? 0,
-      avg_cost: m.avg_cost || m.unit_cost || 0,
-    }))
+    const items  = mats.map(m => ({ ...m, qty: sMap[m.id] ?? 0, avg_cost: m.avg_cost || m.unit_cost || 0 }))
     const totalNilai = items.reduce((s, i) => s + i.qty * i.avg_cost, 0)
     const lowStock   = items.filter(i => i.qty <= i.min_stock && i.min_stock > 0)
     return { items, totalNilai, lowStock }
@@ -166,10 +160,7 @@ function StokGudangView({ isOwnerManager, isOwner }: { isOwnerManager: boolean; 
 
   const filteredItems = (data?.items || []).filter(item => {
     const matchSearch = !search || item.name.toLowerCase().includes(search.toLowerCase())
-    const matchKat =
-      filterKat === 'semua'       ? true :
-      filterKat === 'stok_rendah' ? item.qty <= item.min_stock && item.min_stock > 0 :
-                                    item.category === filterKat
+    const matchKat = filterKat === 'semua' ? true : filterKat === 'stok_rendah' ? item.qty <= item.min_stock && item.min_stock > 0 : item.category === filterKat
     return matchSearch && matchKat
   })
 
@@ -187,7 +178,6 @@ function StokGudangView({ isOwnerManager, isOwner }: { isOwnerManager: boolean; 
           </button>
         </div>
       )}
-
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400">Nilai Stok</p>
@@ -206,38 +196,27 @@ function StokGudangView({ isOwnerManager, isOwner }: { isOwnerManager: boolean; 
           </div>
         )}
       </div>
-
       <input value={search} onChange={e => setSearch(e.target.value)}
         className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
         placeholder="Cari nama bahan..." />
-
       <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
         {KAT_FILTERS.map(({ k, l }) => {
-          const label = k === 'stok_rendah'
-            ? `⚠ Stok Rendah${data?.lowStock?.length ? ` (${data.lowStock.length})` : ''}` : l
+          const label = k === 'stok_rendah' ? `⚠ Stok Rendah${data?.lowStock?.length ? ` (${data.lowStock.length})` : ''}` : l
           return (
             <button key={k} onClick={() => setFilterKat(k)}
-              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                filterKat === k
-                  ? k === 'stok_rendah' ? 'bg-red-600 text-white' : 'bg-gray-900 text-white'
-                  : k === 'stok_rendah' ? 'bg-red-50 text-red-600 border border-red-200'
-                  : 'bg-white text-gray-600 border border-gray-200'}`}>
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${filterKat === k ? k === 'stok_rendah' ? 'bg-red-600 text-white' : 'bg-gray-900 text-white' : k === 'stok_rendah' ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-white text-gray-600 border border-gray-200'}`}>
               {label}
             </button>
           )
         })}
       </div>
-
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {filteredItems.sort((a, b) => (b.qty * b.avg_cost) - (a.qty * a.avg_cost)).map((item, idx) => (
-          <button key={item.id}
-            onClick={() => isOwnerManager && (setEditMat(item as any), setShowForm(true))}
+          <button key={item.id} onClick={() => isOwnerManager && (setEditMat(item as any), setShowForm(true))}
             className={`w-full flex items-center px-4 py-3 text-left ${idx !== 0 ? 'border-t border-gray-50' : ''} ${item.qty <= item.min_stock && item.min_stock > 0 ? 'bg-red-50/30' : ''} ${isOwnerManager ? 'active:bg-gray-50' : ''}`}>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
-              <p className="text-xs text-gray-400">
-                {formatKategori(item.category)} · Avg {formatRupiah(item.avg_cost)}/{item.unit}
-              </p>
+              <p className="text-xs text-gray-400">{formatKategori(item.category)} · Avg {formatRupiah(item.avg_cost)}/{item.unit}</p>
             </div>
             <div className="text-right flex-shrink-0">
               <p className={`text-sm font-semibold ${item.qty <= item.min_stock && item.min_stock > 0 ? 'text-red-600' : 'text-gray-900'}`}>
@@ -247,20 +226,530 @@ function StokGudangView({ isOwnerManager, isOwner }: { isOwnerManager: boolean; 
             </div>
           </button>
         ))}
-        {filteredItems.length === 0 && (
-          <div className="py-10 text-center text-sm text-gray-400">
-            {search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada stok'}
+        {filteredItems.length === 0 && <div className="py-10 text-center text-sm text-gray-400">{search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada stok'}</div>}
+      </div>
+      {showForm    && isOwnerManager && <MaterialForm material={editMat} isOwner={isOwner} onClose={() => { setShowForm(false); setEditMat(null) }} />}
+      {showOpening && isOwnerManager && <OpeningStockForm onClose={() => setShowOpening(false)} />}
+    </div>
+  )
+}
+
+// ── STOK PRODUKSI ─────────────────────────────────────────────
+function StokProduksiView({ isOwnerManager }: { isOwnerManager: boolean }) {
+  const [search,    setSearch]    = useState('')
+  const [filterKat, setFilterKat] = useState('semua')
+  const [showFgsForm,  setShowFgsForm]  = useState(false)
+  const [showPsForm,   setShowPsForm]   = useState(false)
+  const [editFgs, setEditFgs] = useState<any>(null)
+  const [editPs,  setEditPs]  = useState<any>(null)
+
+  const data = useLiveQuery(async () => {
+    const ps   = await db.production_stock.toArray()
+    const fgs  = await db.finished_goods_stock.toArray()
+    const mats = await db.materials.toArray()
+    const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
+    const bahan = ps.map(s => ({
+      ...s, material: mMap[s.material_id],
+      displayAvgCost: (s as any).avg_cost || mMap[s.material_id]?.unit_cost || 0,
+    })).filter(s => s.material?.name)
+    const totalBahan = bahan.reduce((s, i) => s + i.qty_on_hand * i.displayAvgCost, 0)
+    return { bahan, fgs, totalBahan }
+  }, [])
+
+  const filteredBahan = (data?.bahan || []).filter(s => {
+    const matchSearch = !search || s.material?.name?.toLowerCase().includes(search.toLowerCase())
+    const matchKat = filterKat === 'semua' ? true : filterKat === 'stok_rendah' ? s.qty_on_hand <= (s.material?.min_stock || 0) && (s.material?.min_stock || 0) > 0 : s.material?.category === filterKat
+    return matchSearch && matchKat
+  })
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-white rounded-xl border border-gray-100 p-3">
+          <p className="text-xs text-gray-400">Nilai Bahan</p>
+          <p className="text-base font-semibold text-gray-900">{formatRupiah(data?.totalBahan || 0)}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{data?.bahan.length || 0} jenis</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-100 p-3">
+          <p className="text-xs text-gray-400">Produk Jadi</p>
+          <p className="text-base font-semibold text-blue-600">{data?.fgs.reduce((s, f) => s + f.qty_on_hand, 0) || 0} pcs</p>
+          <p className="text-xs text-gray-400 mt-0.5">{data?.fgs.length || 0} jenis</p>
+        </div>
+      </div>
+
+      {/* Produk Jadi section */}
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Produk Siap Kirim</p>
+          {isOwnerManager && (
+            <div className="flex gap-1.5">
+              <button onClick={() => { setEditFgs(null); setShowFgsForm(true) }}
+                className="flex items-center gap-1 text-xs font-medium text-blue-600 border border-blue-200 bg-blue-50 px-2.5 py-1.5 rounded-lg">
+                <Package size={12} /> Stok Awal
+              </button>
+            </div>
+          )}
+        </div>
+        {data?.fgs && data.fgs.length > 0 ? (
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            {data.fgs.map((f, idx) => (
+              <div key={f.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-gray-900">{f.product_name}</p>
+                  {(f as any).hpp_per_unit > 0 && <p className="text-xs text-gray-400">HPP {formatRupiah((f as any).hpp_per_unit)}/pcs</p>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-blue-600">{f.qty_on_hand} pcs</p>
+                    <p className="text-xs text-gray-400">{formatRupiah(f.qty_on_hand * ((f as any).hpp_per_unit || 0))}</p>
+                  </div>
+                  {isOwnerManager && (
+                    <button onClick={() => { setEditFgs(f); setShowFgsForm(true) }} className="p-1.5 text-gray-400 rounded-lg">
+                      <Edit2 size={13} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl border border-gray-100 py-6 text-center text-sm text-gray-400">Belum ada produk jadi</div>
+        )}
+      </div>
+
+      {/* Stok Bahan section */}
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Stok Bahan</p>
+          {isOwnerManager && (
+            <button onClick={() => { setEditPs(null); setShowPsForm(true) }}
+              className="flex items-center gap-1 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg">
+              <Plus size={12} /> Stok Awal Bahan
+            </button>
+          )}
+        </div>
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none mb-2"
+          placeholder="Cari nama bahan..." />
+        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide mb-2">
+          {KAT_FILTERS.map(({ k, l }) => (
+            <button key={k} onClick={() => setFilterKat(k)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${filterKat === k ? k === 'stok_rendah' ? 'bg-red-600 text-white' : 'bg-gray-900 text-white' : k === 'stok_rendah' ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-white text-gray-600 border border-gray-200'}`}>{l}
+            </button>
+          ))}
+        </div>
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          {filteredBahan.map((s, idx) => (
+            <div key={s.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900">{s.material?.name}</p>
+                <p className="text-xs text-gray-400">{formatKategori(s.material?.category)} · Avg {formatRupiah(s.displayAvgCost)}/{s.material?.unit}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="text-right">
+                  <p className="text-sm font-semibold text-gray-900">{s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.material?.unit}</span></p>
+                  <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand * s.displayAvgCost)}</p>
+                </div>
+                {isOwnerManager && (
+                  <button onClick={() => { setEditPs(s); setShowPsForm(true) }} className="p-1.5 text-gray-400 rounded-lg">
+                    <Edit2 size={13} />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+          {filteredBahan.length === 0 && <div className="py-8 text-center text-sm text-gray-400">{search ? `Tidak ada hasil` : 'Belum ada stok bahan'}</div>}
+        </div>
+      </div>
+
+      {showFgsForm && isOwnerManager && <FgsEditForm fgs={editFgs} onClose={() => { setShowFgsForm(false); setEditFgs(null) }} />}
+      {showPsForm  && isOwnerManager && <PsEditForm  ps={editPs}   onClose={() => { setShowPsForm(false);  setEditPs(null)  }} />}
+    </div>
+  )
+}
+
+// ── FORM: Edit Produk Jadi (FGS) ──────────────────────────────
+function FgsEditForm({ fgs, onClose }: { fgs: any; onClose: () => void }) {
+  const [name,  setName]  = useState(fgs?.product_name || '')
+  const [qty,   setQty]   = useState(String(fgs?.qty_on_hand || ''))
+  const [hpp,   setHpp]   = useState(String(fgs?.hpp_per_unit || ''))
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    if (!name.trim()) return toast.error('Nama produk wajib diisi')
+    if (Number(qty) < 0) return toast.error('Qty tidak boleh negatif')
+    setSaving(true)
+    try {
+      const data: any = {
+        id:           fgs?.id || generateId(),
+        product_id:   fgs?.product_id || `fgs-${generateId().slice(0,8)}`,
+        product_name: name.trim(),
+        qty_on_hand:  Number(qty),
+        hpp_per_unit: Number(hpp) || 0,
+        last_updated: now(),
+      }
+      await db.finished_goods_stock.put(data)
+      if (fgs) {
+        await supabase.from('finished_goods_stock').update({ qty_on_hand: data.qty_on_hand, hpp_per_unit: data.hpp_per_unit, last_updated: data.last_updated }).eq('id', fgs.id)
+      } else {
+        await supabase.from('finished_goods_stock').insert(data)
+      }
+      toast.success(fgs ? 'Stok produk jadi diupdate' : 'Produk jadi ditambahkan')
+      onClose()
+    } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title={fgs ? 'Edit Produk Jadi' : 'Tambah Produk Jadi'} onClose={onClose}>
+      <div><Label required>Nama Produk</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label required>Qty (pcs)</Label><input className="input" type="number" value={qty} onChange={e => setQty(e.target.value)} /></div>
+        <div><Label>HPP/pcs (Rp)</Label><input className="input" type="number" value={hpp} onChange={e => setHpp(e.target.value)} /></div>
+      </div>
+      <div className="flex gap-3">
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── FORM: Edit Stok Bahan Produksi ────────────────────────────
+function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
+  const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
+  const [matId,  setMatId]  = useState(ps?.material_id || '')
+  const [qty,    setQty]    = useState(String(ps?.qty_on_hand || ''))
+  const [avg,    setAvg]    = useState(String(ps?.avg_cost || ''))
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    if (!matId) return toast.error('Pilih bahan')
+    if (Number(qty) < 0) return toast.error('Qty tidak boleh negatif')
+    setSaving(true)
+    try {
+      const existing = ps || await db.production_stock.where('material_id').equals(matId).first()
+      const data: any = {
+        id:           existing?.id || generateId(),
+        material_id:  matId,
+        qty_on_hand:  Number(qty),
+        avg_cost:     Number(avg) || 0,
+        last_updated: now(),
+      }
+      await db.production_stock.put(data)
+      await supabase.from('production_stock').upsert(data)
+      toast.success('Stok bahan produksi diupdate')
+      onClose()
+    } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title={ps ? 'Edit Stok Bahan Produksi' : 'Tambah Stok Awal Bahan'} onClose={onClose}>
+      <div><Label required>Bahan</Label>
+        <select className="input" value={matId} onChange={e => setMatId(e.target.value)} disabled={!!ps}>
+          <option value="">Pilih bahan</option>
+          {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
+        </select>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label required>Qty</Label><input className="input" type="number" value={qty} onChange={e => setQty(e.target.value)} /></div>
+        <div><Label>Avg Cost (Rp)</Label><input className="input" type="number" value={avg} onChange={e => setAvg(e.target.value)} /></div>
+      </div>
+      <div className="flex gap-3">
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── STOK TOKO ─────────────────────────────────────────────────
+function StokTokoView({ storeId, role, isOwnerManager }: { storeId: string; role: string; isOwnerManager: boolean }) {
+  const canSeeAllStores = ['owner','manager','gudang','produksi'].includes(role)
+
+  const stores = useLiveQuery(() =>
+    db.stores.filter(s => {
+      if (!s.is_active) return false
+      if ((s as any).is_virtual) return false
+      if (s.id.includes('gudang') || s.id.includes('produksi')) return false
+      return true
+    }).toArray()
+  , [])
+
+  const [selectedStore, setSelectedStore] = useState('')
+
+  useEffect(() => {
+    if (!canSeeAllStores) {
+      setSelectedStore(storeId)
+    } else if (stores && stores.length > 0 && !selectedStore) {
+      setSelectedStore(stores[0].id)
+    }
+  }, [stores, canSeeAllStores, storeId])
+
+  const activeStoreId = canSeeAllStores ? selectedStore : storeId
+
+  return (
+    <div className="flex flex-col h-full">
+      {canSeeAllStores && stores && stores.length > 0 && (
+        <div className="bg-white border-b border-gray-100 px-4 py-2 flex gap-1.5 overflow-x-auto scrollbar-hide flex-shrink-0">
+          {stores.map(s => (
+            <button key={s.id} onClick={() => setSelectedStore(s.id)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${selectedStore===s.id ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {/* Key berubah saat selectedStore berubah → force re-render + re-query */}
+      {activeStoreId && (
+        <StokTokoContent
+          key={activeStoreId}
+          storeId={activeStoreId}
+          isOwnerManager={isOwnerManager}
+        />
+      )}
+      {!activeStoreId && (
+        <div className="flex-1 flex items-center justify-center text-sm text-gray-400">Pilih toko</div>
+      )}
+    </div>
+  )
+}
+
+function StokTokoContent({ storeId, isOwnerManager }: { storeId: string; isOwnerManager: boolean }) {
+  const [search,        setSearch]        = useState('')
+  const [filterTokoKat, setFilterTokoKat] = useState('semua')
+  const [showStokAwal,  setShowStokAwal]  = useState(false)
+  const [editStock,     setEditStock]     = useState<any>(null)
+
+  const data = useLiveQuery(async () => {
+    if (!storeId) return []
+    const stocks = await db.stock.where('store_id').equals(storeId).toArray()
+    const prods  = await db.products.toArray()
+    const cats   = await db.categories.toArray()
+    const mats   = await db.materials.toArray()
+    const pMap   = Object.fromEntries(prods.map(p => [p.id, p]))
+    const cMap   = Object.fromEntries(cats.map(c => [c.id, c]))
+    const mMap   = Object.fromEntries(mats.map(m => [m.id, m]))
+    return stocks.map(s => {
+      const id   = (s as any).material_id || s.ingredient_id || ''
+      const prod = pMap[id]; const mat = mMap[id]
+      if (!prod && !mat) return null
+      return {
+        id: s.id, stockId: s.id, ingredient_id: id,
+        qty_on_hand: s.qty_on_hand,
+        avg_cost: (s as any).avg_cost || 0,
+        displayName: prod?.name || mat?.name || '',
+        displayUnit: prod?.unit || mat?.unit || 'pcs',
+        categoryName: prod ? (cMap[prod.category_id||'']?.name || 'Produk') : formatKategori(mat?.category),
+        categoryRaw: prod ? '' : (mat?.category || ''),
+        isProduk: !!prod,
+      }
+    }).filter(Boolean) as any[]
+  }, [storeId])
+
+  const TOKO_FILTERS = [
+    { k:'semua',               l:'Semua'         },
+    { k:'stok_rendah',         l:'⚠ Stok Rendah' },
+    { k:'stok_habis',          l:'Habis'          },
+    { k:'produk_jadi',         l:'Produk Jadi'    },
+    { k:'bahan_baku',          l:'Bahan Baku'     },
+    { k:'bahan_setengah_jadi', l:'Bahan Setengah' },
+    { k:'packaging',           l:'Packaging'      },
+    { k:'non_produksi',        l:'Non-Produksi'   },
+  ]
+
+  const filtered = (data||[]).filter(s => {
+    const matchSearch = !search || s.displayName.toLowerCase().includes(search.toLowerCase())
+    const matchKat =
+      filterTokoKat==='semua'       ? true :
+      filterTokoKat==='stok_rendah' ? s.qty_on_hand > 0 && s.qty_on_hand <= 5 :
+      filterTokoKat==='stok_habis'  ? s.qty_on_hand <= 0 :
+      filterTokoKat==='produk_jadi' ? s.isProduk :
+      s.categoryRaw === filterTokoKat
+    return matchSearch && matchKat
+  })
+
+  const totalNilai = filtered.reduce((s, i) => s + i.qty_on_hand * (i.avg_cost || 0), 0)
+
+  return (
+    <div className="flex-1 overflow-auto p-4 space-y-3">
+      {isOwnerManager && (
+        <div className="flex justify-end">
+          <button onClick={() => setShowStokAwal(true)}
+            className="flex items-center gap-1.5 text-xs font-medium text-blue-600 border border-blue-200 bg-blue-50 px-3 py-2 rounded-lg">
+            <Package size={13} /> Stok Awal Toko
+          </button>
+        </div>
+      )}
+
+      {filtered.length > 0 && totalNilai > 0 && (
+        <div className="bg-white rounded-xl border border-gray-100 p-3">
+          <p className="text-xs text-gray-400">Nilai Stok Toko</p>
+          <p className="text-base font-semibold text-gray-900">{formatRupiah(totalNilai)}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{filtered.length} item</p>
+        </div>
+      )}
+
+      <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+        {TOKO_FILTERS.map(({ k, l }) => (
+          <button key={k} onClick={() => setFilterTokoKat(k)}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${filterTokoKat===k?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>{l}</button>
+        ))}
+      </div>
+
+      <input value={search} onChange={e => setSearch(e.target.value)}
+        className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
+        placeholder="Cari nama produk / bahan..." />
+
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        {filtered.map((s, idx) => (
+          <div key={s.id} className={`flex items-center px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-gray-900">{s.displayName}</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                {s.isProduk
+                  ? <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-medium">Produk Jadi</span>
+                  : s.categoryName ? <p className="text-xs text-gray-400">{s.categoryName}</p> : null}
+                {s.avg_cost > 0 && <p className="text-xs text-gray-300">· Avg {formatRupiah(s.avg_cost)}/{s.displayUnit}</p>}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="text-right">
+                <p className={`text-sm font-semibold ${s.qty_on_hand<=0?'text-red-500':'text-gray-900'}`}>
+                  {s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.displayUnit}</span>
+                </p>
+                {s.avg_cost > 0 && <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand*s.avg_cost)}</p>}
+              </div>
+              {isOwnerManager && (
+                <button onClick={() => setEditStock(s)} className="p-1.5 text-gray-400 rounded-lg">
+                  <Edit2 size={13} />
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {filtered.length === 0 && (
+          <div className="py-12 text-center text-sm text-gray-400">
+            {search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada data stok toko'}
           </div>
         )}
       </div>
 
-      {showForm    && isOwnerManager && (
-        <MaterialForm material={editMat} isOwner={isOwner} onClose={() => { setShowForm(false); setEditMat(null) }} />
+      {showStokAwal && isOwnerManager && (
+        <StokAwalTokoForm storeId={storeId} onClose={() => setShowStokAwal(false)} />
       )}
-      {showOpening && isOwnerManager && (
-        <OpeningStockForm onClose={() => setShowOpening(false)} />
+      {editStock && isOwnerManager && (
+        <EditStokTokoForm stock={editStock} onClose={() => setEditStock(null)} />
       )}
     </div>
+  )
+}
+
+// ── FORM: Stok Awal Toko ──────────────────────────────────────
+function StokAwalTokoForm({ storeId, onClose }: { storeId: string; onClose: () => void }) {
+  const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
+  const [items,  setItems]  = useState([{ material_id: '', qty: '', avg_cost: '' }])
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    const valid = items.filter(i => i.material_id && Number(i.qty) >= 0)
+    if (!valid.length) return toast.error('Tambahkan minimal 1 item')
+    setSaving(true)
+    try {
+      for (const item of valid) {
+        const existing = await db.stock.filter(s =>
+          s.store_id === storeId && (
+            (s as any).material_id === item.material_id ||
+            s.ingredient_id === item.material_id
+          )
+        ).first()
+        const data: any = {
+          id:           existing?.id || generateId(),
+          store_id:     storeId,
+          ingredient_id: item.material_id,
+          material_id:  item.material_id,
+          qty_on_hand:  Number(item.qty),
+          avg_cost:     Number(item.avg_cost) || 0,
+          last_updated: now(),
+        }
+        await db.stock.put(data)
+        if (existing) {
+          await supabase.from('stock').update({ qty_on_hand: data.qty_on_hand, avg_cost: data.avg_cost }).eq('id', existing.id)
+        } else {
+          await supabase.from('stock').insert(data)
+        }
+      }
+      toast.success(`${valid.length} item stok toko disimpan`)
+      onClose()
+    } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title="Stok Awal Toko" onClose={onClose}>
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
+        <p className="text-xs text-blue-700 font-medium">Set stok awal toko</p>
+        <p className="text-xs text-blue-500 mt-0.5">Qty akan di-set langsung ke nilai yang dimasukkan.</p>
+      </div>
+      <div className="space-y-2">
+        {items.map((item, i) => {
+          const mat = materials?.find(m => m.id === item.material_id)
+          return (
+            <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
+              <select className="input text-sm" value={item.material_id}
+                onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,material_id:e.target.value} : x))}>
+                <option value="">Pilih bahan / produk</option>
+                {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
+              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit||'unit'})`}
+                  value={item.qty} onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,qty:e.target.value} : x))} />
+                <input className="input text-sm" type="number" placeholder="Harga avg"
+                  value={item.avg_cost} onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,avg_cost:e.target.value} : x))} />
+              </div>
+              {items.length > 1 && <button onClick={() => setItems(p => p.filter((_,idx) => idx!==i))} className="text-xs text-red-400">Hapus</button>}
+            </div>
+          )
+        })}
+        <button onClick={() => setItems(p => [...p, {material_id:'',qty:'',avg_cost:''}])} className="text-sm text-blue-600 font-medium">+ Tambah Item</button>
+      </div>
+      <div className="flex gap-3">
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── FORM: Edit Stok Toko (single item) ───────────────────────
+function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void }) {
+  const [qty,    setQty]    = useState(String(stock.qty_on_hand || 0))
+  const [avg,    setAvg]    = useState(String(stock.avg_cost || 0))
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    setSaving(true)
+    try {
+      await db.stock.update(stock.stockId, { qty_on_hand: Number(qty), avg_cost: Number(avg), last_updated: now() } as any)
+      await supabase.from('stock').update({ qty_on_hand: Number(qty), avg_cost: Number(avg) }).eq('id', stock.stockId)
+      toast.success('Stok diupdate')
+      onClose()
+    } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title={`Edit: ${stock.displayName}`} onClose={onClose}>
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label required>Qty ({stock.displayUnit})</Label><input className="input" type="number" value={qty} onChange={e => setQty(e.target.value)} autoFocus /></div>
+        <div><Label>Avg Cost (Rp)</Label><input className="input" type="number" value={avg} onChange={e => setAvg(e.target.value)} /></div>
+      </div>
+      <div className="flex gap-3">
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
+      </div>
+    </Modal>
   )
 }
 
@@ -277,16 +766,14 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
 
   async function handleDelete() {
     if (!material || !isOwner) return
-    if (!confirm(`Hapus "${material.name}" permanen?\nData pembelian & mutasi terkait juga akan terhapus.`)) return
+    if (!confirm(`Hapus "${material.name}" permanen?`)) return
     try {
       for (const t of ['warehouse_mutation_items','purchase_items','warehouse_stock','production_stock','store_recipe_items']) {
         await supabase.from(t).delete().eq('material_id', material.id)
       }
-      // Hapus stock toko yang pakai material ini
       await supabase.from('stock').delete().eq('ingredient_id', material.id)
       await supabase.from('stock').delete().eq('material_id', material.id)
       await supabase.from('materials').delete().eq('id', material.id)
-      // Hapus lokal
       await db.materials.delete(material.id)
       await db.warehouse_stock.where('material_id').equals(material.id).delete()
       await db.production_stock.where('material_id').equals(material.id).delete()
@@ -299,19 +786,13 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama bahan wajib diisi')
     if (!unit)        return toast.error('Satuan wajib diisi')
-    if (!category)    return toast.error('Kategori wajib diisi')
     if (!material) {
       const existing = await db.materials.filter(m => m.name.toLowerCase() === name.trim().toLowerCase() && m.is_active).first()
       if (existing) return toast.error(`Bahan "${name}" sudah ada`)
     }
     setSaving(true)
     try {
-      const matId = material?.id || generateId()
-      const data: Material = {
-        id: matId, name: name.trim(), category, unit,
-        unit_cost: Number(unitCost), min_stock: Number(minStock),
-        is_active: isActive, created_at: material?.created_at || now(), updated_at: now(),
-      }
+      const data: Material = { id: material?.id || generateId(), name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock), is_active: isActive, created_at: material?.created_at || now(), updated_at: now() }
       await db.materials.put(data)
       const { error } = await supabase.from('materials').upsert(data)
       if (error) throw error
@@ -323,9 +804,7 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
 
   return (
     <Modal title={material ? 'Edit Bahan' : 'Tambah Bahan Baru'} onClose={onClose}>
-      <div><Label required>Nama Bahan</Label>
-        <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Tepung Terigu, Gula Pasir, dll" autoFocus />
-      </div>
+      <div><Label required>Nama Bahan</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
       <div><Label required>Kategori</Label>
         <div className="grid grid-cols-2 gap-2">
           {KATEGORI.map(k => (
@@ -348,18 +827,13 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
         {customUnit && <input className="input" value={unit} onChange={e => setUnit(e.target.value)} placeholder="Ketik satuan..." />}
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <div><Label>Harga Default / Satuan (Rp)</Label>
-          <input className="input" type="number" value={unitCost} onChange={e => setUnitCost(e.target.value)} placeholder="0" />
-        </div>
-        <div><Label>Min. Stok (alert)</Label>
-          <input className="input" type="number" value={minStock} onChange={e => setMinStock(e.target.value)} placeholder="0" />
-        </div>
+        <div><Label>Harga Default / Satuan (Rp)</Label><input className="input" type="number" value={unitCost} onChange={e => setUnitCost(e.target.value)} /></div>
+        <div><Label>Min. Stok (alert)</Label><input className="input" type="number" value={minStock} onChange={e => setMinStock(e.target.value)} /></div>
       </div>
       {material && (
         <div className="flex items-center justify-between py-2 border-t border-gray-100">
           <div><p className="text-sm font-medium text-gray-800">Aktif</p><p className="text-xs text-gray-400">Nonaktif tidak muncul di stok</p></div>
-          <button onClick={() => setIsActive(!isActive)}
-            className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
+          <button onClick={() => setIsActive(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
             <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[22px]' : 'left-0.5'}`} />
           </button>
         </div>
@@ -377,7 +851,7 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
   )
 }
 
-// ── FORM: Stok Awal ───────────────────────────────────────────
+// ── FORM: Stok Awal Gudang ────────────────────────────────────
 function OpeningStockForm({ onClose }: { onClose: () => void }) {
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const [items,  setItems]  = useState([{ material_id: '', qty: '', unit_cost: '' }])
@@ -389,10 +863,7 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
     setItems(p => p.map((item, idx) => {
       if (idx !== i) return item
       const updated = { ...item, [f]: v }
-      if (f === 'material_id') {
-        const mat = materials?.find(m => m.id === v)
-        if (mat) updated.unit_cost = String(mat.avg_cost || mat.unit_cost || 0)
-      }
+      if (f === 'material_id') { const mat = materials?.find(m => m.id === v); if (mat) updated.unit_cost = String(mat.avg_cost || mat.unit_cost || 0) }
       return updated
     }))
   }
@@ -403,9 +874,8 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
     setSaving(true)
     try {
       for (const item of valid) {
-        const qty  = Number(item.qty)
-        const cost = Number(item.unit_cost) || 0
-        const ws   = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
+        const qty = Number(item.qty), cost = Number(item.unit_cost) || 0
+        const ws  = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
         const wsd: WarehouseStock = { id: ws?.id || generateId(), material_id: item.material_id, qty_on_hand: qty, last_updated: now() }
         await db.warehouse_stock.put(wsd)
         await supabase.from('warehouse_stock').upsert(wsd)
@@ -414,7 +884,7 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
           await supabase.from('materials').update({ unit_cost: cost, avg_cost: cost }).eq('id', item.material_id)
         }
         const mutId = generateId()
-        const mut   = { id: mutId, mutation_type: 'opening_stock', destination_name: 'Saldo Awal', notes: notes || 'Stok awal', status: 'confirmed', created_by: 'system', created_at: `${date}T00:00:00.000Z`, confirmed_at: now(), confirmed_by: 'system' }
+        const mut = { id: mutId, mutation_type: 'opening_stock', destination_name: 'Saldo Awal', notes: notes || 'Stok awal', status: 'confirmed', created_by: 'system', created_at: `${date}T00:00:00.000Z`, confirmed_at: now(), confirmed_by: 'system' }
         await db.warehouse_mutations.add(mut as any)
         await supabase.from('warehouse_mutations').insert(mut)
         const mi = { id: generateId(), mutation_id: mutId, material_id: item.material_id, qty, unit_cost: cost }
@@ -423,308 +893,47 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
       }
       toast.success(`${valid.length} item stok awal disimpan`)
       onClose()
-    } catch (e) { console.error(e); toast.error('Gagal menyimpan') }
+    } catch (e) { toast.error('Gagal menyimpan') }
     finally { setSaving(false) }
   }
 
   return (
-    <Modal title="Input Stok Awal" onClose={onClose}>
+    <Modal title="Input Stok Awal Gudang" onClose={onClose}>
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
         <p className="text-xs text-blue-700 font-medium mb-0.5">Untuk migrasi dari sistem lama</p>
-        <p className="text-xs text-blue-500">Qty akan di-set langsung. Harga akan update harga default bahan.</p>
+        <p className="text-xs text-blue-500">Qty akan di-set langsung. Harga update harga default bahan.</p>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div><Label>Tanggal Efektif</Label><input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
         <div><Label>Keterangan</Label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} /></div>
       </div>
       <div>
-        <Label>Item Stok Awal</Label>
+        <Label>Item</Label>
         <div className="space-y-2">
           {items.map((item, i) => {
             const mat = materials?.find(m => m.id === item.material_id)
             return (
               <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
-                <select className="input text-sm" value={item.material_id} onChange={e => updateItem(i, 'material_id', e.target.value)}>
+                <select className="input text-sm" value={item.material_id} onChange={e => updateItem(i,'material_id',e.target.value)}>
                   <option value="">Pilih bahan</option>
                   {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
                 </select>
                 <div className="grid grid-cols-2 gap-2">
-                  <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit || 'unit'})`} value={item.qty} onChange={e => updateItem(i, 'qty', e.target.value)} />
-                  <input className="input text-sm" type="number" placeholder="Harga/unit" value={item.unit_cost} onChange={e => updateItem(i, 'unit_cost', e.target.value)} />
+                  <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit||'unit'})`} value={item.qty} onChange={e => updateItem(i,'qty',e.target.value)} />
+                  <input className="input text-sm" type="number" placeholder="Harga/unit" value={item.unit_cost} onChange={e => updateItem(i,'unit_cost',e.target.value)} />
                 </div>
-                {item.qty && item.unit_cost && <p className="text-xs text-gray-400">Nilai: {formatRupiah(Number(item.qty) * Number(item.unit_cost))}</p>}
-                {items.length > 1 && <button onClick={() => setItems(p => p.filter((_,idx) => idx !== i))} className="text-xs text-red-400">Hapus</button>}
+                {item.qty && item.unit_cost && <p className="text-xs text-gray-400">Nilai: {formatRupiah(Number(item.qty)*Number(item.unit_cost))}</p>}
+                {items.length > 1 && <button onClick={() => setItems(p => p.filter((_,idx) => idx!==i))} className="text-xs text-red-400">Hapus</button>}
               </div>
             )
           })}
         </div>
-        <button onClick={() => setItems(p => [...p, { material_id:'', qty:'', unit_cost:'' }])} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
+        <button onClick={() => setItems(p => [...p,{material_id:'',qty:'',unit_cost:''}])} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan Stok Awal'}</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan Stok Awal'}</button>
       </div>
     </Modal>
-  )
-}
-
-// ── STOK PRODUKSI ─────────────────────────────────────────────
-function StokProduksiView() {
-  const [search,    setSearch]    = useState('')
-  const [filterKat, setFilterKat] = useState('semua')
-
-  const data = useLiveQuery(async () => {
-    const ps   = await db.production_stock.toArray()
-    const fgs  = await db.finished_goods_stock.toArray()
-    const mats = await db.materials.toArray()
-    const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
-    const bahan = ps
-      .map(s => ({
-        ...s,
-        material: mMap[s.material_id],
-        // FIX Bug 4: pakai avg_cost dari production_stock (isolated)
-        // bukan dari materials.unit_cost (yang berubah saat gudang beli lagi)
-        displayAvgCost: (s as any).avg_cost || mMap[s.material_id]?.unit_cost || 0,
-      }))
-      .filter(s => s.material?.name)
-    // FIX Bug 4: nilai stok produksi pakai avg_cost produksi sendiri
-    const totalBahan = bahan.reduce((s, i) => s + i.qty_on_hand * i.displayAvgCost, 0)
-    return { bahan, fgs, totalBahan }
-  }, [])
-
-  const filteredBahan = (data?.bahan || []).filter(s => {
-    const matchSearch = !search || s.material?.name?.toLowerCase().includes(search.toLowerCase())
-    const matchKat =
-      filterKat === 'semua'       ? true :
-      filterKat === 'stok_rendah' ? s.qty_on_hand <= (s.material?.min_stock || 0) && (s.material?.min_stock || 0) > 0 :
-                                    s.material?.category === filterKat
-    return matchSearch && matchKat
-  })
-
-  return (
-    <div className="p-4 space-y-4">
-      <div className="grid grid-cols-2 gap-3">
-        <div className="bg-white rounded-xl border border-gray-100 p-3">
-          <p className="text-xs text-gray-400">Nilai Bahan</p>
-          <p className="text-base font-semibold text-gray-900">{formatRupiah(data?.totalBahan || 0)}</p>
-          <p className="text-xs text-gray-400 mt-0.5">{data?.bahan.length || 0} jenis</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-100 p-3">
-          <p className="text-xs text-gray-400">Produk Jadi</p>
-          <p className="text-base font-semibold text-blue-600">{data?.fgs.reduce((s, f) => s + f.qty_on_hand, 0) || 0} pcs</p>
-          <p className="text-xs text-gray-400 mt-0.5">{data?.fgs.length || 0} jenis</p>
-        </div>
-      </div>
-
-      {data?.fgs && data.fgs.length > 0 && (
-        <div>
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Produk Siap Kirim</p>
-          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            {data.fgs.map((f, idx) => (
-              <div key={f.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                <p className="flex-1 text-sm font-medium text-gray-900">{f.product_name}</p>
-                <div className="text-right">
-                  <p className="text-sm font-bold text-blue-600">{f.qty_on_hand} pcs</p>
-                  {(f as any).hpp_per_unit > 0 && <p className="text-xs text-gray-400">HPP {formatRupiah((f as any).hpp_per_unit)}/pcs</p>}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <input value={search} onChange={e => setSearch(e.target.value)}
-        className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
-        placeholder="Cari nama bahan..." />
-
-      <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-        {KAT_FILTERS.map(({ k, l }) => (
-          <button key={k} onClick={() => setFilterKat(k)}
-            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${filterKat === k ? k === 'stok_rendah' ? 'bg-red-600 text-white' : 'bg-gray-900 text-white' : k === 'stok_rendah' ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-white text-gray-600 border border-gray-200'}`}>{l}
-          </button>
-        ))}
-      </div>
-
-      <div>
-        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Stok Bahan</p>
-        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-          {filteredBahan.map((s, idx) => (
-            <div key={s.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900">{s.material?.name}</p>
-                {/* FIX Bug 4: tampilkan avg_cost produksi (isolated), bukan avg gudang */}
-                <p className="text-xs text-gray-400">
-                  {formatKategori(s.material?.category)} · Avg {formatRupiah(s.displayAvgCost)}/{s.material?.unit}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm font-semibold text-gray-900">
-                  {s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.material?.unit}</span>
-                </p>
-                <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand * s.displayAvgCost)}</p>
-              </div>
-            </div>
-          ))}
-          {filteredBahan.length === 0 && (
-            <div className="py-8 text-center text-sm text-gray-400">
-              {search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada stok bahan'}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── STOK TOKO ─────────────────────────────────────────────────
-function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
-  const [search,        setSearch]        = useState('')
-  const [filterTokoKat, setFilterTokoKat] = useState('semua')
-  const canSeeAllStores = ['owner','manager','gudang','produksi'].includes(role)
-  const stores = useLiveQuery(() =>
-    db.stores.filter(s => {
-      if (!s.is_active) return false
-      // Filter toko virtual - cek is_virtual atau dari store_id
-      if ((s as any).is_virtual) return false
-      if (s.id.includes('gudang') || s.id.includes('produksi')) return false
-      return true
-    }).toArray()
-  , [])
-  const [selectedStore, setSelectedStore] = useState('')
-
-  // Auto-select: kasir → toko sendiri, gudang/owner/manager → toko pertama dari list
-  useEffect(() => {
-    if (!canSeeAllStores) {
-      setSelectedStore(storeId)
-    } else if (stores && stores.length > 0 && !selectedStore) {
-      setSelectedStore(stores[0].id)
-    }
-  }, [stores, canSeeAllStores, storeId])
-
-  const activeStoreId = canSeeAllStores ? selectedStore : storeId
-
-  const data = useLiveQuery(async () => {
-    if (!activeStoreId) return []
-    const stocks = await db.stock.where('store_id').equals(activeStoreId).toArray()
-    const prods  = await db.products.toArray()
-    const pMap   = Object.fromEntries(prods.map(p => [p.id, p]))
-    const cats   = await db.categories.toArray()
-    const cMap   = Object.fromEntries(cats.map(c => [c.id, c]))
-    const mats   = await db.materials.toArray()
-    const mMap   = Object.fromEntries(mats.map(m => [m.id, m]))
-
-    return stocks.map(s => {
-      // Cari berdasarkan ingredient_id atau material_id
-      const id   = (s as any).material_id || s.ingredient_id || ''
-      const prod = pMap[id]
-      const mat  = mMap[id]
-      if (!prod && !mat) return null
-
-      // FIX Bug 4: pakai avg_cost dari stock record (isolated per toko)
-      const avgCost = (s as any).avg_cost || 0
-
-      return {
-        id: s.id,
-        ingredient_id: id,
-        qty_on_hand: s.qty_on_hand,
-        avg_cost: avgCost,
-        displayName: prod?.name || mat?.name || '',
-        displayUnit: prod?.unit || mat?.unit || 'pcs',
-        categoryName: prod ? (cMap[prod.category_id||'']?.name || 'Produk') : formatKategori(mat?.category),
-        categoryRaw: prod ? '' : (mat?.category || ''),
-        isProduk: !!prod,
-      }
-    }).filter(Boolean) as any[]
-  }, [activeStoreId])
-
-  const TOKO_FILTERS = [
-    { k:'semua',               l:'Semua' },
-    { k:'stok_rendah',         l:'⚠ Stok Rendah' },
-    { k:'stok_habis',          l:'Habis' },
-    { k:'produk_jadi',         l:'Produk Jadi' },
-    { k:'bahan_baku',          l:'Bahan Baku' },
-    { k:'bahan_setengah_jadi', l:'Bahan Setengah Jadi' },
-    { k:'packaging',           l:'Packaging' },
-    { k:'non_produksi',        l:'Non-Produksi' },
-  ]
-
-  const filtered = (data||[]).filter(s => {
-    const matchSearch = !search || s.displayName.toLowerCase().includes(search.toLowerCase())
-    const matchKat =
-      filterTokoKat==='semua'       ? true :
-      filterTokoKat==='stok_rendah' ? s.qty_on_hand > 0 && s.qty_on_hand <= 5 :
-      filterTokoKat==='stok_habis'  ? s.qty_on_hand <= 0 :
-      filterTokoKat==='produk_jadi' ? s.isProduk :
-      s.categoryRaw === filterTokoKat
-    return matchSearch && matchKat
-  })
-
-  const totalNilai = filtered.reduce((s, i) => s + i.qty_on_hand * (i.avg_cost || 0), 0)
-
-  return (
-    <div className="p-4 space-y-3">
-      {canSeeAllStores && stores && stores.length > 0 && (
-        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-          {stores.map(s => (
-            <button key={s.id} onClick={() => setSelectedStore(s.id)}
-              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${selectedStore===s.id ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
-              {s.name}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Summary nilai stok toko */}
-      {filtered.length > 0 && totalNilai > 0 && (
-        <div className="bg-white rounded-xl border border-gray-100 p-3">
-          <p className="text-xs text-gray-400">Nilai Stok Toko</p>
-          <p className="text-base font-semibold text-gray-900">{formatRupiah(totalNilai)}</p>
-          <p className="text-xs text-gray-400 mt-0.5">{filtered.length} item</p>
-        </div>
-      )}
-
-      <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-        {TOKO_FILTERS.map(({ k, l }) => (
-          <button key={k} onClick={() => setFilterTokoKat(k)}
-            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${filterTokoKat===k ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>{l}</button>
-        ))}
-      </div>
-
-      <input value={search} onChange={e => setSearch(e.target.value)}
-        className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
-        placeholder="Cari nama produk / bahan..." />
-
-      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        {filtered.map((s, idx) => (
-          <div key={s.id} className={`flex items-center px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900">{s.displayName}</p>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                {s.isProduk
-                  ? <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-medium">Produk Jadi</span>
-                  : s.categoryName ? <p className="text-xs text-gray-400">{s.categoryName}</p> : null}
-                {/* FIX Bug 4: tampilkan avg_cost toko (isolated) */}
-                {s.avg_cost > 0 && (
-                  <p className="text-xs text-gray-300">· Avg {formatRupiah(s.avg_cost)}/{s.displayUnit}</p>
-                )}
-              </div>
-            </div>
-            <div className="text-right">
-              <p className={`text-sm font-semibold ${s.qty_on_hand<=0?'text-red-500':'text-gray-900'}`}>
-                {s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.displayUnit}</span>
-              </p>
-              {s.avg_cost > 0 && (
-                <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand * s.avg_cost)}</p>
-              )}
-            </div>
-          </div>
-        ))}
-        {filtered.length === 0 && (
-          <div className="py-12 text-center text-sm text-gray-400">
-            {search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada data stok toko'}
-          </div>
-        )}
-      </div>
-    </div>
   )
 }

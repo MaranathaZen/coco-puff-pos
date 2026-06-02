@@ -79,7 +79,7 @@ export default function UnifiedStokPage() {
         supabase.from('materials').select('*'),
         supabase.from('warehouse_stock').select('*'),
         supabase.from('production_stock').select('*'),
-        supabase.from('finished_goods_stock').select('*').eq('region', region),
+        supabase.from('finished_goods_stock').select('*'),
         supabase.from('products').select('*').eq('is_active', true),
         supabase.from('stock').select('*'),
         supabase.from('categories').select('*'),

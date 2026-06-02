@@ -11,7 +11,7 @@ import { db, generateId, now, addToSyncQueue } from '@/lib/db'
 import { useCartStore } from '@/store/cart'
 import { useAuthStore } from '@/store/auth'
 import { supabase } from '@/lib/supabase'
-import { formatRupiah, generateReceiptNo, calcPackaging, formatDate } from '@/lib/utils'
+import { formatRupiah, generateReceiptNo, calcPackaging, formatDate, cn } from '@/lib/utils'
 import type { Product, Transaction } from '@/types'
 type PaymentMethod = 'cash' | 'qris' | 'transfer' | 'gopay' | 'grab' | 'shopeefood'
 type OrderType = 'dine_in' | 'take_away' | 'online'
@@ -20,7 +20,6 @@ import {
   Package, History, WifiOff, Bike, RefreshCw, UtensilsCrossed, ShoppingBag,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { cn } from '@/lib/utils'
 
 interface PaketItem {
   id: string; name: string; qty_total: number; price: number; is_mix: boolean

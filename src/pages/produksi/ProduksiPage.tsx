@@ -6,13 +6,12 @@
 
 import { useState, useEffect, useMemo, createContext, useContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, generateId, now } from '@/lib/db'
+import { db, generateId, now, type ProductionLog } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
 import { Plus, RefreshCw, X, ChevronDown } from 'lucide-react'
 import toast from 'react-hot-toast'
-import type { ProductionLog } from '@/lib/db'
 
 function groupBy<T>(arr: T[], keyFn: (item: T) => string): { key: string; items: T[] }[] {
   const map = new Map<string, T[]>()

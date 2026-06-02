@@ -7,7 +7,7 @@
 
 import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, generateId, now, addToSyncQueue } from '@/lib/db'
+import { db, generateId, now, addToSyncQueue, type Supplier, type Partner, type MenuRoleConfig } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { hashPassword, formatRupiah } from '@/lib/utils'
@@ -15,7 +15,6 @@ import { hardResetLocal } from '@/lib/sync-helpers'
 import { X, ChevronRight, Plus, Check, Trash2, Tag, Store, Download, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { User, Role } from '@/types'
-import type { Supplier, Partner, MenuRoleConfig } from '@/lib/db'
 
 type Tab = 'users' | 'supplier' | 'mitra' | 'toko' | 'password' | 'ppn' | 'promo' | 'reset' | 'tutup_tahun'
 

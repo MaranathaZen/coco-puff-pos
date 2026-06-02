@@ -137,7 +137,21 @@ function ResepProduksiTab() {
 }
 
 function ResepProduksiForm({ recipe, isOwner, onClose }: { recipe: any; isOwner: boolean; onClose: () => void }) {
-  const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
+  // Bahan dari production_stock (stok yang ada di produksi), bukan master gudang
+  const prodStocks = useLiveQuery(async () => {
+    const ps   = await db.production_stock.toArray()
+    const mats = await db.materials.toArray()
+    const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
+    return ps.map(s => ({ ...s, material: mMap[s.material_id] })).filter(s => s.material)
+  }, [])
+  // Alias materials untuk kompatibilitas dengan existing code
+  const materials = prodStocks?.map(s => ({
+    id: s.material_id,
+    name: `${s.material!.name} (${s.qty_on_hand} ${s.material!.unit})`,
+    unit: s.material!.unit,
+    unit_cost: (s as any).avg_cost || s.material!.unit_cost || 0,
+    is_active: true,
+  }))
   const [name,        setName]    = useState(recipe?.name || '')
   const [productName, setProduct] = useState(recipe?.product_name || '')
   const [batchYield,  setBatch]   = useState(String(recipe?.batch_yield || 120))

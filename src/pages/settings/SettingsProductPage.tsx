@@ -304,6 +304,7 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
           dine_in:   String((p as any).price_dine_in  || ''),
           take_away: String((p as any).price_take_away || ''),
           online:    String((p as any).price_online    || ''),
+          is_active: p.is_active !== false,  // default true
         }
       }
       setStorePrices(map)
@@ -311,7 +312,14 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
   }, [product])
 
   function updateStorePrice(storeId: string, field: string, value: string) {
-    setStorePrices(prev => ({ ...prev, [storeId]: { ...prev[storeId], [field]: value } }))
+    setStorePrices(prev => ({
+      ...prev,
+      [storeId]: {
+        ...prev[storeId],
+        is_active: prev[storeId]?.is_active !== false,  // default true
+        [field]: field === 'is_active' ? value === 'true' : value
+      }
+    }))
   }
 
   async function handleSave() {
@@ -332,10 +340,11 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
       const { error } = await supabase.from('products').upsert(data)
       if (error) throw error
 
-      // Simpan harga per toko
+      // Simpan harga per toko — simpan semua toko yang sudah di-load (aktif/nonaktif)
       for (const [storeId, prices] of Object.entries(storePrices)) {
         const hasPrice = Number(prices.dine_in)||Number(prices.take_away)||Number(prices.online)
-        if (!hasPrice) continue
+        const hasToggle = prices.is_active === false  // simpan jika di-nonaktifkan
+        if (!hasPrice && !hasToggle) continue
         const existing = await db.store_product_prices.filter(p => p.store_id===storeId && p.product_id===prodId).first()
         const priceData: any = {
           id:             existing?.id || generateId(),
@@ -345,15 +354,27 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
           price_dine_in:  Number(prices.dine_in)   || 0,
           price_take_away:Number(prices.take_away)  || 0,
           price_online:   Number(prices.online)     || 0,
-          is_active:      true,
+          is_active:      prices.is_active !== false,  // toggle aktif per toko
           updated_at:     now(),
         }
         await db.store_product_prices.put(priceData)
-        await supabase.from('store_product_prices').upsert(priceData)
+        // Coba update dulu, jika tidak ada baru insert
+        const { error: upsertErr } = await supabase.from('store_product_prices').upsert(priceData, { onConflict: 'store_id,product_id' })
+        if (upsertErr) {
+          console.error('[PRICE UPSERT ERROR]', upsertErr)
+          // Fallback: coba insert saja
+          await supabase.from('store_product_prices').insert(priceData).then(r => {
+            if (r.error) console.error('[PRICE INSERT ERROR]', r.error)
+          })
+        }
       }
       toast.success(product?'Produk diupdate':'Produk ditambahkan')
       onClose()
-    } catch (e) { console.error(e); toast.error('Gagal menyimpan') }
+    } catch (e) {
+      console.error('[PRODUK SAVE ERROR]', e)
+      const msg = (e as any)?.message || String(e)
+      toast.error('Gagal menyimpan: ' + msg.slice(0,60))
+    }
     finally { setSaving(false) }
   }
 
@@ -378,35 +399,47 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
         </div>
       </div>
 
-      {/* Harga per toko per tipe */}
+      {/* Harga per toko per tipe + toggle aktif */}
       {stores && stores.length > 0 && (
         <div className="border border-gray-100 rounded-xl overflow-hidden">
           <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
-            <p className="text-xs font-semibold text-gray-700">Harga per Toko & Tipe Order</p>
-            <p className="text-[10px] text-gray-400 mt-0.5">Kosongkan = pakai harga default</p>
+            <p className="text-xs font-semibold text-gray-700">Harga & Ketersediaan per Toko</p>
+            <p className="text-[10px] text-gray-400 mt-0.5">Nonaktif = produk tidak tampil di kasir toko tersebut</p>
           </div>
           {stores.map(s => {
-            const sp = storePrices[s.id] || { dine_in: '', take_away: '', online: '' }
+            const sp = storePrices[s.id] || { dine_in: '', take_away: '', online: '', is_active: true }
+            const isActive = sp.is_active !== false
             return (
-              <div key={s.id} className="px-4 py-3 border-t border-gray-50">
-                <p className="text-xs font-medium text-gray-700 mb-2">{s.name}</p>
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <p className="text-[10px] text-gray-400 mb-1">Dine In</p>
-                    <input className="input text-sm" type="number" placeholder={price||'0'} value={sp.dine_in}
-                      onChange={e=>updateStorePrice(s.id,'dine_in',e.target.value)} />
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-gray-400 mb-1">Take Away</p>
-                    <input className="input text-sm" type="number" placeholder={price||'0'} value={sp.take_away}
-                      onChange={e=>updateStorePrice(s.id,'take_away',e.target.value)} />
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-gray-400 mb-1">Online</p>
-                    <input className="input text-sm" type="number" placeholder={price||'0'} value={sp.online}
-                      onChange={e=>updateStorePrice(s.id,'online',e.target.value)} />
+              <div key={s.id} className={`px-4 py-3 border-t border-gray-50 ${!isActive ? 'opacity-50' : ''}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-gray-700">{s.name}</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-gray-400">{isActive ? 'Aktif' : 'Nonaktif'}</span>
+                    <button onClick={() => updateStorePrice(s.id, 'is_active', String(!isActive))}
+                      className={`w-9 h-5 rounded-full transition-colors relative ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
+                      <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${isActive ? 'left-[18px]' : 'left-0.5'}`} />
+                    </button>
                   </div>
                 </div>
+                {isActive && (
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <p className="text-[10px] text-gray-400 mb-1">Dine In</p>
+                      <input className="input text-sm" type="number" placeholder={price||'0'} value={sp.dine_in}
+                        onChange={e=>updateStorePrice(s.id,'dine_in',e.target.value)} />
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-400 mb-1">Take Away</p>
+                      <input className="input text-sm" type="number" placeholder={price||'0'} value={sp.take_away}
+                        onChange={e=>updateStorePrice(s.id,'take_away',e.target.value)} />
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-400 mb-1">Online</p>
+                      <input className="input text-sm" type="number" placeholder={price||'0'} value={sp.online}
+                        onChange={e=>updateStorePrice(s.id,'online',e.target.value)} />
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })}

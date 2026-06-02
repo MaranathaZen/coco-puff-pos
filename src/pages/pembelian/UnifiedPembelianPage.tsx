@@ -137,7 +137,14 @@ function PembelianList({ userId, role, storeId }: { userId: string; role: string
   const [showForm,     setShowForm]     = useState(false)
   const [groupMode,    setGroupMode]    = useState<Period>('hari')
   const [search,       setSearch]       = useState('')
-  const [filterStore,  setFilterStore]  = useState(() => role === 'gudang' ? storeId : 'semua')
+  const [filterStore,  setFilterStore]  = useState(() => role === 'gudang' ? storeId : '')
+
+  // Auto-select toko pertama saat stores load
+  useEffect(() => {
+    if (stores && stores.length > 0 && !filterStore) {
+      setFilterStore(stores[0].id)
+    }
+  }, [stores])
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
     [new Date().toISOString().slice(0, 10)]: true
   }))
@@ -195,7 +202,7 @@ function PembelianList({ userId, role, storeId }: { userId: string; role: string
     if (!purchases) return []
     let list = purchases
     // Filter by toko
-    if (isOwnerManager && filterStore !== 'semua') {
+    if (isOwnerManager && filterStore) {
       list = list.filter(p => (p as any).storeId === filterStore)
     }
     if (!search) return list
@@ -229,10 +236,6 @@ function PembelianList({ userId, role, storeId }: { userId: string; role: string
       {/* Filter toko — hanya untuk owner/manager/gudang */}
       {isOwnerManager && stores && stores.length > 0 && (
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-          <button onClick={() => setFilterStore('semua')}
-            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore==='semua'?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
-            Semua Toko
-          </button>
           {stores.map(s => (
             <button key={s.id} onClick={() => setFilterStore(s.id)}
               className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore===s.id?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
@@ -308,7 +311,7 @@ function PembelianList({ userId, role, storeId }: { userId: string; role: string
 
       {filtered.length === 0 && (
         <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">
-          {isOwnerManager && filterStore !== 'semua' ? 'Belum ada pembelian untuk toko ini' : 'Belum ada pembelian'}
+          Belum ada pembelian
         </div>
       )}
       {showForm && <PembelianForm userId={userId} storeId={storeId} role={role} onClose={() => setShowForm(false)} />}

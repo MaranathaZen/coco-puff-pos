@@ -145,7 +145,14 @@ function BiayaList({ userId, role, storeId }: { userId: string; role: string; st
   }))
 
   const isOwnerManager = ['owner','manager','gudang'].includes(role)
-  const [filterStore,  setFilterStore]  = useState(() => role === 'gudang' ? storeId : 'semua')
+  const [filterStore,  setFilterStore]  = useState(() => role === 'gudang' ? storeId : '')
+
+  // Auto-select toko pertama saat stores load
+  useEffect(() => {
+    if (stores && stores.length > 0 && !filterStore) {
+      setFilterStore(stores[0].id)
+    }
+  }, [stores])
 
   // Toko real untuk filter
   // Include gudang tapi exclude produksi dari filter
@@ -223,10 +230,6 @@ function BiayaList({ userId, role, storeId }: { userId: string; role: string; st
       </div>
       {isOwnerManager && stores && stores.length > 0 && (
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-          <button onClick={() => setFilterStore('semua')}
-            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore==='semua'?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
-            Semua Toko
-          </button>
           {stores.map(s => (
             <button key={s.id} onClick={() => setFilterStore(s.id)}
               className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore===s.id?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>

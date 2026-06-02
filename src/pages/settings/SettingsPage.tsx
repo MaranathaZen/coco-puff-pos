@@ -155,7 +155,7 @@ function UsersTab({ currentUser }: { currentUser: User }) {
               <p className="text-sm font-medium text-gray-900 truncate">{u.name}</p>
               <p className="text-xs text-gray-400">
                 @{u.username} · {u.role}
-                {isOwner && storeMap[u.store_id] && (
+                {isOwner && storeMap[u.store_id] && !['owner','manager'].includes(u.role) && (
                   <span className="ml-1 text-gray-300">· {storeMap[u.store_id]}</span>
                 )}
               </p>

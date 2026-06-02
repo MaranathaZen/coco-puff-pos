@@ -158,9 +158,6 @@ function PembelianList({ userId, role, storeId }: { userId: string; role: string
       : Promise.resolve([])
   , [isOwnerManager])
 
-  // Default filter: gudang jika role gudang, semua jika owner/manager
-  const defaultFilter = role === 'gudang' ? storeId : 'semua'
-
   useEffect(() => {
     setToolbar(
       <div className="flex items-center gap-2">

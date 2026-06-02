@@ -193,7 +193,7 @@ function BiayaList({ userId, role, storeId }: { userId: string; role: string; st
   // Filter by toko (untuk owner/manager/gudang)
   const filteredByStore = useMemo(() => {
     if (!expenses) return []
-    if (!isOwnerManager || filterStore === 'semua') return expenses
+    if (!isOwnerManager || !filterStore) return expenses
     return expenses.filter(e => (e as any).store_id === filterStore)
   }, [role, userId, storeId])
 

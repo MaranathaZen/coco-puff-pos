@@ -13,7 +13,7 @@ import { formatRupiah } from '@/lib/utils'
 import { Plus, X, Trash2, ChevronRight, RefreshCw, Package } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-type Tab = 'produk' | 'kategori' | 'paket'
+type Tab = 'produk' | 'kategori' | 'paket' | 'toko'
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
@@ -66,10 +66,10 @@ export default function SettingsProductPage() {
         </button>
       </div>
       <div className="px-4 mt-3 flex gap-0 border-b border-gray-100 overflow-x-auto scrollbar-hide">
-        {(['produk','kategori','paket'] as Tab[]).map(t => (
+        {(['produk','kategori','paket','toko'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`pb-2.5 mr-6 text-sm font-medium border-b-2 capitalize whitespace-nowrap transition-colors ${tab===t?'border-gray-900 text-gray-900':'border-transparent text-gray-400'}`}>
-            {t === 'paket' ? 'Paket / Bundle' : t.charAt(0).toUpperCase() + t.slice(1)}
+            {t === 'paket' ? 'Paket / Bundle' : t === 'toko' ? 'Produk per Toko' : t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
         ))}
       </div>
@@ -77,6 +77,7 @@ export default function SettingsProductPage() {
         {tab === 'produk'   && <ProdukTab storeId={user?.store_id || ''} />}
         {tab === 'kategori' && <KategoriTab />}
         {tab === 'paket'    && <PaketTab storeId={user?.store_id || ''} />}
+        {tab === 'toko'     && <ProdukTokoTab />}
       </div>
     </div>
   )
@@ -273,6 +274,94 @@ function PaketTab({ storeId }: { storeId: string }) {
         </div>
       )}
       {showForm && <PaketForm paket={editItem} onClose={()=>{setShowForm(false);setEditItem(null)}} onSaved={()=>{setShowForm(false);setEditItem(null);loadPakets()}} />}
+    </div>
+  )
+}
+
+// ── PRODUK PER TOKO TAB ──────────────────────────────────────
+function ProdukTokoTab() {
+  const products = useLiveQuery(() => db.products.filter(p => p.is_active).orderBy('name').toArray(), [])
+  const stores   = useLiveQuery(() => db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray(), [])
+  const prices   = useLiveQuery(() => db.store_product_prices.toArray(), [])
+  const [saving, setSaving] = useState(false)
+  const [filterStore, setFilterStore] = useState('')
+
+  // Auto-select toko pertama
+  useEffect(() => {
+    if (stores && stores.length > 0 && !filterStore) setFilterStore(stores[0].id)
+  }, [stores])
+
+  // Map: product_id → is_active per store
+  const activeMap = useMemo(() => {
+    const map: Record<string, Record<string, boolean>> = {}
+    for (const p of prices || []) {
+      if (!map[p.store_id]) map[p.store_id] = {}
+      map[p.store_id][p.product_id] = (p as any).is_active !== false
+    }
+    return map
+  }, [prices])
+
+  async function toggleProduct(storeId: string, productId: string, currentActive: boolean) {
+    const newActive = !currentActive
+    const existing = (prices || []).find(p => p.store_id === storeId && p.product_id === productId)
+    const priceData: any = {
+      id:              existing?.id || generateId(),
+      store_id:        storeId,
+      product_id:      productId,
+      override_price:  existing?.override_price || 0,
+      price_dine_in:   (existing as any)?.price_dine_in  || 0,
+      price_take_away: (existing as any)?.price_take_away || 0,
+      price_online:    (existing as any)?.price_online    || 0,
+      is_active:       newActive,
+      updated_at:      now(),
+    }
+    await db.store_product_prices.put(priceData)
+    const { error } = await supabase.from('store_product_prices').upsert(priceData, { onConflict: 'store_id,product_id' })
+    if (error) await supabase.from('store_product_prices').insert(priceData)
+  }
+
+  return (
+    <div className="p-4 space-y-3">
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
+        <p className="text-xs font-semibold text-blue-700">Produk per Toko</p>
+        <p className="text-xs text-blue-600 mt-0.5">Nonaktif = produk tidak tampil di kasir toko tersebut.</p>
+      </div>
+
+      {/* Filter toko */}
+      {stores && stores.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+          {stores.map(s => (
+            <button key={s.id} onClick={() => setFilterStore(s.id)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore===s.id?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Product list dengan toggle */}
+      {filterStore && (
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          {(products || []).map((p, idx) => {
+            const isActive = activeMap[filterStore]?.[p.id] !== false  // default aktif
+            return (
+              <div key={p.id} className={`flex items-center px-4 py-3 ${idx!==0?'border-t border-gray-50':''} ${!isActive?'opacity-50':''}`}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900 truncate">{p.name}</p>
+                  <p className="text-xs text-gray-400">{formatRupiah(p.base_price || 0)}</p>
+                </div>
+                <button onClick={() => toggleProduct(filterStore, p.id, isActive)}
+                  className={`w-11 h-6 rounded-full transition-colors relative flex-shrink-0 ${isActive?'bg-gray-900':'bg-gray-200'}`}>
+                  <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive?'left-[22px]':'left-0.5'}`} />
+                </button>
+              </div>
+            )
+          })}
+          {(products || []).length === 0 && (
+            <div className="py-8 text-center text-sm text-gray-400">Belum ada produk</div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

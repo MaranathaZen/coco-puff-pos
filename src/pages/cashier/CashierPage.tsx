@@ -95,6 +95,8 @@ export default function CashierPage() {
   const [voidTx,        setVoidTx]        = useState<Transaction | null>(null)
   const [voidReason,    setVoidReason]    = useState('')
   const [isVoiding,     setIsVoiding]     = useState(false)
+  const [lastTxData,    setLastTxData]    = useState<any>(null)
+  const [showReceipt,   setShowReceipt]   = useState(false)
 
   // Saat order type berubah ke online, set payment method ke platform
   useEffect(() => {
@@ -314,7 +316,19 @@ export default function CashierPage() {
       await addToSyncQueue('transactions', txId, 'insert', tx, STORE_ID)
       for (const item of [...txItems, ...txPakets]) await addToSyncQueue('transaction_items', item.id, 'insert', item, STORE_ID)
       await deductStockFromRecipes([...txItems, ...txPakets], STORE_ID)
+      // Simpan data untuk struk
+      const storeName = allStores?.find(s => s.id === STORE_ID)?.name || STORE_ID
+      setLastTxData({
+        tx, txItems: [...txItems, ...txPakets], receiptNo,
+        storeName, grandTotal, rawSubtotal, rawDiscount, ppnAmount, ppnPct,
+        payMethod: finalPay, cashPaid: paidAmt, change: paidAmt - grandTotal,
+        orderType, onlinePlatform: isOnlineOrder ? onlinePlatform : null,
+        onlineOrderNo: isOnlineOrder ? onlineOrderNo : null,
+        items: items.map(i => ({ name: i.product.name, qty: i.qty, price: i.unit_price, subtotal: i.subtotal, promoName: i.product.promo_name, promoDiscount: i.product.promo_discount })),
+        pakets: cartPakets.map(cp => ({ name: cp.paket.name, subtotal: cp.subtotal })),
+      })
       clearCart(); setCartPakets([]); setShowCheckout(false); setCashPaid(''); setOnlineOrderNo(''); setOnlineBuyer('')
+      setShowReceipt(true)
       toast.success(`Transaksi ${receiptNo} berhasil!`)
     } catch (e) { toast.error('Gagal menyimpan transaksi'); console.error(e) }
     finally { setIsProcessing(false) }
@@ -662,6 +676,14 @@ export default function CashierPage() {
         </div>
       )}
 
+      {/* STRUK / RECEIPT */}
+      {showReceipt && lastTxData && (
+        <ReceiptModal
+          data={lastTxData}
+          onClose={() => setShowReceipt(false)}
+        />
+      )}
+
       {/* MODAL PAKET */}
       {showPaketModal && selectedPaket && (
         <div className="fixed inset-0 bg-black/50 flex items-end md:items-center justify-center z-50 p-4">
@@ -740,6 +762,123 @@ function CartItemRow({ item, onQtyChange, onRemove }: {
         <span className="w-6 text-center text-sm font-medium">{item.qty}</span>
         <button onClick={() => onQtyChange(item.qty+1)} className="w-7 h-7 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center"><Plus size={12}/></button>
         <button onClick={onRemove} className="w-7 h-7 rounded-full text-red-400 flex items-center justify-center ml-1"><Trash2 size={12}/></button>
+      </div>
+    </div>
+  )
+}
+
+// ── RECEIPT / STRUK ──────────────────────────────────────────
+function ReceiptModal({ data, onClose }: { data: any; onClose: () => void }) {
+  const orderTypeLabel: Record<string, string> = {
+    dine_in: 'Dine In', take_away: 'Take Away', online: 'Online'
+  }
+  const payLabel: Record<string, string> = {
+    cash: 'Tunai', qris: 'QRIS', transfer: 'Transfer',
+    gopay: 'GoPay', grab: 'GrabPay', shopeefood: 'ShopeePay'
+  }
+
+  function handlePrint() {
+    const printContent = document.getElementById('receipt-content')
+    if (!printContent) return
+    const w = window.open('', '_blank', 'width=400,height=600')
+    if (!w) return
+    w.document.write(`
+      <html><head><title>Struk ${data.receiptNo}</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Courier New', monospace; font-size: 12px; width: 280px; padding: 8px; }
+        .center { text-align: center; }
+        .bold { font-weight: bold; }
+        .line { border-top: 1px dashed #000; margin: 4px 0; }
+        .row { display: flex; justify-content: space-between; margin: 2px 0; }
+        .total { font-size: 14px; font-weight: bold; }
+        .small { font-size: 10px; color: #666; }
+        @media print { body { width: 100%; } }
+      </style></head><body>
+      ${printContent.innerHTML}
+      <script>window.onload=()=>{window.print();window.close()}<\/script>
+      </body></html>
+    `)
+    w.document.close()
+  }
+
+  const now = new Date()
+  const dateStr = now.toLocaleDateString('id-ID', { day:'numeric', month:'long', year:'numeric' })
+  const timeStr = now.toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12:false })
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-sm shadow-lg max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
+          <h3 className="font-semibold text-gray-900">Struk Pembayaran</h3>
+          <button onClick={onClose} className="p-1 text-gray-400"><X size={18} /></button>
+        </div>
+
+        {/* Struk preview */}
+        <div className="flex-1 overflow-auto p-4">
+          <div id="receipt-content" className="font-mono text-xs space-y-1" style={{fontFamily:'Courier New, monospace'}}>
+            <div className="text-center font-bold text-sm">{data.storeName}</div>
+            <div className="text-center text-xs text-gray-500">Coco Puff</div>
+            <div className="border-t border-dashed border-gray-300 my-2" />
+            <div className="flex justify-between"><span>{dateStr}</span><span>{timeStr}</span></div>
+            <div className="flex justify-between"><span>No.</span><span className="font-bold">{data.receiptNo}</span></div>
+            <div className="flex justify-between"><span>Tipe</span><span>{orderTypeLabel[data.orderType] || data.orderType}</span></div>
+            {data.onlineOrderNo && <div className="flex justify-between"><span>Order</span><span>#{data.onlineOrderNo}</span></div>}
+            <div className="border-t border-dashed border-gray-300 my-2" />
+
+            {/* Items */}
+            {data.items.map((item: any, i: number) => (
+              <div key={i}>
+                <div className="flex justify-between">
+                  <span className="flex-1 pr-2">{item.name}</span>
+                  <span>{formatRupiah(item.subtotal)}</span>
+                </div>
+                <div className="flex justify-between text-gray-400">
+                  <span>{item.qty} × {formatRupiah(item.price)}</span>
+                  {item.promoDiscount > 0 && <span className="text-green-600">-{formatRupiah(item.promoDiscount * item.qty)}</span>}
+                </div>
+                {item.promoName && <div className="text-green-600 text-[10px]">🎁 {item.promoName}</div>}
+              </div>
+            ))}
+            {data.pakets.map((p: any, i: number) => (
+              <div key={i} className="flex justify-between">
+                <span className="flex-1 pr-2">{p.name}</span>
+                <span>{formatRupiah(p.subtotal)}</span>
+              </div>
+            ))}
+
+            <div className="border-t border-dashed border-gray-300 my-2" />
+            <div className="flex justify-between"><span>Subtotal</span><span>{formatRupiah(data.rawSubtotal)}</span></div>
+            {data.rawDiscount > 0 && (
+              <div className="flex justify-between text-green-600"><span>Diskon Promo</span><span>-{formatRupiah(data.rawDiscount)}</span></div>
+            )}
+            {data.ppnAmount > 0 && (
+              <div className="flex justify-between"><span>PPN {data.ppnPct}%</span><span>+{formatRupiah(data.ppnAmount)}</span></div>
+            )}
+            <div className="flex justify-between font-bold text-sm border-t border-dashed border-gray-300 pt-1 mt-1">
+              <span>TOTAL</span><span>{formatRupiah(data.grandTotal)}</span>
+            </div>
+            <div className="flex justify-between"><span>Bayar ({payLabel[data.payMethod] || data.payMethod})</span><span>{formatRupiah(data.cashPaid)}</span></div>
+            {data.payMethod === 'cash' && data.change > 0 && (
+              <div className="flex justify-between font-bold"><span>Kembali</span><span>{formatRupiah(data.change)}</span></div>
+            )}
+            <div className="border-t border-dashed border-gray-300 my-2" />
+            <div className="text-center text-xs text-gray-400">Terima kasih atas kunjungan Anda</div>
+            <div className="text-center text-xs text-gray-400">Coco Puff — {data.storeName}</div>
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="px-4 pb-4 flex gap-3 flex-shrink-0">
+          <button onClick={onClose}
+            className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">
+            Tutup
+          </button>
+          <button onClick={handlePrint}
+            className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold flex items-center justify-center gap-2">
+            🖨️ Print Struk
+          </button>
+        </div>
       </div>
     </div>
   )

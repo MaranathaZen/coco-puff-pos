@@ -1,11 +1,9 @@
 /**
- * Auth store — menyimpan user yang login, store aktif, dan shift.
- * Shift otomatis dibuka saat login, ditutup saat logout.
- * forceLogout: dipanggil setelah ganti password/PIN — wajib login ulang.
- *
+ * Auth store — v2
  * CHANGELOG:
- * - login() sekarang return User | null (bukan boolean) agar LoginPage
- *   tidak perlu getState() yang bisa race condition dengan persist middleware.
+ * - login() return User | null
+ * - Tambah region ke user object saat login (dari DB)
+ * - forceLogout dengan delay agar toast sempat tampil
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
@@ -21,31 +19,16 @@ interface AuthState {
   isLoading:   boolean
   error:       string | null
 
-  /** Return User jika berhasil, null jika gagal. Error detail ada di state.error */
   login:       (username: string, password: string) => Promise<User | null>
   logout:      () => void
-  /**
-   * forceLogout — dipanggil setelah user berhasil ganti password/PIN.
-   * Menutup shift aktif lalu clear session.
-   * User akan diarahkan ke /login oleh ProtectedRoute.
-   *
-   * Cara pakai di SettingsPage:
-   *   const { forceLogout } = useAuthStore()
-   *   toast.success('Password berhasil diubah. Silakan login ulang.')
-   *   forceLogout()
-   */
   forceLogout: () => void
   setShift:    (shift: Shift | null) => void
   clearError:  () => void
 }
 
-// ── Helpers ────────────────────────────────────────────────────
-
 async function openShift(user: User): Promise<Shift> {
-  const allShifts = await db.shifts
-    .where('user_id').equals(user.id)
-    .toArray()
-  const existing = allShifts.find(s => s.status === 'open')
+  const allShifts = await db.shifts.where('user_id').equals(user.id).toArray()
+  const existing  = allShifts.find(s => s.status === 'open')
   if (existing) return existing
 
   const shift: Shift = {
@@ -61,11 +44,8 @@ async function openShift(user: User): Promise<Shift> {
     total_sales:  0,
   }
   await db.shifts.add(shift)
-  try {
-    await supabase.from('shifts').insert(shift)
-  } catch {
-    console.warn('[SHIFT] Gagal sync ke Supabase, akan retry nanti')
-  }
+  try { await supabase.from('shifts').insert(shift) }
+  catch { console.warn('[SHIFT] Gagal sync ke Supabase, akan retry nanti') }
   return shift
 }
 
@@ -76,12 +56,8 @@ async function closeShift(shift: Shift): Promise<void> {
     await supabase.from('shifts')
       .update({ status: 'closed', closed_at: updated.closed_at })
       .eq('id', shift.id)
-  } catch {
-    console.warn('[SHIFT] Gagal close shift ke Supabase')
-  }
+  } catch { console.warn('[SHIFT] Gagal close shift ke Supabase') }
 }
-
-// ── Store ──────────────────────────────────────────────────────
 
 export const useAuthStore = create<AuthState>()(
   persist(
@@ -97,21 +73,47 @@ export const useAuthStore = create<AuthState>()(
         try {
           const hashed = await hashPassword(password)
 
-          const user = await db.users
-            .filter(u =>
-              u.username?.toLowerCase() === username.toLowerCase() &&
-              u.is_active
-            )
+          const dbUser = await db.users
+            .filter(u => u.username?.toLowerCase() === username.toLowerCase() && u.is_active)
             .first()
 
-          if (!user) {
+          if (!dbUser) {
             set({ error: 'Username tidak ditemukan', isLoading: false })
             return null
           }
-          if (user.password_hash !== hashed) {
+          if (dbUser.password_hash !== hashed) {
             set({ error: 'PIN atau password salah', isLoading: false })
             return null
           }
+
+          // FIX: ambil region dari DB — field region ada di Supabase
+          // tapi mungkin belum ada di Dexie local (schema lama)
+          // Coba ambil dari Supabase langsung untuk pastikan region terbaru
+          let region = (dbUser as any).region || ''
+          if (!region) {
+            try {
+              const { data } = await supabase
+                .from('users')
+                .select('region')
+                .eq('id', dbUser.id)
+                .single()
+              region = data?.region || 'malang'
+            } catch {
+              region = 'malang'
+            }
+          }
+
+          // Deteksi region dari store_id sebagai fallback
+          if (!region) {
+            const storeId = dbUser.store_id || ''
+            region = storeId.includes('bali') ? 'bali' : 'malang'
+          }
+
+          // Inject region ke user object
+          const user = { ...dbUser, region } as User
+
+          // Update region di Dexie lokal supaya next login tidak perlu fetch Supabase
+          await db.users.update(dbUser.id, { region } as any)
 
           const store = await db.stores.get(user.store_id) || null
 
@@ -121,7 +123,7 @@ export const useAuthStore = create<AuthState>()(
           }
 
           set({ user, store, activeShift: shift, isLoading: false })
-          return user  // ← kembalikan objek user, bukan true/false
+          return user
         } catch (e) {
           console.error('[AUTH] login error', e)
           set({ error: 'Terjadi kesalahan saat login', isLoading: false })
@@ -142,7 +144,6 @@ export const useAuthStore = create<AuthState>()(
         if (activeShift && activeShift.status === 'open') {
           await closeShift(activeShift)
         }
-        // Jeda singkat agar toast sempat tampil sebelum redirect
         setTimeout(() => {
           set({ user: null, store: null, activeShift: null })
         }, 1500)

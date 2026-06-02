@@ -364,7 +364,14 @@ function TokoTab({ currentUser }: { currentUser: User }) {
   useEffect(() => {
     async function load() {
       const { data } = await supabase.from('stores').select('*').eq('region', region).order('created_at')
-      if (data) { setStores(data); await db.stores.bulkPut(data) }
+      if (data) {
+        // Filter toko virtual (gudang/produksi) — tidak perlu tampil di manajemen toko
+        const realStores = data.filter((s: any) =>
+          !s.id.includes('gudang') && !s.id.includes('produksi')
+        )
+        setStores(realStores)
+        await db.stores.bulkPut(data) // tetap simpan semua ke Dexie
+      }
       setLoading(false)
     }
     load()
@@ -524,7 +531,9 @@ function PPNTab({ currentUser }: { currentUser: User }) {
   const region   = getUserRegion(currentUser)
   const stores   = useLiveQuery(async () => {
     const all = await db.stores.filter(s => s.is_active).toArray()
-    return isOwner ? all.filter(s => (s as any).region === region || !(s as any).region) : all
+    const regional = isOwner ? all.filter(s => (s as any).region === region || !(s as any).region) : all
+    // Filter toko virtual (gudang/produksi) dari selector PPN
+    return regional.filter(s => !s.id.includes('gudang') && !s.id.includes('produksi'))
   }, [isOwner, region])
   const [selectedStoreId, setSelectedStoreId] = useState(currentUser.store_id)
   const [enabled, setEnabled] = useState(false)
@@ -625,7 +634,9 @@ function PromoTab({ currentUser }: { currentUser: User }) {
   const region   = getUserRegion(currentUser)
   const stores   = useLiveQuery(async () => {
     const all = await db.stores.filter(s => s.is_active).toArray()
-    return isOwner ? all.filter(s => (s as any).region === region || !(s as any).region) : all
+    const regional = isOwner ? all.filter(s => (s as any).region === region || !(s as any).region) : all
+    // Filter toko virtual (gudang/produksi) dari selector Promo
+    return regional.filter(s => !s.id.includes('gudang') && !s.id.includes('produksi'))
   }, [isOwner, region])
   const [selectedStoreId, setSelectedStoreId] = useState(currentUser.store_id)
   const [promos,   setPromos]   = useState<PromoItem[]>([])

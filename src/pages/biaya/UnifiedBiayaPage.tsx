@@ -144,20 +144,19 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: { userId: strin
   const isOwnerManager = ['owner','manager','gudang'].includes(role)
   const [filterStore,  setFilterStore]  = useState(() => role === 'gudang' ? storeId : '')
 
-  // Auto-select toko pertama saat stores load
-  useEffect(() => {
-    if (stores && stores.length > 0 && !filterStore) {
-      setFilterStore(stores[0].id)
-    }
-  }, [stores])
-
-  // Toko real untuk filter
-  // Include gudang tapi exclude produksi dari filter
+  // Toko real untuk filter (exclude produksi)
   const stores = useLiveQuery(() =>
     isOwnerManager
       ? db.stores.filter(s => s.is_active && !s.id.includes('produksi')).toArray()
       : Promise.resolve([])
   , [isOwnerManager])
+
+  // Auto-select toko pertama - SETELAH stores declaration
+  useEffect(() => {
+    if (stores && stores.length > 0 && !filterStore) {
+      setFilterStore(stores[0].id)
+    }
+  }, [stores])
 
   useEffect(() => {
     setToolbar(

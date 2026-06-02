@@ -6,7 +6,8 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, generateId, now, type WarehouseStock } from '@/lib/db'
+import { db, generateId, now } from '@/lib/db'
+import type { WarehouseStock } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
@@ -134,13 +135,6 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   const [groupMode,    setGroupMode]    = useState<Period>('hari')
   const [search,       setSearch]       = useState('')
   const [filterStore,  setFilterStore]  = useState(() => role === 'gudang' ? storeId : '')
-
-  // Auto-select toko pertama saat stores load
-  useEffect(() => {
-    if (stores && stores.length > 0 && !filterStore) {
-      setFilterStore(stores[0].id)
-    }
-  }, [stores])
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
     [new Date().toISOString().slice(0, 10)]: true
   }))
@@ -153,6 +147,13 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
       ? db.stores.filter(s => s.is_active && !s.id.includes('produksi')).toArray()
       : Promise.resolve([])
   , [isOwnerManager])
+
+  // Auto-select toko pertama - HARUS setelah stores declaration
+  useEffect(() => {
+    if (stores && stores.length > 0 && !filterStore) {
+      setFilterStore(stores[0].id)
+    }
+  }, [stores])
 
   useEffect(() => {
     setToolbar(

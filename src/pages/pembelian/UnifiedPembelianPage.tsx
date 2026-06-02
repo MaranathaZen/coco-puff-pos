@@ -1,11 +1,8 @@
 // src/pages/pembelian/UnifiedPembelianPage.tsx
-// CHANGELOG:
-// - Data separation per role:
-//   · owner/manager/gudang: lihat semua pembelian
-//   · kasir: hanya pembelian yang dibuat sendiri (created_by) atau store_id toko sendiri
-//   · produksi: tidak ada akses (sudah ada gate)
-// - Auto expand hari ini, collapse hari lain
-// - Sync hanya pull data yang relevan per role
+// CHANGELOG v2:
+// - owner/manager/gudang: filter toko + lihat semua history pembelian
+// - kasir: hanya pembelian toko sendiri (read-only)
+// - auto expand hari ini
 
 import { useState, useMemo, useEffect, useContext, createContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -34,9 +31,9 @@ function groupBy<T>(arr: T[], fn: (i: T) => string) {
 }
 
 const METODE_BAYAR = [
-  { value: 'tunai', label: 'Tunai' },
+  { value: 'tunai',    label: 'Tunai'    },
   { value: 'transfer', label: 'Transfer' },
-  { value: 'kredit', label: 'Kredit' },
+  { value: 'kredit',   label: 'Kredit'   },
 ]
 
 async function generatePONumber() {
@@ -59,16 +56,14 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
     </div>
   )
 }
-
 function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
-  return <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">{children}{required && <span className="text-red-400 ml-0.5">*</span>}</label>
+  return <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">{children}{required && <span className="text-red-500 font-bold ml-0.5">*</span>}</label>
 }
-
 function CopyBtn({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <button onClick={() => { navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }) }}
-      className="inline-flex items-center gap-0.5 text-[10px] text-blue-400 hover:text-blue-600 ml-1 align-middle">
+      className="inline-flex items-center gap-0.5 text-[10px] text-blue-400 ml-1 align-middle">
       {copied ? '✓' : '⧉'}
     </button>
   )
@@ -79,7 +74,6 @@ export default function UnifiedPembelianPage() {
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
   const [syncing, setSyncing] = useState(false)
 
-  // Produksi tidak punya akses pembelian
   if (user?.role === 'produksi') {
     return (
       <div className="flex flex-col h-full bg-gray-50">
@@ -100,17 +94,16 @@ export default function UnifiedPembelianPage() {
   async function syncData() {
     setSyncing(true)
     try {
-      // Sync sesuai role — kasir hanya pull pembelian toko sendiri
-      const isKasir = user?.role === 'kasir'
+      const isOwnerManager = ['owner','manager','gudang'].includes(user?.role || '')
       const [p, pi, m, s] = await Promise.all([
-        isKasir
-          ? supabase.from('purchases').select('*').eq('store_id', user?.store_id).order('created_at', { ascending: false }).limit(200)
-          : supabase.from('purchases').select('*').order('created_at', { ascending: false }).limit(200),
+        isOwnerManager
+          ? supabase.from('purchases').select('*').order('created_at', { ascending: false }).limit(500)
+          : supabase.from('purchases').select('*').eq('store_id', user?.store_id).order('created_at', { ascending: false }).limit(200),
         supabase.from('purchase_items').select('*'),
         supabase.from('materials').select('*'),
         supabase.from('suppliers').select('*'),
       ])
-      if (p.data?.length)  { await db.purchases.clear(); await db.purchases.bulkPut(p.data) }
+      if (p.data !== null) { await db.purchases.clear(); if (p.data.length) await db.purchases.bulkPut(p.data) }
       if (pi.data?.length) { await db.purchase_items.clear(); await db.purchase_items.bulkPut(pi.data) }
       if (m.data?.length)  await db.materials.bulkPut(m.data)
       if (s.data?.length)  await db.suppliers.bulkPut(s.data)
@@ -141,15 +134,22 @@ export default function UnifiedPembelianPage() {
 
 function PembelianList({ userId, role, storeId }: { userId: string; role: string; storeId: string }) {
   const setToolbar = useContext(ToolbarCtx)
-  const [showForm,   setShowForm]   = useState(false)
-  const [groupMode,  setGroupMode]  = useState<Period>('hari')
-  const [search,     setSearch]     = useState('')
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
-    const today = new Date().toISOString().slice(0, 10)
-    return { [today]: true }
-  })
+  const [showForm,     setShowForm]     = useState(false)
+  const [groupMode,    setGroupMode]    = useState<Period>('hari')
+  const [search,       setSearch]       = useState('')
+  const [filterStore,  setFilterStore]  = useState('semua')
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
+    [new Date().toISOString().slice(0, 10)]: true
+  }))
 
   const isOwnerManager = ['owner','manager','gudang'].includes(role)
+
+  // Toko real untuk filter (owner/manager/gudang saja)
+  const stores = useLiveQuery(() =>
+    isOwnerManager
+      ? db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+      : Promise.resolve([])
+  , [isOwnerManager])
 
   useEffect(() => {
     setToolbar(
@@ -170,51 +170,50 @@ function PembelianList({ userId, role, storeId }: { userId: string; role: string
 
   const purchases = useLiveQuery(async () => {
     let p = await db.purchases.orderBy('created_at').reverse().toArray()
-
-    // ── Data separation ──
-    // Kasir: hanya lihat pembelian toko sendiri atau yang dia buat
     if (role === 'kasir') {
-      p = p.filter(x =>
-        (x as any).store_id === storeId ||
-        x.created_by === userId
-      )
+      p = p.filter(x => (x as any).store_id === storeId || x.created_by === userId)
     }
-    // Gudang/owner/manager: lihat semua
-
     const pi   = await db.purchase_items.toArray()
     const mats = await db.materials.toArray()
     const sups = await db.suppliers.toArray()
     const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
     const sMap = Object.fromEntries(sups.map(s => [s.id, s]))
-
     return p.map(pur => ({
       ...pur,
       supplier: sMap[(pur as any).supplier_id || ''],
+      storeId:  (pur as any).store_id || '',
       items: pi.filter(i => i.purchase_id === pur.id).map(i => ({ ...i, material: mMap[i.material_id] }))
     }))
   }, [role, userId, storeId])
 
+  const storeMap = Object.fromEntries((stores || []).map(s => [s.id, s.name]))
+
   const filtered = useMemo(() => {
     if (!purchases) return []
-    if (!search) return purchases
+    let list = purchases
+    // Filter by toko
+    if (isOwnerManager && filterStore !== 'semua') {
+      list = list.filter(p => (p as any).storeId === filterStore)
+    }
+    if (!search) return list
     const q = search.toLowerCase()
-    return purchases.filter(p =>
+    return list.filter(p =>
       p.supplier?.name?.toLowerCase().includes(q) ||
       (p as any).po_number?.toLowerCase().includes(q) ||
       p.items.some(i => i.material?.name?.toLowerCase().includes(q)) ||
       p.notes?.toLowerCase().includes(q)
     )
-  }, [purchases, search])
+  }, [purchases, search, filterStore, isOwnerManager])
 
   const grouped = useMemo(() => groupBy(filtered, p => groupKey(p.created_at, groupMode)), [filtered, groupMode])
 
   const totalBulanIni = useMemo(() => {
     const now2 = new Date()
-    return (purchases || []).filter(p => {
+    return (filtered || []).filter(p => {
       const d = new Date(p.created_at)
       return d.getMonth() === now2.getMonth() && d.getFullYear() === now2.getFullYear()
     }).reduce((s, p) => s + p.total_amount, 0)
-  }, [purchases])
+  }, [filtered])
 
   return (
     <div className="p-4 space-y-3">
@@ -223,6 +222,22 @@ function PembelianList({ userId, role, storeId }: { userId: string; role: string
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalBulanIni)}</p>
         {!isOwnerManager && <p className="text-xs text-gray-400 mt-0.5">Data toko ini saja</p>}
       </div>
+
+      {/* Filter toko — hanya untuk owner/manager/gudang */}
+      {isOwnerManager && stores && stores.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+          <button onClick={() => setFilterStore('semua')}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore==='semua'?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
+            Semua Toko
+          </button>
+          {stores.map(s => (
+            <button key={s.id} onClick={() => setFilterStore(s.id)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore===s.id?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       <input value={search} onChange={e => setSearch(e.target.value)}
         className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
@@ -237,7 +252,7 @@ function PembelianList({ userId, role, storeId }: { userId: string; role: string
             <button onClick={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))}
               className="w-full flex items-center justify-between px-1 py-2">
               <div className="flex items-center gap-2">
-                <svg className={`w-3 h-3 text-gray-400 transition-transform ${expanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className={`w-3 h-3 text-gray-400 transition-transform ${expanded?'rotate-90':''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
                 </svg>
                 <p className="text-xs font-semibold text-gray-600">{groupLabel(grpItems[0].created_at, groupMode)}</p>
@@ -247,22 +262,22 @@ function PembelianList({ userId, role, storeId }: { userId: string; role: string
                 <span className="text-xs font-medium text-gray-700">{formatRupiah(total)}</span>
               </div>
             </button>
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden"
-              style={{ display: expanded ? undefined : 'none' }}>
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{ display: expanded ? undefined : 'none' }}>
               {grpItems.map((p, idx) => (
-                <div key={p.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                <div key={p.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
                   <div className="flex items-start justify-between mb-1">
                     <div className="flex-1 min-w-0">
                       {(p as any).po_number && (
-                        <p className="text-xs font-mono text-blue-600 mb-0.5">
-                          {(p as any).po_number}<CopyBtn text={(p as any).po_number} />
-                        </p>
+                        <p className="text-xs font-mono text-blue-600 mb-0.5">{(p as any).po_number}<CopyBtn text={(p as any).po_number} /></p>
                       )}
                       <p className="text-sm font-medium text-gray-900">{p.supplier?.name || 'Tanpa Supplier'}</p>
                       <p className="text-xs text-gray-400 mt-0.5">
-                        {new Date(p.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })},{' '}
-                        {new Date(p.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
+                        {new Date(p.created_at).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})},{' '}
+                        {new Date(p.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}
                         {(p as any).payment_method ? ` · ${(p as any).payment_method}` : ''}
+                        {isOwnerManager && storeMap[(p as any).storeId] && (
+                          <span className="ml-1 text-gray-300">· {storeMap[(p as any).storeId]}</span>
+                        )}
                       </p>
                       {p.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {p.notes}</p>}
                     </div>
@@ -277,7 +292,7 @@ function PembelianList({ userId, role, storeId }: { userId: string; role: string
                         </div>
                       ))}
                       <div className="flex justify-between text-xs font-medium text-gray-600 pt-1 border-t border-gray-50 mt-1">
-                        <span>Total</span><span>{formatRupiah(p.items.reduce((s,i) => s + i.subtotal, 0))}</span>
+                        <span>Total</span><span>{formatRupiah(p.items.reduce((s,i)=>s+i.subtotal,0))}</span>
                       </div>
                     </div>
                   )}
@@ -290,10 +305,9 @@ function PembelianList({ userId, role, storeId }: { userId: string; role: string
 
       {filtered.length === 0 && (
         <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">
-          Belum ada pembelian
+          {isOwnerManager && filterStore !== 'semua' ? 'Belum ada pembelian untuk toko ini' : 'Belum ada pembelian'}
         </div>
       )}
-
       {showForm && <PembelianForm userId={userId} storeId={storeId} onClose={() => setShowForm(false)} />}
     </div>
   )
@@ -317,23 +331,19 @@ function PembelianForm({ userId, storeId, onClose }: { userId: string; storeId: 
       return Number(item.pack_price) / Number(item.pack_qty)
     return Number(item.unit_cost) || 0
   }
-
   const total = items.reduce((s, i) => s + Number(i.qty) * getUnitCost(i), 0)
 
   function updateItem(i: number, f: string, v: any) {
     setItems(p => p.map((item, idx) => {
       if (idx !== i) return item
-      const updated = { ...item, [f]: v }
-      if (f === 'material_id') {
-        const m = materials?.find(m => m.id === v)
-        if (m?.unit_cost) updated.unit_cost = String(m.unit_cost)
+      const u = { ...item, [f]: v }
+      if (f === 'material_id') { const m = materials?.find(m => m.id === v); if (m?.unit_cost) u.unit_cost = String(m.unit_cost) }
+      if ((f === 'pack_price' || f === 'pack_qty') && u.pack_mode) {
+        const pp = Number(f === 'pack_price' ? v : u.pack_price)
+        const pq = Number(f === 'pack_qty'   ? v : u.pack_qty)
+        if (pp > 0 && pq > 0) u.unit_cost = String((pp/pq).toFixed(4))
       }
-      if ((f === 'pack_price' || f === 'pack_qty') && updated.pack_mode) {
-        const pp = Number(f === 'pack_price' ? v : updated.pack_price)
-        const pq = Number(f === 'pack_qty'   ? v : updated.pack_qty)
-        if (pp > 0 && pq > 0) updated.unit_cost = String((pp/pq).toFixed(4))
-      }
-      return updated
+      return u
     }))
   }
 
@@ -345,14 +355,10 @@ function PembelianForm({ userId, storeId, onClose }: { userId: string; storeId: 
       const poNumber = await generatePONumber()
       const purchId  = generateId()
       const purch: any = {
-        id: purchId, po_number: poNumber,
-        store_id: storeId,                    // ← tag store_id untuk data separation
-        supplier_id:  supplierId || undefined,
-        invoice_no:   invoiceNo  || undefined,
-        total_amount: total,
-        payment_method: payMethod,
-        transfer_to: transferTo || undefined,
-        due_date:    dueDate    || undefined,
+        id: purchId, po_number: poNumber, store_id: storeId,
+        supplier_id: supplierId || undefined, invoice_no: invoiceNo || undefined,
+        total_amount: total, payment_method: payMethod,
+        transfer_to: transferTo || undefined, due_date: dueDate || undefined,
         status: 'received', notes: notes || undefined,
         created_by: userId, created_at: now(),
       }
@@ -360,41 +366,26 @@ function PembelianForm({ userId, storeId, onClose }: { userId: string; storeId: 
       await supabase.from('purchases').insert(purch)
 
       for (const item of valid) {
-        const unitCost = getUnitCost(item)
-        const pi = {
-          id: generateId(), purchase_id: purchId, material_id: item.material_id,
-          qty: Number(item.qty), unit_cost: unitCost,
-          subtotal: Number(item.qty) * unitCost, qty_returned: 0,
-        }
+        const uc = getUnitCost(item)
+        const pi = { id: generateId(), purchase_id: purchId, material_id: item.material_id, qty: Number(item.qty), unit_cost: uc, subtotal: Number(item.qty) * uc, qty_returned: 0 }
         await db.purchase_items.add(pi)
         await supabase.from('purchase_items').insert(pi)
 
-        // Update warehouse stock
-        const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
-        const wsd: WarehouseStock = {
-          id: ws?.id || generateId(), material_id: item.material_id,
-          qty_on_hand: (ws?.qty_on_hand || 0) + Number(item.qty), last_updated: now()
-        }
+        const ws  = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
+        const wsd: WarehouseStock = { id: ws?.id || generateId(), material_id: item.material_id, qty_on_hand: (ws?.qty_on_hand || 0) + Number(item.qty), last_updated: now() }
         await db.warehouse_stock.put(wsd)
         await supabase.from('warehouse_stock').upsert(wsd)
 
-        // Moving average
-        if (unitCost > 0) {
+        if (uc > 0) {
           const mat = await db.materials.get(item.material_id)
           if (mat) {
             const prevQty  = (mat as any).total_qty_purchased  || 0
             const prevCost = (mat as any).total_cost_purchased || 0
             const newQty   = prevQty  + Number(item.qty)
-            const newCost  = prevCost + Number(item.qty) * unitCost
-            const avgCost  = newQty > 0 ? newCost / newQty : unitCost
-            await db.materials.update(item.material_id, {
-              unit_cost: avgCost, avg_cost: avgCost,
-              total_qty_purchased: newQty, total_cost_purchased: newCost, updated_at: now()
-            })
-            await supabase.from('materials').update({
-              unit_cost: avgCost, avg_cost: avgCost,
-              total_qty_purchased: newQty, total_cost_purchased: newCost
-            }).eq('id', item.material_id)
+            const newCost  = prevCost + Number(item.qty) * uc
+            const avgCost  = newQty > 0 ? newCost / newQty : uc
+            await db.materials.update(item.material_id, { unit_cost: avgCost, avg_cost: avgCost, total_qty_purchased: newQty, total_cost_purchased: newCost, updated_at: now() })
+            await supabase.from('materials').update({ unit_cost: avgCost, avg_cost: avgCost, total_qty_purchased: newQty, total_cost_purchased: newCost }).eq('id', item.material_id)
           }
         }
       }
@@ -417,25 +408,16 @@ function PembelianForm({ userId, storeId, onClose }: { userId: string; storeId: 
           <input className="input" value={invoiceNo} onChange={e => setInv(e.target.value)} placeholder="INV-001" />
         </div>
       </div>
-
       <div><Label required>Metode Bayar</Label>
         <div className="flex gap-2">
           {METODE_BAYAR.map(m => (
             <button key={m.value} onClick={() => setPay(m.value)}
-              className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-colors ${payMethod === m.value ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
-              {m.label}
-            </button>
+              className={`flex-1 py-2 rounded-xl text-xs font-medium border ${payMethod===m.value?'bg-gray-900 text-white border-gray-900':'border-gray-200 text-gray-600'}`}>{m.label}</button>
           ))}
         </div>
       </div>
-
-      {payMethod === 'transfer' && (
-        <div><Label>Transfer ke</Label><input className="input" value={transferTo} onChange={e => setTransferTo(e.target.value)} placeholder="BCA 1234567890" /></div>
-      )}
-      {payMethod === 'kredit' && (
-        <div><Label>Jatuh Tempo</Label><input className="input" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} /></div>
-      )}
-
+      {payMethod === 'transfer' && <div><Label>Transfer ke</Label><input className="input" value={transferTo} onChange={e => setTransferTo(e.target.value)} placeholder="BCA 1234567890" /></div>}
+      {payMethod === 'kredit'   && <div><Label>Jatuh Tempo</Label><input className="input" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} /></div>}
       <div><Label required>Item</Label>
         <div className="space-y-2">
           {items.map((item, i) => {
@@ -443,53 +425,48 @@ function PembelianForm({ userId, storeId, onClose }: { userId: string; storeId: 
             const uc  = getUnitCost(item)
             return (
               <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
-                <select className="input text-sm" value={item.material_id} onChange={e => updateItem(i, 'material_id', e.target.value)}>
+                <select className="input text-sm" value={item.material_id} onChange={e => updateItem(i,'material_id',e.target.value)}>
                   <option value="">Pilih bahan</option>
                   {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
                 </select>
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-gray-500">Input per pack?</span>
-                  <button onClick={() => updateItem(i, 'pack_mode', !item.pack_mode)}
-                    className={`w-9 h-5 rounded-full relative ${item.pack_mode ? 'bg-blue-500' : 'bg-gray-200'}`}>
-                    <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${item.pack_mode ? 'left-4' : 'left-0.5'}`} />
+                  <button onClick={() => updateItem(i,'pack_mode',!item.pack_mode)}
+                    className={`w-9 h-5 rounded-full relative ${item.pack_mode?'bg-blue-500':'bg-gray-200'}`}>
+                    <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${item.pack_mode?'left-4':'left-0.5'}`} />
                   </button>
                 </div>
                 {item.pack_mode ? (
                   <div className="space-y-1.5">
                     <div className="grid grid-cols-2 gap-2">
-                      <div><p className="text-[10px] text-gray-400 mb-1">Harga/pack (Rp)</p><input className="input text-sm" type="number" value={item.pack_price} onChange={e => updateItem(i, 'pack_price', e.target.value)} /></div>
-                      <div><p className="text-[10px] text-gray-400 mb-1">Isi/pack ({mat?.unit})</p><input className="input text-sm" type="number" value={item.pack_qty} onChange={e => updateItem(i, 'pack_qty', e.target.value)} /></div>
+                      <div><p className="text-[10px] text-gray-400 mb-1">Harga/pack</p><input className="input text-sm" type="number" value={item.pack_price} onChange={e => updateItem(i,'pack_price',e.target.value)} /></div>
+                      <div><p className="text-[10px] text-gray-400 mb-1">Isi/pack ({mat?.unit})</p><input className="input text-sm" type="number" value={item.pack_qty} onChange={e => updateItem(i,'pack_qty',e.target.value)} /></div>
                     </div>
                     {uc > 0 && <p className="text-xs text-blue-600">= {formatRupiah(uc)}/{mat?.unit}</p>}
-                    <div><p className="text-[10px] text-gray-400 mb-1">Qty beli ({mat?.unit})</p><input className="input text-sm" type="number" value={item.qty} onChange={e => updateItem(i, 'qty', e.target.value)} /></div>
+                    <div><p className="text-[10px] text-gray-400 mb-1">Qty ({mat?.unit})</p><input className="input text-sm" type="number" value={item.qty} onChange={e => updateItem(i,'qty',e.target.value)} /></div>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-2">
-                    <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit || ''})`} value={item.qty} onChange={e => updateItem(i, 'qty', e.target.value)} />
-                    <input className="input text-sm" type="number" placeholder={`Harga/${mat?.unit || 'unit'}`} value={item.unit_cost} onChange={e => updateItem(i, 'unit_cost', e.target.value)} />
+                    <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit||''})`} value={item.qty} onChange={e => updateItem(i,'qty',e.target.value)} />
+                    <input className="input text-sm" type="number" placeholder={`Harga/${mat?.unit||'unit'}`} value={item.unit_cost} onChange={e => updateItem(i,'unit_cost',e.target.value)} />
                   </div>
                 )}
-                {item.qty && uc > 0 && <p className="text-xs text-gray-400">Subtotal: {formatRupiah(Number(item.qty) * uc)}</p>}
-                {items.length > 1 && <button onClick={() => setItems(p => p.filter((_,idx) => idx !== i))} className="text-xs text-red-400">Hapus</button>}
+                {item.qty && uc > 0 && <p className="text-xs text-gray-400">Subtotal: {formatRupiah(Number(item.qty)*uc)}</p>}
+                {items.length > 1 && <button onClick={() => setItems(p => p.filter((_,idx) => idx!==i))} className="text-xs text-red-400">Hapus</button>}
               </div>
             )
           })}
         </div>
-        <button onClick={() => setItems(p => [...p, { material_id:'', qty:'', unit_cost:'', pack_mode:false, pack_price:'', pack_qty:'' }])}
-          className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
+        <button onClick={() => setItems(p => [...p,{material_id:'',qty:'',unit_cost:'',pack_mode:false,pack_price:'',pack_qty:''}])} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
       </div>
-
       <div><Label>Catatan</Label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} /></div>
-
       <div className="flex items-center justify-between py-2 border-t border-gray-100">
         <span className="text-sm font-medium text-gray-700">Total</span>
         <span className="text-base font-semibold text-gray-900">{formatRupiah(total)}</span>
       </div>
-      <p className="text-xs text-gray-400">Harga beli otomatis update moving average bahan.</p>
-
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
       </div>
     </Modal>
   )

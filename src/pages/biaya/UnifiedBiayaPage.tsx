@@ -145,6 +145,14 @@ function BiayaList({ userId, role, storeId }: { userId: string; role: string; st
   }))
 
   const isOwnerManager = ['owner','manager','gudang'].includes(role)
+  const [filterStore,  setFilterStore]  = useState('semua')
+
+  // Toko real untuk filter
+  const stores = useLiveQuery(() =>
+    isOwnerManager
+      ? db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
+      : Promise.resolve([])
+  , [isOwnerManager])
 
   useEffect(() => {
     setToolbar(
@@ -174,9 +182,16 @@ function BiayaList({ userId, role, storeId }: { userId: string; role: string; st
     return list
   }, [role, userId, storeId])
 
-  const filtered = useMemo(() => {
+  // Filter by toko (untuk owner/manager/gudang)
+  const filteredByStore = useMemo(() => {
     if (!expenses) return []
-    let list = expenses
+    if (!isOwnerManager || filterStore === 'semua') return expenses
+    return expenses.filter(e => (e as any).store_id === filterStore)
+  }, [role, userId, storeId])
+
+  const filtered = useMemo(() => {
+    if (!filteredByStore) return []
+    let list = filteredByStore
     if (filterCat !== 'semua') list = list.filter(e => e.category === filterCat)
     if (search) {
       const q = search.toLowerCase()
@@ -187,12 +202,12 @@ function BiayaList({ userId, role, storeId }: { userId: string; role: string; st
       )
     }
     return list
-  }, [expenses, filterCat, search])
+  }, [filteredByStore, filterCat, search])
 
   const grouped = useMemo(() => groupBy(filtered, e => groupKey(e.created_at, groupMode)), [filtered, groupMode])
   const totalBulanIni = useMemo(() => {
     const now2 = new Date()
-    return (expenses || []).filter(e => {
+    return (filteredByStore || []).filter(e => {
       const d = new Date(e.created_at)
       return d.getMonth() === now2.getMonth() && d.getFullYear() === now2.getFullYear()
     }).reduce((s, e) => s + e.amount, 0)
@@ -205,6 +220,20 @@ function BiayaList({ userId, role, storeId }: { userId: string; role: string; st
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalBulanIni)}</p>
         {!isOwnerManager && <p className="text-xs text-gray-400 mt-0.5">Data milik Anda saja</p>}
       </div>
+      {isOwnerManager && stores && stores.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+          <button onClick={() => setFilterStore('semua')}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore==='semua'?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
+            Semua Toko
+          </button>
+          {stores.map(s => (
+            <button key={s.id} onClick={() => setFilterStore(s.id)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore===s.id?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
       <input value={search} onChange={e => setSearch(e.target.value)}
         className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
         placeholder="Cari keterangan biaya..." />

@@ -429,6 +429,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
     if (role === 'kasir') return (storeStocks || [])
     if (role === 'produksi') {
       if (type === 'to_store' || type === 'to_partner') {
+        // Kirim ke toko/franchise: hanya produk jadi
         return (fgStocks || []).map((f: any) => ({
           id:   f.product_id ?? f.id,
           name: f.product_name ?? f.name,
@@ -436,9 +437,18 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           qty:  f.qty_on_hand,
         }))
       }
-      return (prodStocks || []).map(s => ({
+      // Retur / pemakaian: tampilkan bahan produksi + produk jadi
+      const bahanOpts = (prodStocks || []).map(s => ({
         id: s.id, name: s.name, unit: s.unit, qty: s.qty, avg_cost: s.avg_cost,
       }))
+      const fgOpts = (fgStocks || []).map((f: any) => ({
+        id:   f.product_id ?? f.id,
+        name: `${f.product_name ?? f.name} (Produk Jadi)`,
+        unit: 'pcs',
+        qty:  f.qty_on_hand,
+        avg_cost: (f as any).hpp_per_unit || 0,
+      }))
+      return [...bahanOpts, ...fgOpts]
     }
     return (warehouseStocks || []).map(s => ({
       id: s.id, name: s.name, unit: s.unit, qty: s.qty, avg_cost: s.avg_cost,
@@ -548,12 +558,24 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
               await supabase.from('finished_goods_stock').update({ qty_on_hand: n, last_updated: now() }).eq('id', fg.id)
             }
           } else {
-            const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
-            if (ps) {
-              // Retur (adjustment) = mengurangi stok produksi
-            const n = Math.max(0, ps.qty_on_hand - Number(item.qty))
-              await db.production_stock.update(ps.id, { qty_on_hand: n, last_updated: now() })
-              await supabase.from('production_stock').update({ qty_on_hand: n, last_updated: now() }).eq('id', ps.id)
+            // Cek apakah ini produk jadi atau bahan produksi
+            const isFgItem = (fgStocks || []).some((f: any) => (f.product_id ?? f.id) === item.material_id)
+            if (isFgItem) {
+              // Kurangi stok produk jadi
+              const fg = await db.finished_goods_stock.filter((f: any) => (f.product_id ?? f.id) === item.material_id).first()
+              if (fg) {
+                const n = Math.max(0, fg.qty_on_hand - Number(item.qty))
+                await db.finished_goods_stock.update(fg.id, { qty_on_hand: n, last_updated: now() })
+                await supabase.from('finished_goods_stock').update({ qty_on_hand: n, last_updated: now() }).eq('id', fg.id)
+              }
+            } else {
+              const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
+              if (ps) {
+                // Retur (adjustment) = mengurangi stok produksi
+                const n = Math.max(0, ps.qty_on_hand - Number(item.qty))
+                await db.production_stock.update(ps.id, { qty_on_hand: n, last_updated: now() })
+                await supabase.from('production_stock').update({ qty_on_hand: n, last_updated: now() }).eq('id', ps.id)
+              }
             }
           }
         } else {

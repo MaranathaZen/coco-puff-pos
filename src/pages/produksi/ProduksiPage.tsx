@@ -90,8 +90,16 @@ function LoadingSkeleton() {
   )
 }
 
+type ProduksiTab = 'divisi' | 'toko'
+
 export default function ProduksiPage() {
   const { user } = useAuthStore()
+  const role = user?.role || 'produksi'
+  const isOwnerManager = ['owner','manager'].includes(role)
+  const canSeeToko = ['owner','manager','kasir'].includes(role)
+  const canSeeDivisi = ['owner','manager','produksi'].includes(role)
+  const defaultTab: ProduksiTab = canSeeDivisi ? 'divisi' : 'toko'
+  const [activeTab, setActiveTab] = useState<ProduksiTab>(defaultTab)
   const [isSyncing, setIsSyncing] = useState(false)
   const [isInitialLoad, setIsInitialLoad] = useState(true)
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
@@ -177,12 +185,27 @@ async function syncData() {
         </div>
       )}
 
+      {/* Tab selector hanya jika bisa akses keduanya */}
+      {canSeeDivisi && canSeeToko && (
+        <div className="bg-white border-b border-gray-100 flex flex-shrink-0">
+          <button onClick={() => setActiveTab('divisi')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 transition-colors ${activeTab==='divisi'?'border-gray-900 text-gray-900':'border-transparent text-gray-400'}`}>
+            🏭 Divisi Produksi
+          </button>
+          <button onClick={() => setActiveTab('toko')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 transition-colors ${activeTab==='toko'?'border-gray-900 text-gray-900':'border-transparent text-gray-400'}`}>
+            🏪 Produksi Toko
+          </button>
+        </div>
+      )}
+
       <ToolbarCtx.Provider value={setToolbarActions}>
         <div className="flex-1 overflow-auto bg-gray-50">
-          {/* FIX Bug 3: tampil skeleton hanya saat benar-benar tidak ada data lokal */}
           {isInitialLoad && hasLocalData === undefined
             ? <LoadingSkeleton />
-            : <CatatProduksiTab userId={user!.id} isOwnerManager={isOwnerManager} />
+            : activeTab === 'divisi'
+              ? <CatatProduksiTab userId={user!.id} isOwnerManager={isOwnerManager} />
+              : <ProduksiTokoTab userId={user!.id} storeId={user?.store_id || ''} role={role} />
           }
         </div>
       </ToolbarCtx.Provider>
@@ -672,6 +695,238 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving}
           className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+          {saving ? 'Menyimpan...' : 'Simpan'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── PRODUKSI TOKO ─────────────────────────────────────────────
+// Kasir/toko buat bahan setengah jadi (Fla, Teh, dll) dari bahan baku toko
+function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: string; role: string }) {
+  const isOwnerManager = ['owner','manager'].includes(role)
+
+  // Filter toko real untuk owner/manager
+  const stores = useLiveQuery(() =>
+    isOwnerManager
+      ? db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray()
+      : Promise.resolve([])
+  , [isOwnerManager])
+
+  const [activeStoreId, setActiveStoreId] = useState(storeId)
+  const [showForm, setShowForm] = useState(false)
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    if (isOwnerManager && storeId.includes('gudang') || storeId.includes('produksi')) {
+      if (stores && stores.length > 0) setActiveStoreId(stores[0].id)
+    }
+  }, [stores])
+
+  // Resep produksi toko dari store_recipes dengan recipe_type='production'
+  const recipes = useLiveQuery(() =>
+    db.store_recipes.filter(r => r.store_id === activeStoreId && (r as any).recipe_type === 'production').toArray()
+  , [activeStoreId])
+
+  // Log produksi toko (simpan di production_logs dengan store_id)
+  const logs = useLiveQuery(async () => {
+    const today = new Date().toISOString().slice(0, 10)
+    const all = await db.production_logs
+      .filter(l => (l as any).store_id === activeStoreId && l.created_at.startsWith(today))
+      .reverse().sortBy('created_at')
+    const rMap = Object.fromEntries((await db.store_recipes.toArray()).map(r => [r.id, r]))
+    return all.map(l => ({ ...l, recipe: rMap[(l as any).recipe_id] }))
+  }, [activeStoreId])
+
+  const totalHariIni = logs?.reduce((s, l) => s + l.total_yield, 0) || 0
+
+  return (
+    <div className="p-4 space-y-4">
+      {/* Store selector untuk owner/manager */}
+      {isOwnerManager && stores && stores.length > 1 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+          {stores.map(s => (
+            <button key={s.id} onClick={() => setActiveStoreId(s.id)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${activeStoreId===s.id?'bg-gray-900 text-white':'bg-gray-100 text-gray-600'}`}>
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Summary */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-white rounded-xl border border-gray-100 p-3">
+          <p className="text-xs text-gray-400">Produksi Hari Ini</p>
+          <p className="text-lg font-bold text-gray-900">{totalHariIni}</p>
+          <p className="text-xs text-gray-400">{logs?.length || 0} batch</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-100 p-3">
+          <p className="text-xs text-gray-400">Resep Tersedia</p>
+          <p className="text-lg font-bold text-blue-600">{recipes?.length || 0}</p>
+          <p className="text-xs text-gray-400">jenis produk</p>
+        </div>
+      </div>
+
+      <button onClick={() => setShowForm(true)}
+        className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white py-3 rounded-xl text-sm font-semibold">
+        + Catat Produksi Toko
+      </button>
+
+      {/* Log hari ini */}
+      {logs && logs.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-gray-50">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Produksi Hari Ini</p>
+          </div>
+          {logs.map((l, idx) => (
+            <div key={l.id} className={`flex items-center px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-gray-900">{(l.recipe as any)?.product_name || 'Produksi'}</p>
+                <p className="text-xs text-gray-400">
+                  {new Date(l.created_at).toLocaleTimeString('id-ID', {hour:'2-digit',minute:'2-digit',hour12:false})}
+                  {(l as any).log_number ? ` · ${(l as any).log_number}` : ''}
+                </p>
+              </div>
+              <p className="text-sm font-bold text-blue-600">{l.total_yield} {(l.recipe as any)?.yield_unit || 'pcs'}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {recipes?.length === 0 && (
+        <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-center">
+          <p className="text-sm font-medium text-amber-800">Belum ada resep produksi toko</p>
+          <p className="text-xs text-amber-600 mt-1">Buat resep di menu Resep → Resep Produksi Toko</p>
+        </div>
+      )}
+
+      {showForm && (
+        <ProduksiTokoForm
+          userId={userId}
+          storeId={activeStoreId}
+          recipes={recipes || []}
+          onClose={() => setShowForm(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
+  userId: string; storeId: string; recipes: any[]; onClose: () => void
+}) {
+  const [recipeId,    setRecipeId]    = useState('')
+  const [batchCount,  setBatchCount]  = useState('1')
+  const [notes,       setNotes]       = useState('')
+  const [saving,      setSaving]      = useState(false)
+
+  const selectedRecipe = recipes.find(r => r.id === recipeId)
+  const batchYield = (selectedRecipe as any)?.batch_yield || 1
+  const yieldUnit  = (selectedRecipe as any)?.yield_unit || 'pcs'
+  const finalYield = Number(batchCount) * batchYield
+
+  async function handleSave() {
+    if (!recipeId) return toast.error('Pilih resep')
+    if (Number(batchCount) <= 0) return toast.error('Batch harus lebih dari 0')
+    setSaving(true)
+    try {
+      const logId = generateId()
+      // Generate nomor produksi toko
+      const ds = new Date().toISOString().slice(0,10).replace(/-/g,'')
+      const prefix = `PTOKO-${ds}-`
+      const existing = await db.production_logs.filter(l => (l as any).log_number?.startsWith(prefix)).toArray()
+      const logNumber = `${prefix}${String(existing.length + 1).padStart(3,'0')}`
+
+      const logData: any = {
+        id:          logId,
+        log_number:  logNumber,
+        recipe_id:   recipeId,
+        batch_count: Number(batchCount),
+        total_yield: finalYield,
+        notes:       notes || undefined,
+        created_by:  userId,
+        store_id:    storeId,  // tag toko
+        created_at:  now(),
+      }
+      await db.production_logs.add(logData)
+      const { error } = await supabase.from('production_logs').insert(logData)
+      if (error) console.error('[PTOKO LOG ERROR]', error)
+
+      // Kurangi bahan dari stok toko
+      const recipeItems = await db.store_recipe_items.where('recipe_id').equals(recipeId).toArray()
+      for (const ri of recipeItems) {
+        const used = ri.qty_used * Number(batchCount)
+        const existing = await db.stock
+          .filter(s => s.store_id === storeId && (s.ingredient_id === ri.material_id || (s as any).material_id === ri.material_id))
+          .first()
+        if (existing) {
+          const newQty = Math.max(0, existing.qty_on_hand - used)
+          await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
+          supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', existing.id).then(() => {})
+        }
+        // Log material used
+        const lm: any = { id: generateId(), log_id: logId, material_id: ri.material_id, qty_used: used }
+        await db.production_log_materials.add(lm)
+        supabase.from('production_log_materials').insert(lm).then(() => {})
+      }
+
+      // Tambah hasil ke stok toko sebagai bahan setengah jadi
+      const productName = (selectedRecipe as any)?.product_name || ''
+      if (productName) {
+        // Cari material yang namanya sama atau buat baru
+        const mat = await db.materials.filter(m => m.name.toLowerCase() === productName.toLowerCase()).first()
+        if (mat) {
+          const existing = await db.stock
+            .filter(s => s.store_id === storeId && (s.ingredient_id === mat.id || (s as any).material_id === mat.id))
+            .first()
+          const newQty = (existing?.qty_on_hand || 0) + finalYield
+          if (existing) {
+            await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
+            supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', existing.id).then(() => {})
+          } else {
+            const newStock: any = { id: generateId(), store_id: storeId, ingredient_id: mat.id, material_id: mat.id, qty_on_hand: newQty, avg_cost: 0, last_updated: now() }
+            await db.stock.add(newStock)
+            supabase.from('stock').insert(newStock).then(() => {})
+          }
+        }
+      }
+
+      toast.success(`${logNumber} — ${finalYield} ${yieldUnit} dicatat`)
+      onClose()
+    } catch (e) { console.error(e); toast.error('Gagal menyimpan') }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title="Catat Produksi Toko" onClose={onClose}>
+      <div>
+        <Label required>Pilih Resep</Label>
+        <select className="input" value={recipeId} onChange={e => setRecipeId(e.target.value)}>
+          <option value="">-- Pilih resep --</option>
+          {recipes.map(r => (
+            <option key={r.id} value={r.id}>{(r as any).product_name}</option>
+          ))}
+        </select>
+      </div>
+      {selectedRecipe && (
+        <div className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
+          <p className="text-xs text-blue-700">1 batch = {batchYield} {yieldUnit}</p>
+        </div>
+      )}
+      <div>
+        <Label required>Jumlah Batch</Label>
+        <input className="input" type="number" min="1" value={batchCount} onChange={e => setBatchCount(e.target.value)} />
+        {selectedRecipe && <p className="text-xs text-gray-400 mt-1">Total: {finalYield} {yieldUnit}</p>}
+      </div>
+      <div>
+        <Label>Catatan</Label>
+        <input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opsional" />
+      </div>
+      <div className="flex gap-3">
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
           {saving ? 'Menyimpan...' : 'Simpan'}
         </button>
       </div>

@@ -218,7 +218,7 @@ export default function App() {
           <Route path="accounting"    element={<AccountingPage />} />
 
           <Route path="gudang"        element={<Navigate to="/stok" replace />} />
-          <Route path="produksi"      element={<RequireRole roles={['owner','manager','produksi']}><ProduksiPage /></RequireRole>} />
+          <Route path="produksi"      element={<RequireRole roles={['owner','manager','produksi','kasir']}><ProduksiPage /></RequireRole>} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -1,9 +1,8 @@
 // src/components/layout/Layout.tsx
-// CHANGELOG:
-// - Desktop responsive: sidebar navigation di kiri, content di kanan
-// - Mobile: bottom nav (existing behavior)
-// - Breakpoint: md (768px) ke atas = desktop layout
-// - Accounting kembali untuk owner/manager/gudang
+// CHANGELOG v2:
+// - Kasir: urutan Kasir, Stok, Produksi, Mutasi, Close Order, Lainnya(Pembelian+Biaya)
+// - Produksi: hapus menu Biaya
+// - Desktop sidebar + mobile bottom nav
 
 import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
@@ -15,7 +14,7 @@ import {
   ShoppingCart, FlaskConical,
   BarChart3, LayoutDashboard, Settings,
   MoreHorizontal, X, Receipt, ArrowRightLeft,
-  Package, Calculator, BookOpen, Tag,
+  Package, Calculator, BookOpen,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -77,15 +76,15 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
     { path: '/stok',           label: 'Stok'        },
     { path: '/produksi',       label: 'Produksi'    },
     { path: '/mutasi',         label: 'Mutasi'      },
-    { path: '/biaya',          label: 'Biaya'       },
   ],
   kasir: [
     { path: '/kasir',          label: 'Kasir'       },
     { path: '/stok',           label: 'Stok'        },
-    { path: '/pembelian',      label: 'Pembelian'   },
+    { path: '/produksi',       label: 'Produksi'    },
     { path: '/mutasi',         label: 'Mutasi'      },
-    { path: '/biaya',          label: 'Biaya'       },
     { path: '/tutup-toko',     label: 'Close Order' },
+    { path: '/pembelian',      label: 'Pembelian'   },
+    { path: '/biaya',          label: 'Biaya'       },
   ],
 }
 
@@ -148,10 +147,8 @@ export default function Layout() {
 
   return (
     <div className="flex h-[100dvh] bg-gray-50">
-
       {/* ── DESKTOP SIDEBAR ── */}
       <aside className="hidden md:flex flex-col w-56 bg-white border-r border-gray-100 flex-shrink-0">
-        {/* Logo */}
         <div className="px-4 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -163,17 +160,12 @@ export default function Layout() {
             </div>
           </div>
         </div>
-
-        {/* Nav items */}
         <nav className="flex-1 overflow-auto p-2 space-y-0.5">
           {allMenus.map(menu => (
             <NavItem key={menu.menu_path} menu_path={menu.menu_path} menu_label={menu.menu_label} />
           ))}
         </nav>
-
-        {/* Footer */}
         <div className="p-2 border-t border-gray-100 space-y-1">
-          {/* Online indicator */}
           <div className="flex items-center gap-2 px-3 py-2">
             {isOnline
               ? <><Wifi size={14} className="text-green-500" /><span className="text-xs text-green-600">Online</span></>
@@ -181,23 +173,18 @@ export default function Layout() {
           </div>
           <button onClick={handleLogout}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-red-500 hover:bg-red-50 transition-colors">
-            <LogOut size={18} />
-            <span>Keluar</span>
+            <LogOut size={18} /><span>Keluar</span>
           </button>
         </div>
       </aside>
 
       {/* ── MAIN CONTENT ── */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-
-        {/* Offline banner */}
         {!isOnline && (
           <div className="bg-amber-500 text-white text-xs text-center py-1 px-3 flex items-center justify-center gap-1.5 flex-shrink-0">
             <WifiOff size={12} /><span>Offline — data tersimpan lokal</span>
           </div>
         )}
-
-        {/* Content */}
         <div className="flex-1 overflow-hidden relative max-w-lg mx-auto w-full md:max-w-none">
           <Outlet />
         </div>
@@ -216,11 +203,13 @@ export default function Layout() {
                 </NavLink>
               )
             })}
-            <button onClick={() => setShowMore(true)}
-              className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${isMoreActive ? 'text-gray-900' : 'text-gray-400'}`}>
-              <MoreHorizontal size={20} strokeWidth={isMoreActive ? 2 : 1.5} />
-              <span>Lainnya</span>
-            </button>
+            {moreMenus.length > 0 && (
+              <button onClick={() => setShowMore(true)}
+                className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${isMoreActive ? 'text-gray-900' : 'text-gray-400'}`}>
+                <MoreHorizontal size={20} strokeWidth={isMoreActive ? 2 : 1.5} />
+                <span>Lainnya</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

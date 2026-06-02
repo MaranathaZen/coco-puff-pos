@@ -21,7 +21,7 @@ const TAB_ACCESS: Record<string, StokTab[]> = {
   owner:    ['gudang', 'produksi', 'toko'],
   manager:  ['gudang', 'produksi', 'toko'],
   gudang:   ['gudang', 'produksi', 'toko'],
-  produksi: ['produksi', 'toko'],
+  produksi: ['produksi'],
   kasir:    ['toko'],
 }
 

@@ -129,7 +129,7 @@ export default function ProduksiPage() {
       await Promise.all([
         mats.data?.length      ? db.materials.bulkPut(mats.data)                       : Promise.resolve(),
         pstock.data !== null   ? (async () => { await db.production_stock.clear();      if (pstock.data?.length)   await db.production_stock.bulkPut(pstock.data)      })() : Promise.resolve(),
-        fgs.data !== null      ? (async () => { await db.finished_goods_stock.clear();  if (fgs.data?.length)      await db.finished_goods_stock.bulkPut(fgs.data)      })() : Promise.resolve(),
+        fgs.data?.length       ? db.finished_goods_stock.bulkPut(fgs.data)                : Promise.resolve(),
         recipes.data !== null  ? (async () => { await db.production_recipes.clear();    if (recipes.data?.length)  await db.production_recipes.bulkPut(recipes.data)    })() : Promise.resolve(),
         recipeItems.data !== null ? (async () => { await db.production_recipe_items.clear(); if (recipeItems.data?.length) await db.production_recipe_items.bulkPut(recipeItems.data) })() : Promise.resolve(),
         logs.data?.length      ? db.production_logs.bulkPut(logs.data)                 : Promise.resolve(),
@@ -444,9 +444,17 @@ function ProduksiForm({ userId, onClose }: { userId: string; onClose: () => void
           .eq('id', fgsId)
         if (fgsErr) console.error('[FGS UPDATE ERROR]', fgsErr)
       } else {
-        // Insert baru
+        // Insert baru — log untuk debug
+        console.log('[FGS INSERT]', JSON.stringify(fgsData))
         const { error: fgsErr } = await supabase.from('finished_goods_stock').insert(fgsData)
-        if (fgsErr) console.error('[FGS INSERT ERROR]', fgsErr)
+        if (fgsErr) {
+          console.error('[FGS INSERT ERROR]', fgsErr)
+          // Coba upsert sebagai fallback
+          const { error: upsertErr } = await supabase.from('finished_goods_stock').upsert(fgsData)
+          if (upsertErr) console.error('[FGS UPSERT FALLBACK ERROR]', upsertErr)
+        } else {
+          console.log('[FGS INSERT SUCCESS]', fgsData.product_name, fgsData.qty_on_hand)
+        }
       }
 
       toast.success(`Produksi ${logNumber} dicatat: ${totalYield} ${selectedRecipe?.yield_unit || 'pcs'}`)

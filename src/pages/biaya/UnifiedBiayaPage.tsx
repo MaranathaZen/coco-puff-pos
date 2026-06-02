@@ -1,12 +1,8 @@
 // src/pages/biaya/UnifiedBiayaPage.tsx
-// CHANGELOG:
-// - Data separation per role:
-//   · owner/manager/gudang: lihat semua biaya
-//   · kasir: hanya biaya yang dia buat (created_by) atau store_id sendiri
-//   · produksi: hanya biaya yang dia buat
-// - Biaya form: tag store_id saat simpan
-// - Auto expand hari ini, collapse hari lain
-// - Sync pull data sesuai role
+// CHANGELOG v2:
+// - Fix label * merah di form
+// - owner/manager/gudang lihat semua history biaya semua toko
+// - sync pull semua data untuk owner/manager/gudang
 
 import { useState, useMemo, useEffect, useContext, createContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -50,11 +46,10 @@ const KATEGORI_BIAYA = [
   { value: 'beban_pemasaran',    label: 'Pemasaran',    desc: 'Iklan, promo' },
   { value: 'beban_lainnya',      label: 'Lainnya',      desc: 'ATK, kebersihan' },
 ]
-
 const METODE_BAYAR = [
-  { value: 'tunai',    label: 'Tunai'   },
-  { value: 'transfer', label: 'Transfer'},
-  { value: 'kredit',   label: 'Kredit'  },
+  { value: 'tunai',    label: 'Tunai'    },
+  { value: 'transfer', label: 'Transfer' },
+  { value: 'kredit',   label: 'Kredit'   },
 ]
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
@@ -70,7 +65,13 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
     </div>
   )
 }
-
+function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
+  return (
+    <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+      {children}{required && <span className="text-red-500 font-bold ml-0.5">*</span>}
+    </label>
+  )
+}
 function CopyBtn({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
   return (
@@ -90,25 +91,23 @@ export default function UnifiedBiayaPage() {
     setSyncing(true)
     try {
       const isOwnerManager = ['owner','manager','gudang'].includes(user?.role || '')
-      const query = isOwnerManager
-        ? supabase.from('warehouse_expenses').select('*').order('created_at', { ascending: false }).limit(300)
-        : supabase.from('warehouse_expenses').select('*')
-            .eq('store_id', user?.store_id)
+      const { data } = isOwnerManager
+        ? await supabase.from('warehouse_expenses').select('*').order('created_at', { ascending: false }).limit(500)
+        : await supabase.from('warehouse_expenses').select('*')
+            .eq('store_id', user?.store_id || '')
             .order('created_at', { ascending: false }).limit(200)
 
-      const { data } = await query
-      if (data?.length) {
-        // Untuk owner: replace all. Untuk kasir: hanya replace data toko sendiri
+      if (data !== null) {
         if (isOwnerManager) {
           await db.warehouse_expenses.clear()
+          if (data.length) await db.warehouse_expenses.bulkPut(data)
         } else {
-          // Hapus data toko ini dari lokal, lalu isi ulang
-          const localIds = (await db.warehouse_expenses
+          const local = await db.warehouse_expenses
             .filter(e => (e as any).store_id === user?.store_id || e.created_by === user?.id)
-            .primaryKeys())
-          if (localIds.length) await db.warehouse_expenses.bulkDelete(localIds)
+            .primaryKeys()
+          if (local.length) await db.warehouse_expenses.bulkDelete(local)
+          if (data.length) await db.warehouse_expenses.bulkPut(data)
         }
-        await db.warehouse_expenses.bulkPut(data)
       }
       toast.success('Data diperbarui')
     } catch { toast.error('Gagal sync') }
@@ -137,14 +136,13 @@ export default function UnifiedBiayaPage() {
 
 function BiayaList({ userId, role, storeId }: { userId: string; role: string; storeId: string }) {
   const setToolbar = useContext(ToolbarCtx)
-  const [showForm,   setShowForm]   = useState(false)
-  const [groupMode,  setGroupMode]  = useState<Period>('hari')
-  const [filterCat,  setFilterCat]  = useState('semua')
-  const [search,     setSearch]     = useState('')
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
-    const today = new Date().toISOString().slice(0, 10)
-    return { [today]: true }
-  })
+  const [showForm,  setShowForm]  = useState(false)
+  const [groupMode, setGroupMode] = useState<Period>('hari')
+  const [filterCat, setFilterCat] = useState('semua')
+  const [search,    setSearch]    = useState('')
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
+    [new Date().toISOString().slice(0, 10)]: true
+  }))
 
   const isOwnerManager = ['owner','manager','gudang'].includes(role)
 
@@ -167,20 +165,12 @@ function BiayaList({ userId, role, storeId }: { userId: string; role: string; st
 
   const expenses = useLiveQuery(async () => {
     let list = await db.warehouse_expenses.orderBy('created_at').reverse().toArray()
-
-    // ── Data separation ──
     if (role === 'kasir') {
-      // Kasir: hanya biaya toko sendiri atau yang dia buat
-      list = list.filter(e =>
-        (e as any).store_id === storeId ||
-        e.created_by === userId
-      )
+      list = list.filter(e => (e as any).store_id === storeId || e.created_by === userId)
     } else if (role === 'produksi') {
-      // Produksi: hanya biaya yang dia buat
       list = list.filter(e => e.created_by === userId)
     }
     // owner/manager/gudang: lihat semua
-
     return list
   }, [role, userId, storeId])
 
@@ -200,7 +190,6 @@ function BiayaList({ userId, role, storeId }: { userId: string; role: string; st
   }, [expenses, filterCat, search])
 
   const grouped = useMemo(() => groupBy(filtered, e => groupKey(e.created_at, groupMode)), [filtered, groupMode])
-
   const totalBulanIni = useMemo(() => {
     const now2 = new Date()
     return (expenses || []).filter(e => {
@@ -216,25 +205,21 @@ function BiayaList({ userId, role, storeId }: { userId: string; role: string; st
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalBulanIni)}</p>
         {!isOwnerManager && <p className="text-xs text-gray-400 mt-0.5">Data milik Anda saja</p>}
       </div>
-
       <input value={search} onChange={e => setSearch(e.target.value)}
         className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
         placeholder="Cari keterangan biaya..." />
-
-      {/* Filter kategori */}
       <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
         <button onClick={() => setFilterCat('semua')}
-          className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterCat === 'semua' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
+          className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterCat==='semua'?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
           Semua
         </button>
         {KATEGORI_BIAYA.map(k => (
           <button key={k.value} onClick={() => setFilterCat(k.value)}
-            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterCat === k.value ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterCat===k.value?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
             {k.label}
           </button>
         ))}
       </div>
-
       {grouped.map(({ key, items: grpItems }) => {
         const total    = grpItems.reduce((s, e) => s + e.amount, 0)
         const today    = new Date().toISOString().slice(0,10)
@@ -244,7 +229,7 @@ function BiayaList({ userId, role, storeId }: { userId: string; role: string; st
             <button onClick={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))}
               className="w-full flex items-center justify-between px-1 py-2">
               <div className="flex items-center gap-2">
-                <svg className={`w-3 h-3 text-gray-400 transition-transform ${expanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className={`w-3 h-3 text-gray-400 transition-transform ${expanded?'rotate-90':''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
                 </svg>
                 <p className="text-xs font-semibold text-gray-600">{groupLabel(grpItems[0].created_at, groupMode)}</p>
@@ -254,21 +239,18 @@ function BiayaList({ userId, role, storeId }: { userId: string; role: string; st
                 <span className="text-xs font-medium text-gray-700">{formatRupiah(total)}</span>
               </div>
             </button>
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden"
-              style={{ display: expanded ? undefined : 'none' }}>
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{ display: expanded ? undefined : 'none' }}>
               {grpItems.map((e, idx) => (
-                <div key={e.id} className={`flex items-start justify-between px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+                <div key={e.id} className={`flex items-start justify-between px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
                   <div className="flex-1 min-w-0">
                     {(e as any).expense_number && (
-                      <p className="text-xs font-mono text-blue-600 mb-0.5">
-                        {(e as any).expense_number}<CopyBtn text={(e as any).expense_number} />
-                      </p>
+                      <p className="text-xs font-mono text-blue-600 mb-0.5">{(e as any).expense_number}<CopyBtn text={(e as any).expense_number} /></p>
                     )}
                     <p className="text-sm font-medium text-gray-900 truncate">{e.name}</p>
                     <p className="text-xs text-gray-400 mt-0.5">
                       {KATEGORI_BIAYA.find(k => k.value === e.category)?.label || e.category}
-                      {' · '}{new Date(e.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })},{' '}
-                      {new Date(e.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
+                      {' · '}{new Date(e.created_at).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})},{' '}
+                      {new Date(e.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}
                       {(e as any).payment_method ? ` · ${(e as any).payment_method}` : ''}
                     </p>
                     {e.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {e.notes}</p>}
@@ -280,13 +262,9 @@ function BiayaList({ userId, role, storeId }: { userId: string; role: string; st
           </div>
         )
       })}
-
       {filtered.length === 0 && (
-        <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">
-          Belum ada catatan biaya
-        </div>
+        <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">Belum ada catatan biaya</div>
       )}
-
       {showForm && <BiayaForm userId={userId} storeId={storeId} onClose={() => setShowForm(false)} />}
     </div>
   )
@@ -303,28 +281,24 @@ function BiayaForm({ userId, storeId, onClose }: { userId: string; storeId: stri
   const [saving,     setSaving]     = useState(false)
 
   async function handleSave() {
-    if (!name.trim())                      return toast.error('Keterangan wajib diisi')
-    if (!amount || Number(amount) <= 0)    return toast.error('Jumlah wajib diisi')
+    if (!name.trim())               return toast.error('Keterangan wajib diisi')
+    if (!amount || Number(amount) <= 0) return toast.error('Jumlah wajib diisi')
     setSaving(true)
     try {
       const expNumber = await generateExpenseNumber()
       const data: any = {
-        id:             generateId(),
-        expense_number: expNumber,
-        store_id:       storeId,        // ← tag store_id untuk data separation
-        name:           name.trim(),
-        amount:         Number(amount),
-        expense_date:   now().slice(0,10),
-        category,
-        payment_method: payMethod,
-        transfer_to:    transferTo || undefined,
-        due_date:       dueDate    || undefined,
-        notes:          notes      || undefined,
-        created_by:     userId,
-        created_at:     now(),
+        id: generateId(), expense_number: expNumber,
+        store_id: storeId, name: name.trim(),
+        amount: Number(amount), expense_date: now().slice(0,10),
+        category, payment_method: payMethod,
+        transfer_to: transferTo || undefined,
+        due_date:    dueDate    || undefined,
+        notes:       notes      || undefined,
+        created_by: userId, created_at: now(),
       }
       await db.warehouse_expenses.add(data)
-      await supabase.from('warehouse_expenses').insert(data)
+      const { error } = await supabase.from('warehouse_expenses').insert(data)
+      if (error) console.error('[BIAYA INSERT ERROR]', error)
       toast.success('Biaya dicatat')
       onClose()
     } catch (e) { console.error(e); toast.error('Gagal menyimpan') }
@@ -333,54 +307,49 @@ function BiayaForm({ userId, storeId, onClose }: { userId: string; storeId: stri
 
   return (
     <Modal title="Catat Biaya" onClose={onClose}>
-      <div>
-        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Keterangan *</label>
+      <div><Label required>Keterangan</Label>
         <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Bayar listrik Mei 2026" autoFocus />
       </div>
-      <div>
-        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Jumlah (Rp) *</label>
+      <div><Label required>Jumlah (Rp)</Label>
         <input className="input" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value.replace(/[^0-9]/g,''))} placeholder="0" />
       </div>
-      <div>
-        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Kategori *</label>
+      <div><Label required>Kategori</Label>
         <div className="grid grid-cols-2 gap-2">
           {KATEGORI_BIAYA.map(c => (
             <button key={c.value} onClick={() => setCat(c.value)}
-              className={`px-3 py-2 rounded-xl text-left border transition-colors ${category === c.value ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
+              className={`px-3 py-2 rounded-xl text-left border transition-colors ${category===c.value?'bg-gray-900 text-white border-gray-900':'border-gray-200 text-gray-600'}`}>
               <p className="text-xs font-medium">{c.label}</p>
-              <p className={`text-[10px] leading-tight mt-0.5 ${category === c.value ? 'text-gray-300' : 'text-gray-400'}`}>{c.desc}</p>
+              <p className={`text-[10px] leading-tight mt-0.5 ${category===c.value?'text-gray-300':'text-gray-400'}`}>{c.desc}</p>
             </button>
           ))}
         </div>
       </div>
-      <div>
-        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Metode Bayar *</label>
+      <div><Label required>Metode Bayar</Label>
         <div className="flex gap-2">
           {METODE_BAYAR.map(m => (
             <button key={m.value} onClick={() => setPay(m.value)}
-              className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-colors ${payMethod === m.value ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
+              className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-colors ${payMethod===m.value?'bg-gray-900 text-white border-gray-900':'border-gray-200 text-gray-600'}`}>
               {m.label}
             </button>
           ))}
         </div>
       </div>
       {payMethod === 'transfer' && (
-        <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Transfer ke</label>
+        <div><Label>Transfer ke</Label>
           <input className="input" value={transferTo} onChange={e => setTransferTo(e.target.value)} placeholder="BCA 1234567890" />
         </div>
       )}
       {payMethod === 'kredit' && (
-        <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Jatuh Tempo</label>
+        <div><Label>Jatuh Tempo</Label>
           <input className="input" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
         </div>
       )}
-      <div>
-        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Catatan</label>
+      <div><Label>Catatan</Label>
         <input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opsional" />
       </div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
       </div>
     </Modal>
   )

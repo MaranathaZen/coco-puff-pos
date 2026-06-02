@@ -5,7 +5,7 @@
 // - FIX Bug 4: StokGudangView tetap baca dari materials.avg_cost (benar)
 // - Nilai stok dihitung dari avg_cost masing-masing lokasi
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now } from '@/lib/db'
 import { useAuthStore } from '@/store/auth'
@@ -84,13 +84,14 @@ export default function UnifiedStokPage() {
         supabase.from('stock').select('*'),
         supabase.from('categories').select('*'),
       ])
-      if (mats.data !== null)   { await db.materials.clear();            if (mats.data.length)   await db.materials.bulkPut(mats.data)            }
-      if (ws.data !== null)     { await db.warehouse_stock.clear();      if (ws.data.length)     await db.warehouse_stock.bulkPut(ws.data)         }
-      if (ps.data !== null)     { await db.production_stock.clear();     if (ps.data.length)     await db.production_stock.bulkPut(ps.data)        }
-      if (fgs.data !== null)    { await db.finished_goods_stock.clear(); if (fgs.data.length)    await db.finished_goods_stock.bulkPut(fgs.data)   }
-      if (prods.data !== null)  { await db.products.clear();             if (prods.data.length)  await db.products.bulkPut(prods.data)             }
-      if (stocks.data !== null) { await db.stock.clear();                if (stocks.data.length) await db.stock.bulkPut(stocks.data)               }
-      if (cats.data !== null)   { await db.categories.clear();           if (cats.data.length)   await db.categories.bulkPut(cats.data)            }
+      // Gunakan bulkPut (bukan clear+bulkPut) agar data lokal tidak hilang jika Supabase return kosong
+      if (mats.data?.length)   await db.materials.bulkPut(mats.data)
+      if (ws.data?.length)     await db.warehouse_stock.bulkPut(ws.data)
+      if (ps.data?.length)     await db.production_stock.bulkPut(ps.data)
+      if (fgs.data?.length)    await db.finished_goods_stock.bulkPut(fgs.data)
+      if (prods.data !== null) { await db.products.clear(); if (prods.data.length) await db.products.bulkPut(prods.data) }
+      if (stocks.data !== null) { await db.stock.clear(); if (stocks.data.length) await db.stock.bulkPut(stocks.data) }
+      if (cats.data !== null)  { await db.categories.clear(); if (cats.data.length) await db.categories.bulkPut(cats.data) }
       toast.success('Stok diperbarui')
     } catch { toast.error('Gagal sync') }
     finally { setSyncing(false) }
@@ -583,7 +584,17 @@ function StokTokoView({ storeId, role }: { storeId: string; role: string }) {
   const stores = useLiveQuery(() =>
     db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
   , [])
-  const [selectedStore, setSelectedStore] = useState(storeId)
+  // Auto-select toko pertama jika user adalah gudang/owner/manager (store_id mereka adalah toko virtual)
+  const defaultStore = canSeeAllStores ? '' : storeId
+  const [selectedStore, setSelectedStore] = useState(defaultStore)
+
+  // Saat stores load, auto-select toko pertama jika belum ada yang dipilih
+  useEffect(() => {
+    if (canSeeAllStores && !selectedStore && stores && stores.length > 0) {
+      setSelectedStore(stores[0].id)
+    }
+  }, [stores, canSeeAllStores, selectedStore])
+
   const activeStoreId = canSeeAllStores ? selectedStore : storeId
 
   const data = useLiveQuery(async () => {

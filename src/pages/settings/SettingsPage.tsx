@@ -48,6 +48,7 @@ export default function SettingsPage() {
     { id: 'password',    label: 'Password'    },
     { id: 'ppn',         label: 'PPN',         ownerOnly: true },
     { id: 'promo',       label: 'Promo',       ownerOnly: true },
+    { id: 'printer',     label: 'Printer'      },
     { id: 'tutup_tahun', label: 'Tutup Tahun', ownerOnly: true },
     { id: 'reset',       label: 'Reset',       ownerOnly: true },
   ].filter(t => !t.ownerOnly || isOwnerManager)
@@ -70,7 +71,6 @@ export default function SettingsPage() {
         {tab === 'supplier'    && <SupplierTab />}
         {tab === 'mitra'       && <MitraTab />}
         {/* tab menu dihapus */}
-        {tab === 'printer' && <PrinterTab storeId={currentUser.store_id || ''} />}
         {tab === 'toko'        && <TokoTab currentUser={user!} />}
         {tab === 'password'    && <ChangePasswordTab userId={user!.id} storeId={user!.store_id} />}
         {tab === 'ppn'         && <PPNTab currentUser={user!} />}

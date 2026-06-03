@@ -87,8 +87,6 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
     { path: '/mutasi',     label: 'Mutasi'      },
     { path: '/pembelian',  label: 'Pembelian'   },
     { path: '/biaya',      label: 'Biaya'       },
-    { path: '/laporan',    label: 'Laporan'     },
-    { path: '/accounting', label: 'Accounting'  },
   ],
 }
 

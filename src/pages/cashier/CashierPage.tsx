@@ -444,7 +444,7 @@ export default function CashierPage() {
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             {transactions?.map((tx, idx) => (
               <div key={tx.id} className={`${idx!==0?'border-t border-gray-50':''} ${(tx as any).status==='voided'?'opacity-50':''}`}>
-              <div onClick={() => setExpandedTxId(expandedTxId===tx.id ? null : tx.id)}
+              <div onClick={() => setExpandedTxId(expandedTxId===String(tx.id) ? null : String(tx.id))}
                 className="px-4 py-3 cursor-pointer active:bg-gray-50">
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
@@ -484,8 +484,8 @@ export default function CashierPage() {
                 </div>
               </div>
               {/* Detail expandable */}
-              {expandedTxId === tx.id && (
-                <TxDetailRow txId={tx.id} total={tx.total} onReprint={(txData) => { setLastTxData(txData); setShowReceipt(true) }} />
+              {expandedTxId !== null && expandedTxId === String(tx.id) && (
+                <TxDetailRow txId={String(tx.id)} total={tx.total} onReprint={(txData) => { setLastTxData(txData); setShowReceipt(true) }} />
               )}
               </div>
             ))}
@@ -956,11 +956,11 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
 
     const html = `<html><head><title>Struk</title><style>
       * { margin: 0; padding: 0; }
-      body { font-family: 'Courier New', Courier, monospace; font-size: 11px; line-height: 1.4; padding: 4px; white-space: pre; }
-      @page { margin: 2mm; size: 58mm auto; }
-      @media print { body { width: 54mm; } }
-    </style></head><body>${lines.join('
-')}</body></html>`
+      body { margin: 0; padding: 2px; }
+      pre { font-family: 'Courier New', Courier, monospace; font-size: 11px; line-height: 1.5; white-space: pre; }
+      @page { margin: 1mm; size: 58mm auto; }
+      @media print { pre { width: 56mm; } }
+    </style></head><body><pre>${lines.join('\n')}</pre></body></html>`
 
     const iframe = document.createElement('iframe')
     iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;'

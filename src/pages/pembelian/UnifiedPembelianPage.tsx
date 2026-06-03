@@ -175,7 +175,7 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   const purchases = useLiveQuery(async () => {
     let p = await db.purchases.orderBy('created_at').reverse().toArray()
     if (role === 'kasir') {
-      const today = new Date().toISOString().slice(0,10)
+      const today = new Date().toLocaleDateString('sv-SE')  // YYYY-MM-DD local time
       p = p.filter(x => ((x as any).store_id === storeId || x.created_by === userId) && x.created_at.startsWith(today))
     }
     const pi   = await db.purchase_items.toArray()

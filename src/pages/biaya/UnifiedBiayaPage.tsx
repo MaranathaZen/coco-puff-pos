@@ -178,8 +178,9 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: { userId: strin
   const expenses = useLiveQuery(async () => {
     let list = await db.warehouse_expenses.orderBy('created_at').reverse().toArray()
     if (role === 'kasir') {
-      const today = new Date().toISOString().slice(0,10)
-      list = list.filter(e => ((e as any).store_id === storeId || e.created_by === userId) && e.created_at.startsWith(today))
+      const today = new Date().toLocaleDateString('sv-SE')  // YYYY-MM-DD local time
+      list = list.filter(e => ((e as any).store_id === storeId || e.created_by === userId) && 
+        (e.created_at.startsWith(today) || (e as any).expense_date === today))
     } else if (role === 'produksi') {
       list = list.filter(e => e.created_by === userId)
     }

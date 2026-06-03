@@ -109,7 +109,7 @@ export default function App() {
           <Route path="pembelian" element={<UnifiedPembelianPage />} />
           <Route path="mutasi"    element={<UnifiedMutasiPage />} />
           <Route path="biaya"     element={<UnifiedBiayaPage />} />
-          <Route path="produksi"  element={<RequireRole roles={['owner','manager','produksi']}><ProduksiPage /></RequireRole>} />
+          <Route path="produksi"  element={<RequireRole roles={['owner','manager','produksi','kasir']}><ProduksiPage /></RequireRole>} />
 
           {/* Laporan — LaporanPage baru (toko+produksi+gudang) */}
           <Route path="laporan"        element={<RequireRole roles={['owner','manager','kasir','gudang','produksi']}><LaporanPage /></RequireRole>} />

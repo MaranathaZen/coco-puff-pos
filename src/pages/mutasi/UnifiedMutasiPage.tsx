@@ -178,7 +178,7 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
     let m = await db.warehouse_mutations.orderBy('created_at').reverse().toArray()
     if (role === 'produksi') m = m.filter(x => x.created_by === userId)
     else if (role === 'kasir') {
-      const today = new Date().toISOString().slice(0,10)
+      const today = new Date().toLocaleDateString('sv-SE')  // YYYY-MM-DD local time
       m = m.filter(x => (x.destination_id === storeId || x.created_by === userId) && x.created_at.startsWith(today))
     }
     else if (role === 'gudang') m = m.filter(x => x.created_by === userId || x.destination_id === storeId)

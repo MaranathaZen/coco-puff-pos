@@ -1458,8 +1458,12 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
     </div>
   )
 }
-function Label({ children }: { children: React.ReactNode }) {
-  return <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">{children}</label>
+function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
+  return (
+    <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+      {children}{required && <span className="text-red-500 font-bold ml-0.5">*</span>}
+    </label>
+  )
 }
 
 // ── UserForm ──────────────────────────────────────────────────

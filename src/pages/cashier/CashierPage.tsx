@@ -384,8 +384,66 @@ export default function CashierPage() {
           // Trigger print setelah state update
         }, 100)
       }
-      setShowReceipt(true)
-      toast.success(`Transaksi ${receiptNo} berhasil!`)
+      if (autoPrint) {
+        // Auto print langsung tanpa modal
+        setTimeout(() => {
+          if (printMode === 'rawbt') {
+            // Generate dan kirim ke RawBT
+            const pad2 = (s: string, len: number) => s.padEnd(len)
+            const rpad2 = (s: string, len: number) => s.padStart(len)
+            const W = 32
+            const line2 = '-'.repeat(W)
+            let txt = ''
+            txt += storeName.substring(0,W).padStart(Math.floor((W+Math.min(storeName.length,W))/2)) + '\n'
+            txt += line2 + '\n'
+            txt += `No: ${receiptNo}\n`
+            txt += `${new Date().toLocaleDateString('id-ID')} ${new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}\n`
+            txt += line2 + '\n'
+            for (const item of txItems) {
+              txt += item.product_name.substring(0,W) + '\n'
+            }
+            txt += line2 + '\n'
+            txt += pad2('TOTAL',22) + rpad2(formatRupiah(grandTotal),10) + '\n'
+            txt += '\n\n\n'
+            window.location.href = `rawbt:${encodeURIComponent(txt)}`
+          } else {
+            // Browser print via iframe
+            const W2 = 42
+            const lineStr = '-'.repeat(W2)
+            const rowFn = (l: string, r: string) => { const sp = W2-l.length-r.length; return l+(sp>0?' '.repeat(sp):' ')+r }
+            const lines2: string[] = []
+            lines2.push(storeName.padStart(Math.floor((W2+storeName.length)/2)))
+            lines2.push('Coco Puff'.padStart(Math.floor((W2+9)/2)))
+            lines2.push(lineStr)
+            lines2.push(rowFn(new Date().toLocaleDateString('id-ID'),new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})))
+            lines2.push(rowFn('No.',receiptNo))
+            lines2.push(lineStr)
+            for (const item of txItems) {
+              lines2.push(item.product_name.substring(0,W2))
+              lines2.push('  '+item.qty_eceran+' x '+formatRupiah(item.unit_price))
+            }
+            lines2.push(lineStr)
+            lines2.push(rowFn('TOTAL', formatRupiah(grandTotal)))
+            lines2.push(rowFn('Bayar ('+payMethod+')', formatRupiah(paidAmt)))
+            if (paidAmt > grandTotal) lines2.push(rowFn('Kembali', formatRupiah(paidAmt-grandTotal)))
+            lines2.push(lineStr)
+            lines2.push('Terima kasih!'.padStart(Math.floor((W2+13)/2)))
+            lines2.push('')
+            const html2 = `<html><head><style>*{margin:0;padding:0;}pre{font-family:'Courier New',monospace;font-size:11px;line-height:1.5;white-space:pre;}@page{margin:1mm;size:58mm auto;}</style></head><body><pre>${lines2.join('\n')}</pre></body></html>`
+            const iframe2 = document.createElement('iframe')
+            iframe2.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;'
+            document.body.appendChild(iframe2)
+            const doc2 = iframe2.contentWindow?.document
+            if (doc2) { doc2.open(); doc2.write(html2); doc2.close(); }
+            setTimeout(() => { iframe2.contentWindow?.focus(); iframe2.contentWindow?.print(); setTimeout(()=>{try{document.body.removeChild(iframe2)}catch{}},2000) }, 300)
+          }
+        }, 200)
+        clearCart(); setCartPakets([]); setShowCheckout(false); setCashPaid(''); setOnlineOrderNo(''); setOnlineBuyer('')
+        toast.success(`Transaksi ${receiptNo} berhasil! ✓ Auto-print`)
+      } else {
+        setShowReceipt(true)
+        toast.success(`Transaksi ${receiptNo} berhasil!`)
+      }
     } catch (e) { toast.error('Gagal menyimpan transaksi'); console.error(e) }
     finally { setIsProcessing(false) }
   }
@@ -858,36 +916,92 @@ function CartItemRow({ item, onQtyChange, onRemove }: {
 
 // ── TX DETAIL ROW (expandable in history) ────────────────────
 function TxDetailRow({ txId, total, onReprint }: { txId: string; total: number; onReprint: (data: any) => void }) {
-  const [items, setItems] = useState<any[]>([])
+  const [items,   setItems]   = useState<any[]>([])
+  const [tx,      setTx]      = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    db.transaction_items.where('transaction_id').equals(txId).toArray().then(its => {
+    Promise.all([
+      db.transaction_items.where('transaction_id').equals(txId).toArray(),
+      db.transactions.get(txId),
+    ]).then(([its, txData]) => {
       setItems(its)
+      setTx(txData)
       setLoading(false)
     })
   }, [txId])
 
+  const payColor: Record<string,string> = {
+    cash:       'bg-gray-100 text-gray-700',
+    qris:       'bg-blue-100 text-blue-700',
+    transfer:   'bg-purple-100 text-purple-700',
+    gopay:      'bg-green-100 text-green-700',
+    grab:       'bg-emerald-100 text-emerald-700',
+    shopeefood: 'bg-orange-100 text-orange-700',
+  }
+  const payLabel: Record<string,string> = {
+    cash:'Tunai', qris:'QRIS', transfer:'Transfer',
+    gopay:'GoPay', grab:'GrabPay', shopeefood:'ShopeePay'
+  }
+
+  if (loading) return <div className="bg-gray-50 border-t border-gray-100 px-4 py-2 text-xs text-gray-400">Memuat...</div>
+
+  const payMethod = tx?.payment_method || ''
+  const cashPaid  = tx?.cash_paid || tx?.total || 0
+  const change    = tx?.change_amount || 0
+
   return (
-    <div className="bg-gray-50 border-t border-gray-100 px-4 py-3 space-y-1.5">
-      {loading ? (
-        <p className="text-xs text-gray-400">Memuat...</p>
-      ) : items.length === 0 ? (
-        <p className="text-xs text-gray-400">Tidak ada detail item</p>
-      ) : (
-        <>
-          {items.map(item => (
-            <div key={item.id} className="flex justify-between text-xs">
-              <span className="text-gray-700">{item.product_name} <span className="text-gray-400">×{(item.qty_eceran||0)+(item.qty_dus||0)}</span></span>
-              <span className="text-gray-700">{formatRupiah(item.subtotal||0)}</span>
-            </div>
-          ))}
-          <div className="flex justify-between text-xs font-semibold text-gray-900 pt-1 border-t border-gray-200">
-            <span>Total</span>
-            <span>{formatRupiah(total)}</span>
+    <div className="bg-gray-50 border-t border-gray-100 px-4 py-3 space-y-2">
+      {/* Items */}
+      <div className="space-y-1">
+        {items.map(item => (
+          <div key={item.id} className="flex justify-between text-xs">
+            <span className="text-gray-700 flex-1 pr-2">
+              {item.product_name}
+              <span className="text-gray-400 ml-1">×{(item.qty_eceran||0)+(item.qty_dus||0)}</span>
+              {item.promo_discount > 0 && (
+                <span className="text-green-600 ml-1">-{formatRupiah(item.promo_discount)}</span>
+              )}
+            </span>
+            <span className="text-gray-700 font-medium">{formatRupiah(item.subtotal||0)}</span>
           </div>
-        </>
-      )}
+        ))}
+      </div>
+
+      {/* Summary */}
+      <div className="border-t border-gray-200 pt-2 space-y-1">
+        <div className="flex justify-between text-xs font-semibold text-gray-900">
+          <span>Total</span>
+          <span>{formatRupiah(total)}</span>
+        </div>
+
+        {/* Payment info */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${payColor[payMethod]||'bg-gray-100 text-gray-600'}`}>
+              {payLabel[payMethod]||payMethod}
+            </span>
+            {cashPaid > 0 && <span className="text-xs text-gray-500">{formatRupiah(cashPaid)}</span>}
+          </div>
+          {change > 0 && (
+            <span className="text-xs text-gray-500">Kembali {formatRupiah(change)}</span>
+          )}
+        </div>
+
+        {/* Order type */}
+        {tx?.order_type && (
+          <div className="flex items-center gap-1.5">
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+              tx.order_type==='dine_in'?'bg-orange-100 text-orange-700':
+              tx.order_type==='take_away'?'bg-blue-100 text-blue-700':
+              'bg-green-100 text-green-700'
+            }`}>
+              {tx.order_type==='dine_in'?'Dine In':tx.order_type==='take_away'?'Take Away':'Online'}
+            </span>
+            {tx.online_order_no && <span className="text-xs text-gray-400">#{tx.online_order_no}</span>}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

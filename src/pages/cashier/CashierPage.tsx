@@ -396,18 +396,6 @@ export default function CashierPage() {
       if (autoPrintNow) {
         // Auto print langsung tanpa modal
         setTimeout(() => {
-          if (printModeNow === 'rawbt') {
-            // akan di-handle oleh ReceiptModal yang auto-trigger RawBT
-          }
-          // Trigger print setelah state update
-        }, 100)
-      }
-      const autoPrintNow = getAutoPrintNow()
-      const printModeNow = getPrintModeNow()
-      console.log('[AutoPrint Debug]', { autoPrintNow, printModeNow, STORE_ID, config: localStorage.getItem(`printer_config_${STORE_ID}`) })
-      if (autoPrintNow) {
-        // Auto print langsung tanpa modal
-        setTimeout(() => {
           if (printMode === 'rawbt') {
             // Generate dan kirim ke RawBT
             const pad2 = (s: string, len: number) => s.padEnd(len)

@@ -396,7 +396,7 @@ export default function CashierPage() {
       if (autoPrintNow) {
         // Auto print langsung tanpa modal
         setTimeout(() => {
-          if (printMode === 'rawbt') {
+          if (printModeNow === 'rawbt') {
             // Generate dan kirim ke RawBT
             const pad2 = (s: string, len: number) => s.padEnd(len)
             const rpad2 = (s: string, len: number) => s.padStart(len)
@@ -417,7 +417,7 @@ export default function CashierPage() {
             window.location.href = `rawbt:${encodeURIComponent(txt)}`
           } else {
             // Browser print via iframe
-            const W2 = 42
+            const W2 = 32
             const lineStr = '-'.repeat(W2)
             const rowFn = (l: string, r: string) => { const sp = W2-l.length-r.length; return l+(sp>0?' '.repeat(sp):' ')+r }
             const lines2: string[] = []
@@ -1097,7 +1097,7 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
 
   function handlePrint() {
     // Generate HTML receipt yang bersih untuk thermal printer
-    const W = 42  // lebar karakter 58mm printer
+    const W = 32  // lebar karakter 58mm printer
     const line = '-'.repeat(W)
     const center = (s: string) => s.padStart(Math.floor((W + s.length) / 2)).padEnd(W)
     const row = (l: string, r: string) => {
@@ -1151,7 +1151,7 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
     const html = `<html><head><title>Struk</title><style>
       * { margin: 0; padding: 0; }
       body { margin: 0; padding: 2px; }
-      pre { font-family: 'Courier New', Courier, monospace; font-size: 11px; line-height: 1.5; white-space: pre; }
+      pre { font-family: 'Courier New', Courier, monospace; font-size: 9px; line-height: 1.4; white-space: pre; }
       @page { margin: 1mm; size: 58mm auto; }
       @media print { pre { width: 56mm; } }
     </style></head><body><pre>${lines.join('\n')}</pre></body></html>`

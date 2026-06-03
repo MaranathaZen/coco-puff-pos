@@ -171,12 +171,21 @@ export default function CashierPage() {
       let effectivePrice = basePrice
       let promoDiscount  = 0
       let promoName      = ''
+      let promoBuy1Get1  = false
       if (promo) {
-        promoDiscount  = promo.promo_type === 'percent' ? basePrice * promo.value / 100 : promo.value
-        effectivePrice = Math.max(0, basePrice - promoDiscount)
-        promoName      = promo.name || ''
+        if (promo.promo_type === 'buy1get1') {
+          // Buy 1 Get 1: tampilkan badge, diskon dihitung saat checkout berdasarkan qty
+          promoBuy1Get1  = true
+          promoName      = promo.name || 'Buy 1 Get 1'
+          promoDiscount  = 0  // dihitung per item di cart
+          effectivePrice = basePrice  // harga normal, diskon di cart
+        } else {
+          promoDiscount  = promo.promo_type === 'percent' ? basePrice * promo.value / 100 : promo.value
+          effectivePrice = Math.max(0, basePrice - promoDiscount)
+          promoName      = promo.name || ''
+        }
       }
-      return { ...p, base_price: basePrice, effective_price: effectivePrice, promo_discount: promoDiscount, promo_name: promoName, promo_id: promo?.id || '' }
+      return { ...p, base_price: basePrice, effective_price: effectivePrice, promo_discount: promoDiscount, promo_name: promoName, promo_id: promo?.id || '', promo_buy1get1: promoBuy1Get1, promo_type: promo?.promo_type || '' }
     })
   }, [selectedCat, STORE_ID, orderType])  // eslint-disable-line
 
@@ -197,7 +206,15 @@ export default function CashierPage() {
 
   const totalPakets   = cartPakets.reduce((s, p) => s + p.subtotal, 0)
   const rawSubtotal   = subtotal() + totalPakets
-  const rawDiscount   = totalDiscount()
+  // Hitung total diskon termasuk buy1get1
+  const buy1get1Discount = items.reduce((s, item) => {
+    if ((item.product as any).promo_buy1get1 && item.qty >= 2) {
+      const freeQty = Math.floor(item.qty / 2)
+      return s + freeQty * item.unit_price
+    }
+    return s
+  }, 0)
+  const rawDiscount   = totalDiscount() + buy1get1Discount
   const afterDiscount = rawSubtotal - rawDiscount
   const ppnAmount     = ppnPct > 0 ? Math.round(afterDiscount * ppnPct / 100) : 0
   const grandTotal    = afterDiscount + ppnAmount
@@ -293,14 +310,21 @@ export default function CashierPage() {
       }
       const txItems = items.map(item => {
         const pkg = item.product.auto_package ? calcPackaging(item.qty, item.product.pkg_qty) : { dus: 0, eceran: item.qty }
+        // Hitung diskon buy1get1 berdasarkan qty
+        let itemPromoDiscount = (item.product as any).promo_discount || 0
+        if ((item.product as any).promo_buy1get1 && item.qty >= 2) {
+          const freeQty = Math.floor(item.qty / 2)
+          itemPromoDiscount = freeQty * item.unit_price  // total diskon untuk item ini
+        }
+        const itemSubtotal = item.qty * item.unit_price - itemPromoDiscount
         return {
           id: generateId(), transaction_id: txId,
           product_id: item.product.id, product_name: item.product.name,
           qty_eceran: pkg.eceran, qty_dus: pkg.dus,
           unit_price: item.unit_price, discount: item.discount,
           promo_id: (item.product as any).promo_id || null,
-          promo_discount: (item.product as any).promo_discount || 0,
-          subtotal: item.subtotal, item_type: 'unit',
+          promo_discount: itemPromoDiscount,
+          subtotal: Math.max(0, itemSubtotal), item_type: 'unit',
         }
       })
       const txPakets = cartPakets.flatMap(cp => cp.pilihan.map(p => ({
@@ -324,7 +348,16 @@ export default function CashierPage() {
         payMethod: finalPay, cashPaid: paidAmt, change: paidAmt - grandTotal,
         orderType, onlinePlatform: isOnlineOrder ? onlinePlatform : null,
         onlineOrderNo: isOnlineOrder ? onlineOrderNo : null,
-        items: items.map(i => ({ name: i.product.name, qty: i.qty, price: i.unit_price, subtotal: i.subtotal, promoName: i.product.promo_name, promoDiscount: i.product.promo_discount })),
+        items: items.map(i => {
+          const isBuy1Get1 = (i.product as any).promo_buy1get1 && i.qty >= 2
+          const b1g1Discount = isBuy1Get1 ? Math.floor(i.qty/2) * i.unit_price : 0
+          return {
+            name: i.product.name, qty: i.qty, price: i.unit_price,
+            subtotal: isBuy1Get1 ? i.qty * i.unit_price - b1g1Discount : i.subtotal,
+            promoName: i.product.promo_name,
+            promoDiscount: isBuy1Get1 ? b1g1Discount : (i.product.promo_discount * i.qty),
+          }
+        }),
         pakets: cartPakets.map(cp => ({ name: cp.paket.name, subtotal: cp.subtotal })),
       })
       clearCart(); setCartPakets([]); setShowCheckout(false); setCashPaid(''); setOnlineOrderNo(''); setOnlineBuyer('')
@@ -726,13 +759,24 @@ export default function CashierPage() {
 }
 
 function ProductCard({ product, orderType, onAdd }: { product: any; orderType: OrderType; onAdd: () => void }) {
-  const hasPromo = product.promo_discount > 0
+  const hasPromo     = product.promo_discount > 0
+  const isBuy1Get1   = product.promo_buy1get1
   return (
     <button onClick={onAdd} className="bg-white rounded-2xl border border-gray-100 p-3 text-left active:scale-95 transition-transform shadow-sm relative overflow-hidden">
-      {hasPromo && <div className="absolute top-0 right-0 bg-green-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-bl-xl">PROMO</div>}
+      {isBuy1Get1 && (
+        <div className="absolute top-0 right-0 bg-purple-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-bl-xl">B1G1</div>
+      )}
+      {hasPromo && !isBuy1Get1 && (
+        <div className="absolute top-0 right-0 bg-green-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-bl-xl">PROMO</div>
+      )}
       <div className="text-2xl mb-2">🧁</div>
       <p className="text-sm font-medium text-gray-800 line-clamp-2 leading-tight">{product.name}</p>
-      {hasPromo ? (
+      {isBuy1Get1 ? (
+        <div className="mt-1">
+          <p className="text-purple-600 font-semibold text-sm">{formatRupiah(product.base_price)}</p>
+          <p className="text-[10px] text-purple-400">Beli 2 bayar 1!</p>
+        </div>
+      ) : hasPromo ? (
         <div className="mt-1">
           <p className="text-[10px] text-gray-400 line-through">{formatRupiah(product.base_price)}</p>
           <p className="text-green-600 font-semibold text-sm">{formatRupiah(product.effective_price)}</p>
@@ -752,9 +796,21 @@ function CartItemRow({ item, onQtyChange, onRemove }: {
     <div className="flex items-center gap-2 bg-gray-50 rounded-xl p-2">
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-gray-800 truncate">{item.product.name}</p>
-        <div className="flex items-center gap-1">
-          <p className="text-xs text-gray-500">{formatRupiah(item.subtotal)}</p>
-          {item.product.promo_name && <span className="text-[10px] text-green-600">🎁{item.product.promo_name}</span>}
+        <div className="flex items-center gap-1 flex-wrap">
+          {(item.product as any).promo_buy1get1 && item.qty >= 2 ? (
+            <p className="text-xs text-purple-600">
+              {formatRupiah(item.qty * item.unit_price - Math.floor(item.qty/2)*item.unit_price)}
+              <span className="text-purple-400 ml-1">({Math.floor(item.qty/2)} gratis)</span>
+            </p>
+          ) : (
+            <p className="text-xs text-gray-500">{formatRupiah(item.subtotal)}</p>
+          )}
+          {item.product.promo_name && !((item.product as any).promo_buy1get1) && (
+            <span className="text-[10px] text-green-600">🎁{item.product.promo_name}</span>
+          )}
+          {(item.product as any).promo_buy1get1 && (
+            <span className="text-[10px] text-purple-500">🎁 B1G1</span>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-1">
@@ -800,6 +856,59 @@ function ReceiptModal({ data, onClose }: { data: any; onClose: () => void }) {
       </body></html>
     `)
     w.document.close()
+  }
+
+  function handleRawBT() {
+    // Generate ESC/POS text untuk RawBT (Android Bluetooth printer)
+    const pad = (str: string, len: number) => str.substring(0,len).padEnd(len)
+    const rpad = (str: string, len: number) => str.substring(0,len).padStart(len)
+    const line = '-'.repeat(32)
+    const nl = '\n'
+
+    let txt = ''
+    txt += data.storeName.toUpperCase().padStart((32+data.storeName.length)/2|0) + nl
+    txt += 'COCO PUFF'.padStart(20) + nl
+    txt += line + nl
+    txt += `No: ${data.receiptNo}` + nl
+    txt += `Tgl: ${new Date().toLocaleDateString('id-ID')} ${new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}` + nl
+    txt += `Tipe: ${data.orderType==='dine_in'?'Dine In':data.orderType==='take_away'?'Take Away':'Online'}` + nl
+    if (data.onlineOrderNo) txt += `Order: #${data.onlineOrderNo}` + nl
+    txt += line + nl
+
+    for (const item of data.items) {
+      txt += item.name.substring(0,22) + nl
+      txt += `  ${item.qty} x ${formatRupiah(item.price)}`.padEnd(22) + rpad(formatRupiah(item.subtotal),10) + nl
+      if (item.promoDiscount > 0) txt += `  Promo: -${formatRupiah(item.promoDiscount)}` + nl
+    }
+    for (const p of data.pakets) {
+      txt += p.name.substring(0,22) + nl
+      txt += rpad(formatRupiah(p.subtotal),32) + nl
+    }
+
+    txt += line + nl
+    txt += pad('Subtotal',22) + rpad(formatRupiah(data.rawSubtotal),10) + nl
+    if (data.rawDiscount > 0) txt += pad('Diskon',22) + rpad('-'+formatRupiah(data.rawDiscount),10) + nl
+    if (data.ppnAmount > 0)   txt += pad(`PPN ${data.ppnPct}%`,22) + rpad('+'+formatRupiah(data.ppnAmount),10) + nl
+    txt += pad('TOTAL',22) + rpad(formatRupiah(data.grandTotal),10) + nl
+    txt += pad('Bayar',22) + rpad(formatRupiah(data.cashPaid),10) + nl
+    if (data.payMethod==='cash' && data.change>0)
+      txt += pad('Kembali',22) + rpad(formatRupiah(data.change),10) + nl
+    txt += line + nl
+    txt += 'Terima kasih!'.padStart(22) + nl
+    txt += nl + nl + nl
+
+    // Encode untuk RawBT intent URL
+    const encoded = encodeURIComponent(txt)
+    // RawBT URL scheme
+    const rawbtUrl = `rawbt:${encoded}`
+    // Coba buka RawBT app
+    window.location.href = rawbtUrl
+    // Fallback: copy ke clipboard
+    setTimeout(() => {
+      navigator.clipboard.writeText(txt).then(() => {
+        toast.success('Teks struk disalin ke clipboard (backup)')
+      }).catch(() => {})
+    }, 1000)
   }
 
   const now = new Date()
@@ -869,14 +978,20 @@ function ReceiptModal({ data, onClose }: { data: any; onClose: () => void }) {
         </div>
 
         {/* Action buttons */}
-        <div className="px-4 pb-4 flex gap-3 flex-shrink-0">
+        <div className="px-4 pb-4 space-y-2 flex-shrink-0">
+          <div className="flex gap-2">
+            <button onClick={handlePrint}
+              className="flex-1 py-2.5 rounded-xl bg-gray-900 text-white text-xs font-semibold">
+              🖨️ Print (Desktop)
+            </button>
+            <button onClick={handleRawBT}
+              className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-semibold">
+              📱 RawBT (Android)
+            </button>
+          </div>
           <button onClick={onClose}
-            className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">
+            className="w-full py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">
             Tutup
-          </button>
-          <button onClick={handlePrint}
-            className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold flex items-center justify-center gap-2">
-            🖨️ Print Struk
           </button>
         </div>
       </div>

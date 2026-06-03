@@ -1157,29 +1157,70 @@ function TutupTahunTab({ currentUser }: { currentUser: User }) {
 // ── RESET TAB ─────────────────────────────────────────────────
 // ── PRINTER TAB ──────────────────────────────────────────────
 function PrinterTab({ storeId }: { storeId: string }) {
+  const { user } = useAuthStore()
+  const isOwnerManager = ['owner','manager'].includes(user?.role || '')
+
+  // Owner/manager bisa set untuk semua toko
+  const stores = useLiveQuery(() =>
+    isOwnerManager
+      ? db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray()
+      : Promise.resolve([])
+  , [isOwnerManager])
+
+  const [selectedStore, setSelectedStore] = useState(storeId)
+
   // Setting printer disimpan per toko di localStorage
-  const key = `printer_config_${storeId}`
-  const [printMode, setPrintMode] = useState<'browser'|'rawbt'>(() => {
-    try { return JSON.parse(localStorage.getItem(key) || '{}').printMode || 'browser' } catch { return 'browser' }
-  })
-  const [autoPrint, setAutoPrint] = useState<boolean>(() => {
-    try { return JSON.parse(localStorage.getItem(key) || '{}').autoPrint || false } catch { return false }
-  })
+  const key = `printer_config_${selectedStore}`
+  const [printMode, setPrintMode] = useState<'browser'|'rawbt'>('browser')
+  const [autoPrint, setAutoPrint] = useState<boolean>(false)
   const [saved, setSaved] = useState(false)
+
+  // Load config saat selectedStore berubah
+  useEffect(() => {
+    try {
+      const cfg = JSON.parse(localStorage.getItem(`printer_config_${selectedStore}`) || '{}')
+      setPrintMode(cfg.printMode || 'browser')
+      setAutoPrint(cfg.autoPrint || false)
+    } catch {
+      setPrintMode('browser')
+      setAutoPrint(false)
+    }
+  }, [selectedStore])
 
   function handleSave() {
     localStorage.setItem(key, JSON.stringify({ printMode, autoPrint }))
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
-    toast.success('Setting printer disimpan')
+    const storeName = stores?.find(s => s.id === selectedStore)?.name || selectedStore
+    toast.success(`Setting printer ${isOwnerManager ? storeName : ''} disimpan`)
   }
+
+  const selectedStoreName = stores?.find(s => s.id === selectedStore)?.name || ''
 
   return (
     <div className="p-4 space-y-4">
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
         <p className="text-xs font-semibold text-blue-700">Setting Printer per Toko</p>
-        <p className="text-xs text-blue-600 mt-0.5">Setting ini disimpan di device ini. Setiap perangkat kasir perlu setting sendiri.</p>
+        <p className="text-xs text-blue-600 mt-0.5">Setting disimpan di device ini. Kasir di device lain perlu setting sendiri.</p>
       </div>
+
+      {/* Store selector untuk owner/manager */}
+      {isOwnerManager && stores && stores.length > 0 && (
+        <div>
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Pilih Toko</label>
+          <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+            {stores.map(s => (
+              <button key={s.id} onClick={() => setSelectedStore(s.id)}
+                className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${selectedStore===s.id?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
+                {s.name}
+              </button>
+            ))}
+          </div>
+          {selectedStoreName && (
+            <p className="text-xs text-gray-400 mt-2">Setting untuk: <span className="font-medium text-gray-700">{selectedStoreName}</span></p>
+          )}
+        </div>
+      )}
 
       {/* Mode printer */}
       <div>

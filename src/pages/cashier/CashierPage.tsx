@@ -1007,17 +1007,10 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
 
         {/* Action buttons */}
         <div className="px-4 pb-4 space-y-2 flex-shrink-0">
-          {/* Tombol utama sesuai setting printer */}
           <button
             onClick={printMode === 'rawbt' ? handleRawBT : handlePrint}
             className={`w-full py-3 rounded-xl text-white text-sm font-semibold ${printMode==='rawbt'?'bg-blue-600':'bg-gray-900'}`}>
             {printMode === 'rawbt' ? '📱 Print via RawBT' : '🖨️ Print Struk'}
-          </button>
-          {/* Tombol alternatif */}
-          <button
-            onClick={printMode === 'rawbt' ? handlePrint : handleRawBT}
-            className="w-full py-2 rounded-xl border border-gray-200 text-xs font-medium text-gray-500">
-            {printMode === 'rawbt' ? '🖥️ Print Browser (alternatif)' : '📱 RawBT (alternatif)'}
           </button>
           <button onClick={onClose}
             className="w-full py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">

@@ -76,6 +76,7 @@ export default function SettingsPage() {
         {tab === 'ppn'         && <PPNTab currentUser={user!} />}
         {tab === 'promo'       && <PromoTab currentUser={user!} />}
         {tab === 'tutup_tahun' && <TutupTahunTab currentUser={user!} />}
+        {tab === 'printer'     && <PrinterTab storeId={currentUser.store_id || ''} />}
         {tab === 'reset'       && <ResetDataTab />}
       </div>
     </div>
@@ -134,9 +135,17 @@ function UsersTab({ currentUser }: { currentUser: User }) {
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
           <button onClick={() => setFilterStore('semua')}
             className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore==='semua' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
-            Semua Toko
+            Semua
           </button>
-          {stores.map(s => (
+          {/* Gudang & Produksi dulu */}
+          {(stores || []).filter(s => s.id.includes('gudang') || s.id.includes('produksi')).map(s => (
+            <button key={s.id} onClick={() => setFilterStore(s.id)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore===s.id ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
+              {s.name.replace(' Malang','').replace(' Bali','')}
+            </button>
+          ))}
+          {/* Toko real */}
+          {(stores || []).filter(s => !s.id.includes('gudang') && !s.id.includes('produksi')).map(s => (
             <button key={s.id} onClick={() => setFilterStore(s.id)}
               className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore===s.id ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
               {s.name.replace(' Malang','').replace(' Bali','')}
@@ -599,8 +608,8 @@ function PPNTab({ currentUser }: { currentUser: User }) {
           {enabled && (
             <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-50">
-                <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-1.5">Tarif PPN (%)</p>
-                <input className="input w-24 text-lg font-semibold text-center" type="number" min="0" max="100" step="0.5" value={rate} onChange={e => setRate(e.target.value)} />
+                <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-1.5">Tarif PPN (%) <span className="text-red-500 font-bold">*</span></p>
+                <input className="input w-24 text-lg font-semibold text-center" type="number" min="0" max="100" step="0.01" value={rate} onChange={e => setRate(e.target.value)} />
               </div>
               <div className="px-4 py-3 space-y-2">
                 {(['include','exclude'] as const).map(m => (
@@ -1526,7 +1535,7 @@ function MitraForm({ partner, onClose }: { partner: Partner|null; onClose: () =>
       <div><Label required>Nama Franchise</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus /></div>
       <div className="grid grid-cols-2 gap-3">
         <div><Label required>Kota</Label><input className="input" value={city} onChange={e=>setCity(e.target.value)} /></div>
-        <div><Label>No. Handphone</Label><input className="input" type="tel" value={contact} onChange={e=>setContact(e.target.value)} /></div>
+        <div><Label required>No. Telepon</Label><input className="input" type="tel" value={contact} onChange={e=>setContact(e.target.value)} /></div>
       </div>
       <div><Label>Alamat</Label><input className="input" value={address} onChange={e=>setAddr(e.target.value)} placeholder="Opsional" /></div>
       <div className="flex items-center justify-between py-2 border-t border-gray-100">

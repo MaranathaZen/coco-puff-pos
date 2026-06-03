@@ -80,13 +80,15 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
     { path: '/mutasi',         label: 'Mutasi'      },
   ],
   kasir: [
-    { path: '/kasir',          label: 'Kasir'       },
-    { path: '/stok',           label: 'Stok'        },
-    { path: '/produksi',       label: 'Produksi'    },
-    { path: '/mutasi',         label: 'Mutasi'      },
-    { path: '/tutup-toko',     label: 'Close Order' },
-    { path: '/pembelian',      label: 'Pembelian'   },
-    { path: '/biaya',          label: 'Biaya'       },
+    { path: '/kasir',      label: 'Kasir'       },
+    { path: '/tutup-toko', label: 'Close Order' },
+    { path: '/stok',       label: 'Stok'        },
+    { path: '/produksi',   label: 'Produksi'    },
+    { path: '/mutasi',     label: 'Mutasi'      },
+    { path: '/pembelian',  label: 'Pembelian'   },
+    { path: '/biaya',      label: 'Biaya'       },
+    { path: '/laporan',    label: 'Laporan'     },
+    { path: '/accounting', label: 'Accounting'  },
   ],
 }
 

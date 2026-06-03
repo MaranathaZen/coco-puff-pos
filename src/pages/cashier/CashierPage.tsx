@@ -101,20 +101,30 @@ export default function CashierPage() {
   const [lastTxData,    setLastTxData]    = useState<any>(null)
   const [showReceipt,   setShowReceipt]   = useState(false)
 
-  // Load printer config dari localStorage - pakai store_id user langsung
+  // Load printer config langsung dari localStorage setiap render
   const userStoreId = user?.store_id || ''
   const getPrinterConfig = (sid: string) => {
     try { return JSON.parse(localStorage.getItem(`printer_config_${sid}`) || '{}') }
     catch { return {} }
   }
   const [printerConfig, setPrinterConfig] = useState(() => getPrinterConfig(userStoreId))
-  // Reload config saat toko berubah
+  // Reload config saat toko berubah atau timestamp berubah
   useEffect(() => {
-    setPrinterConfig(getPrinterConfig(STORE_ID || userStoreId))
+    const cfg = getPrinterConfig(STORE_ID || userStoreId)
+    setPrinterConfig(cfg)
+    console.log('[Printer Config Loaded]', { storeId: STORE_ID || userStoreId, cfg })
   }, [STORE_ID, userStoreId, printerConfigTs])
+  // Baca langsung dari localStorage saat checkout (bypass state lag)
+  const getPrintModeNow = () => {
+    const cfg = getPrinterConfig(STORE_ID || userStoreId)
+    return cfg.printMode || 'browser'
+  }
+  const getAutoPrintNow = () => {
+    const cfg = getPrinterConfig(STORE_ID || userStoreId)
+    return cfg.autoPrint === true || cfg.autoPrint === 'true'
+  }
   const printMode = printerConfig.printMode || 'browser'
-  // autoPrint bisa tersimpan sebagai boolean atau string
-  const autoPrint = printerConfig.autoPrint === true || printerConfig.autoPrint === 'true' || printerConfig.autoPrint === 1
+  const autoPrint = printerConfig.autoPrint === true || printerConfig.autoPrint === 'true'
 
   // Saat order type berubah ke online, set payment method ke platform
   useEffect(() => {
@@ -359,7 +369,8 @@ export default function CashierPage() {
       for (const item of [...txItems, ...txPakets]) await addToSyncQueue('transaction_items', item.id, 'insert', item, STORE_ID)
       await deductStockFromRecipes([...txItems, ...txPakets], STORE_ID)
       // Simpan data untuk struk
-      const storeName = allStores?.find(s => s.id === STORE_ID)?.name || STORE_ID
+      const storeRec = await db.stores.get(STORE_ID)
+      const storeName = storeRec?.name || allStores?.find(s => s.id === STORE_ID)?.name || STORE_ID
       setLastTxData({
         tx, txItems: [...txItems, ...txPakets], receiptNo,
         storeName, grandTotal, rawSubtotal, rawDiscount, ppnAmount, ppnPct,
@@ -379,18 +390,22 @@ export default function CashierPage() {
         pakets: cartPakets.map(cp => ({ name: cp.paket.name, subtotal: cp.subtotal })),
       })
       clearCart(); setCartPakets([]); setShowCheckout(false); setCashPaid(''); setOnlineOrderNo(''); setOnlineBuyer('')
-      console.log('[AutoPrint Debug]', { autoPrint, printMode, STORE_ID, config: localStorage.getItem(`printer_config_${STORE_ID}`) })
-      if (autoPrint) {
+      const autoPrintNow = getAutoPrintNow()
+      const printModeNow = getPrintModeNow()
+      console.log('[AutoPrint Debug]', { autoPrintNow, printModeNow, STORE_ID, config: localStorage.getItem(`printer_config_${STORE_ID}`) })
+      if (autoPrintNow) {
         // Auto print langsung tanpa modal
         setTimeout(() => {
-          if (printMode === 'rawbt') {
+          if (printModeNow === 'rawbt') {
             // akan di-handle oleh ReceiptModal yang auto-trigger RawBT
           }
           // Trigger print setelah state update
         }, 100)
       }
-      console.log('[AutoPrint Debug]', { autoPrint, printMode, STORE_ID, config: localStorage.getItem(`printer_config_${STORE_ID}`) })
-      if (autoPrint) {
+      const autoPrintNow = getAutoPrintNow()
+      const printModeNow = getPrintModeNow()
+      console.log('[AutoPrint Debug]', { autoPrintNow, printModeNow, STORE_ID, config: localStorage.getItem(`printer_config_${STORE_ID}`) })
+      if (autoPrintNow) {
         // Auto print langsung tanpa modal
         setTimeout(() => {
           if (printMode === 'rawbt') {
@@ -447,6 +462,7 @@ export default function CashierPage() {
         clearCart(); setCartPakets([]); setShowCheckout(false); setCashPaid(''); setOnlineOrderNo(''); setOnlineBuyer('')
         toast.success(`Transaksi ${receiptNo} berhasil! ✓ Auto-print`)
       } else {
+        // Manual print - tampilkan modal struk
         setShowReceipt(true)
         toast.success(`Transaksi ${receiptNo} berhasil!`)
       }

@@ -58,7 +58,7 @@ export default function CloseOrderPage() {
     setSyncing(true)
     try {
       const [txRes, shiftsRes, storesRes, reportsRes, usersRes] = await Promise.all([
-        supabase.from('transactions').select('*').eq('status','completed'),
+        supabase.from('transactions').select('*').eq('status','completed').gte('created_at', new Date(new Date().setHours(0,0,0,0)).toISOString()),
         supabase.from('shifts').select('*').order('opened_at',{ascending:false}).limit(500),
         supabase.from('stores').select('*').eq('is_active',true),
         supabase.from('close_order_reports').select('*').order('report_date',{ascending:false}).limit(200),

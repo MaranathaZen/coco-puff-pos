@@ -99,18 +99,20 @@ export default function CashierPage() {
   const [lastTxData,    setLastTxData]    = useState<any>(null)
   const [showReceipt,   setShowReceipt]   = useState(false)
 
-  // Load printer config dari localStorage
-  const [printerConfig, setPrinterConfig] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(`printer_config_${STORE_ID}`) || '{}') }
+  // Load printer config dari localStorage - pakai store_id user langsung
+  const userStoreId = user?.store_id || ''
+  const getPrinterConfig = (sid: string) => {
+    try { return JSON.parse(localStorage.getItem(`printer_config_${sid}`) || '{}') }
     catch { return {} }
-  })
-  // Reload config saat STORE_ID berubah
+  }
+  const [printerConfig, setPrinterConfig] = useState(() => getPrinterConfig(userStoreId))
+  // Reload config saat toko berubah
   useEffect(() => {
-    try { setPrinterConfig(JSON.parse(localStorage.getItem(`printer_config_${STORE_ID}`) || '{}')) }
-    catch { setPrinterConfig({}) }
-  }, [STORE_ID])
+    setPrinterConfig(getPrinterConfig(STORE_ID || userStoreId))
+  }, [STORE_ID, userStoreId])
   const printMode = printerConfig.printMode || 'browser'
-  const autoPrint = printerConfig.autoPrint === true || printerConfig.autoPrint === 'true'
+  // autoPrint bisa tersimpan sebagai boolean atau string
+  const autoPrint = printerConfig.autoPrint === true || printerConfig.autoPrint === 'true' || printerConfig.autoPrint === 1
 
   // Saat order type berubah ke online, set payment method ke platform
   useEffect(() => {
@@ -1037,8 +1039,9 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
     lines.push(center('Coco Puff'))
     lines.push(line)
     lines.push(row(dateStr, timeStr))
-    lines.push(row('No.', data.receiptNo))
+    lines.push(row('No.', data.receiptNo.length > 20 ? data.receiptNo.substring(0,20)+'...' : data.receiptNo))
     lines.push(row('Tipe', orderTypeLabel[data.orderType] || data.orderType))
+    lines.push(row('Toko', data.storeName))
     if (data.onlineOrderNo) lines.push(row('Order', '#' + data.onlineOrderNo))
     lines.push(line)
 

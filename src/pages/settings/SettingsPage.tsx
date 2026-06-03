@@ -458,9 +458,9 @@ function TokoForm({ store, isNew, region, onClose, onSaved }: {
 
   return (
     <Modal title={isNew ? 'Tambah Toko Baru' : 'Edit Toko'} onClose={onClose}>
-      <div><Label>Nama Toko</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
-      <div><Label>Kota</Label><input className="input" value={city} onChange={e => setCity(e.target.value)} /></div>
-      <div><Label>No. Telepon</Label><input className="input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} /></div>
+      <div><Label required>Nama Toko</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
+      <div><Label required>Kota</Label><input className="input" value={city} onChange={e => setCity(e.target.value)} /></div>
+      <div><Label required>No. Telepon</Label><input className="input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} /></div>
       <div><Label>Alamat</Label><input className="input" value={address} onChange={e => setAddr(e.target.value)} placeholder="Opsional" /></div>
       <div className="bg-gray-50 rounded-xl p-3">
         <p className="text-xs text-gray-500">Region: <span className="font-medium text-gray-700">{region}</span></p>

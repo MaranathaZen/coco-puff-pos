@@ -5,7 +5,7 @@
 // - Promo otomatis diterapkan dan tampil di struk
 // - order_type disimpan ke transactions
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now, addToSyncQueue } from '@/lib/db'
 import { useCartStore } from '@/store/cart'

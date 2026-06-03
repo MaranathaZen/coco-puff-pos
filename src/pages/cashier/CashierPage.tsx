@@ -99,12 +99,17 @@ export default function CashierPage() {
   const [showReceipt,   setShowReceipt]   = useState(false)
 
   // Load printer config dari localStorage
-  const printerConfig = useMemo(() => {
+  const [printerConfig, setPrinterConfig] = useState(() => {
     try { return JSON.parse(localStorage.getItem(`printer_config_${STORE_ID}`) || '{}') }
     catch { return {} }
+  })
+  // Reload config saat STORE_ID berubah
+  useEffect(() => {
+    try { setPrinterConfig(JSON.parse(localStorage.getItem(`printer_config_${STORE_ID}`) || '{}')) }
+    catch { setPrinterConfig({}) }
   }, [STORE_ID])
-  const printMode  = printerConfig.printMode  || 'browser'
-  const autoPrint  = printerConfig.autoPrint  || false
+  const printMode = printerConfig.printMode || 'browser'
+  const autoPrint = printerConfig.autoPrint === true || printerConfig.autoPrint === 'true'
 
   // Saat order type berubah ke online, set payment method ke platform
   useEffect(() => {
@@ -855,26 +860,36 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
   function handlePrint() {
     const printContent = document.getElementById('receipt-content')
     if (!printContent) return
-    const w = window.open('', '_blank', 'width=400,height=600')
-    if (!w) return
-    w.document.write(`
+    
+    // Buat iframe tersembunyi untuk print (tidak diblock browser)
+    const iframe = document.createElement('iframe')
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;'
+    document.body.appendChild(iframe)
+    
+    const iframeDoc = iframe.contentWindow?.document
+    if (!iframeDoc) { document.body.removeChild(iframe); return }
+    
+    iframeDoc.open()
+    iframeDoc.write(`
       <html><head><title>Struk ${data.receiptNo}</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Courier New', monospace; font-size: 12px; width: 280px; padding: 8px; }
-        .center { text-align: center; }
-        .bold { font-weight: bold; }
-        .line { border-top: 1px dashed #000; margin: 4px 0; }
-        .row { display: flex; justify-content: space-between; margin: 2px 0; }
-        .total { font-size: 14px; font-weight: bold; }
-        .small { font-size: 10px; color: #666; }
         @media print { body { width: 100%; } }
       </style></head><body>
       ${printContent.innerHTML}
-      <script>window.onload=()=>{window.print();window.close()}<\/script>
       </body></html>
     `)
-    w.document.close()
+    iframeDoc.close()
+    
+    setTimeout(() => {
+      try {
+        iframe.contentWindow?.focus()
+        iframe.contentWindow?.print()
+      } finally {
+        setTimeout(() => document.body.removeChild(iframe), 1000)
+      }
+    }, 250)
   }
 
   function handleRawBT() {

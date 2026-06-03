@@ -844,17 +844,6 @@ function CartItemRow({ item, onQtyChange, onRemove }: {
 
 // ── RECEIPT / STRUK ──────────────────────────────────────────
 function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; printMode?: string; autoPrint?: boolean; onClose: () => void }) {
-  // Auto print saat modal muncul
-  useEffect(() => {
-    if (!autoPrint) return
-    setTimeout(() => {
-      if (printMode === 'rawbt') {
-        handleRawBT()
-      } else {
-        handlePrint()
-      }
-    }, 300)
-  }, [])
   const orderTypeLabel: Record<string, string> = {
     dine_in: 'Dine In', take_away: 'Take Away', online: 'Online'
   }
@@ -943,6 +932,15 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
 
   const now = new Date()
   const dateStr = now.toLocaleDateString('id-ID', { day:'numeric', month:'long', year:'numeric' })
+
+  // Auto print - HARUS setelah handlePrint & handleRawBT dideklarasikan
+  useEffect(() => {
+    if (!autoPrint) return
+    setTimeout(() => {
+      if (printMode === 'rawbt') handleRawBT()
+      else handlePrint()
+    }, 300)
+  }, [])
   const timeStr = now.toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12:false })
 
   return (

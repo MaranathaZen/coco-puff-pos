@@ -16,7 +16,7 @@ import { X, ChevronRight, Plus, Check, Trash2, Tag, Store, Download, AlertTriang
 import toast from 'react-hot-toast'
 import type { User, Role } from '@/types'
 
-type Tab = 'users' | 'supplier' | 'mitra' | 'toko' | 'password' | 'ppn' | 'promo' | 'reset' | 'tutup_tahun'
+type Tab = 'users' | 'supplier' | 'mitra' | 'toko' | 'password' | 'ppn' | 'promo' | 'printer' | 'reset' | 'tutup_tahun'
 
 const ALL_MENUS = [
   { path: '/kasir',          label: 'Kasir'       },
@@ -70,6 +70,7 @@ export default function SettingsPage() {
         {tab === 'supplier'    && <SupplierTab />}
         {tab === 'mitra'       && <MitraTab />}
         {/* tab menu dihapus */}
+        {tab === 'printer' && <PrinterTab storeId={currentUser.store_id || ''} />}
         {tab === 'toko'        && <TokoTab currentUser={user!} />}
         {tab === 'password'    && <ChangePasswordTab userId={user!.id} storeId={user!.store_id} />}
         {tab === 'ppn'         && <PPNTab currentUser={user!} />}
@@ -138,7 +139,7 @@ function UsersTab({ currentUser }: { currentUser: User }) {
           {stores.map(s => (
             <button key={s.id} onClick={() => setFilterStore(s.id)}
               className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore===s.id ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
-              {s.name}
+              {s.name.replace(' Malang','').replace(' Bali','')}
             </button>
           ))}
         </div>
@@ -1144,6 +1145,92 @@ function TutupTahunTab({ currentUser }: { currentUser: User }) {
 }
 
 // ── RESET TAB ─────────────────────────────────────────────────
+// ── PRINTER TAB ──────────────────────────────────────────────
+function PrinterTab({ storeId }: { storeId: string }) {
+  // Setting printer disimpan per toko di localStorage
+  const key = `printer_config_${storeId}`
+  const [printMode, setPrintMode] = useState<'browser'|'rawbt'>(() => {
+    try { return JSON.parse(localStorage.getItem(key) || '{}').printMode || 'browser' } catch { return 'browser' }
+  })
+  const [autoPrint, setAutoPrint] = useState<boolean>(() => {
+    try { return JSON.parse(localStorage.getItem(key) || '{}').autoPrint || false } catch { return false }
+  })
+  const [saved, setSaved] = useState(false)
+
+  function handleSave() {
+    localStorage.setItem(key, JSON.stringify({ printMode, autoPrint }))
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+    toast.success('Setting printer disimpan')
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
+        <p className="text-xs font-semibold text-blue-700">Setting Printer per Toko</p>
+        <p className="text-xs text-blue-600 mt-0.5">Setting ini disimpan di device ini. Setiap perangkat kasir perlu setting sendiri.</p>
+      </div>
+
+      {/* Mode printer */}
+      <div>
+        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Jenis Printer</label>
+        <div className="space-y-2">
+          <button onClick={() => setPrintMode('browser')}
+            className={`w-full flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-colors ${printMode==='browser'?'border-gray-900 bg-gray-50':'border-gray-200'}`}>
+            <div className="mt-0.5">
+              <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${printMode==='browser'?'border-gray-900':'border-gray-300'}`}>
+                {printMode==='browser' && <div className="w-2 h-2 bg-gray-900 rounded-full" />}
+              </div>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-900">🖥️ Browser Print (Desktop/USB)</p>
+              <p className="text-xs text-gray-500 mt-0.5">Buka dialog print browser. Support semua OS. Cocok untuk printer USB/WiFi di desktop.</p>
+            </div>
+          </button>
+
+          <button onClick={() => setPrintMode('rawbt')}
+            className={`w-full flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-colors ${printMode==='rawbt'?'border-blue-600 bg-blue-50':'border-gray-200'}`}>
+            <div className="mt-0.5">
+              <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${printMode==='rawbt'?'border-blue-600':'border-gray-300'}`}>
+                {printMode==='rawbt' && <div className="w-2 h-2 bg-blue-600 rounded-full" />}
+              </div>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-900">📱 RawBT (Android Bluetooth)</p>
+              <p className="text-xs text-gray-500 mt-0.5">Kirim langsung ke printer thermal via RawBT app. Cocok untuk Android + printer Bluetooth.</p>
+              <p className="text-xs text-blue-600 mt-1">Pastikan RawBT sudah terinstall dan printer sudah dipilih di RawBT.</p>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* Auto print */}
+      <div className="bg-white border border-gray-100 rounded-xl p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-900">Print Otomatis</p>
+            <p className="text-xs text-gray-400 mt-0.5">Langsung print setelah transaksi berhasil tanpa tombol konfirmasi</p>
+          </div>
+          <button onClick={() => setAutoPrint(!autoPrint)}
+            className={`w-11 h-6 rounded-full transition-colors relative flex-shrink-0 ${autoPrint?'bg-gray-900':'bg-gray-200'}`}>
+            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${autoPrint?'left-[22px]':'left-0.5'}`} />
+          </button>
+        </div>
+        {autoPrint && (
+          <div className="mt-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+            <p className="text-xs text-amber-700">Mode auto-print: struk langsung terkirim ke printer tanpa preview. Pastikan printer sudah siap.</p>
+          </div>
+        )}
+      </div>
+
+      <button onClick={handleSave}
+        className="w-full py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold">
+        {saved ? '✓ Tersimpan' : 'Simpan Setting Printer'}
+      </button>
+    </div>
+  )
+}
+
 function ResetDataTab() {
   // Reset untuk: persiapan go-live dari sistem lama ke POS baru
   // Menghapus semua data transaksi, pembelian, biaya, mutasi, produksi, close order
@@ -1438,8 +1525,8 @@ function MitraForm({ partner, onClose }: { partner: Partner|null; onClose: () =>
     <Modal title={partner?'Edit Mitra':'Tambah Franchise'} onClose={onClose}>
       <div><Label required>Nama Franchise</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus /></div>
       <div className="grid grid-cols-2 gap-3">
-        <div><Label>Kota</Label><input className="input" value={city} onChange={e=>setCity(e.target.value)} /></div>
-        <div><Label>Kontak</Label><input className="input" type="tel" value={contact} onChange={e=>setContact(e.target.value)} /></div>
+        <div><Label required>Kota</Label><input className="input" value={city} onChange={e=>setCity(e.target.value)} /></div>
+        <div><Label>No. Handphone</Label><input className="input" type="tel" value={contact} onChange={e=>setContact(e.target.value)} /></div>
       </div>
       <div><Label>Alamat</Label><input className="input" value={address} onChange={e=>setAddr(e.target.value)} placeholder="Opsional" /></div>
       <div className="flex items-center justify-between py-2 border-t border-gray-100">

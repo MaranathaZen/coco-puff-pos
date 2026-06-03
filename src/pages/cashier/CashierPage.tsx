@@ -98,6 +98,14 @@ export default function CashierPage() {
   const [lastTxData,    setLastTxData]    = useState<any>(null)
   const [showReceipt,   setShowReceipt]   = useState(false)
 
+  // Load printer config dari localStorage
+  const printerConfig = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem(`printer_config_${STORE_ID}`) || '{}') }
+    catch { return {} }
+  }, [STORE_ID])
+  const printMode  = printerConfig.printMode  || 'browser'
+  const autoPrint  = printerConfig.autoPrint  || false
+
   // Saat order type berubah ke online, set payment method ke platform
   useEffect(() => {
     if (orderType === 'online') setPayMethod(PLATFORM_PAYMENT[onlinePlatform])
@@ -361,6 +369,15 @@ export default function CashierPage() {
         pakets: cartPakets.map(cp => ({ name: cp.paket.name, subtotal: cp.subtotal })),
       })
       clearCart(); setCartPakets([]); setShowCheckout(false); setCashPaid(''); setOnlineOrderNo(''); setOnlineBuyer('')
+      if (autoPrint) {
+        // Auto print langsung tanpa modal
+        setTimeout(() => {
+          if (printMode === 'rawbt') {
+            // akan di-handle oleh ReceiptModal yang auto-trigger RawBT
+          }
+          // Trigger print setelah state update
+        }, 100)
+      }
       setShowReceipt(true)
       toast.success(`Transaksi ${receiptNo} berhasil!`)
     } catch (e) { toast.error('Gagal menyimpan transaksi'); console.error(e) }
@@ -713,6 +730,8 @@ export default function CashierPage() {
       {showReceipt && lastTxData && (
         <ReceiptModal
           data={lastTxData}
+          printMode={printMode}
+          autoPrint={autoPrint}
           onClose={() => setShowReceipt(false)}
         />
       )}
@@ -824,7 +843,18 @@ function CartItemRow({ item, onQtyChange, onRemove }: {
 }
 
 // ── RECEIPT / STRUK ──────────────────────────────────────────
-function ReceiptModal({ data, onClose }: { data: any; onClose: () => void }) {
+function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; printMode?: string; autoPrint?: boolean; onClose: () => void }) {
+  // Auto print saat modal muncul
+  useEffect(() => {
+    if (!autoPrint) return
+    setTimeout(() => {
+      if (printMode === 'rawbt') {
+        handleRawBT()
+      } else {
+        handlePrint()
+      }
+    }, 300)
+  }, [])
   const orderTypeLabel: Record<string, string> = {
     dine_in: 'Dine In', take_away: 'Take Away', online: 'Online'
   }
@@ -979,16 +1009,18 @@ function ReceiptModal({ data, onClose }: { data: any; onClose: () => void }) {
 
         {/* Action buttons */}
         <div className="px-4 pb-4 space-y-2 flex-shrink-0">
-          <div className="flex gap-2">
-            <button onClick={handlePrint}
-              className="flex-1 py-2.5 rounded-xl bg-gray-900 text-white text-xs font-semibold">
-              🖨️ Print (Desktop)
-            </button>
-            <button onClick={handleRawBT}
-              className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-semibold">
-              📱 RawBT (Android)
-            </button>
-          </div>
+          {/* Tombol utama sesuai setting printer */}
+          <button
+            onClick={printMode === 'rawbt' ? handleRawBT : handlePrint}
+            className={`w-full py-3 rounded-xl text-white text-sm font-semibold ${printMode==='rawbt'?'bg-blue-600':'bg-gray-900'}`}>
+            {printMode === 'rawbt' ? '📱 Print via RawBT' : '🖨️ Print Struk'}
+          </button>
+          {/* Tombol alternatif */}
+          <button
+            onClick={printMode === 'rawbt' ? handlePrint : handleRawBT}
+            className="w-full py-2 rounded-xl border border-gray-200 text-xs font-medium text-gray-500">
+            {printMode === 'rawbt' ? '🖥️ Print Browser (alternatif)' : '📱 RawBT (alternatif)'}
+          </button>
           <button onClick={onClose}
             className="w-full py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">
             Tutup

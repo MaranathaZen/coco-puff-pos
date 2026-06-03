@@ -377,6 +377,7 @@ export default function CashierPage() {
         pakets: cartPakets.map(cp => ({ name: cp.paket.name, subtotal: cp.subtotal })),
       })
       clearCart(); setCartPakets([]); setShowCheckout(false); setCashPaid(''); setOnlineOrderNo(''); setOnlineBuyer('')
+      console.log('[AutoPrint Debug]', { autoPrint, printMode, STORE_ID, config: localStorage.getItem(`printer_config_${STORE_ID}`) })
       if (autoPrint) {
         // Auto print langsung tanpa modal
         setTimeout(() => {
@@ -386,6 +387,7 @@ export default function CashierPage() {
           // Trigger print setelah state update
         }, 100)
       }
+      console.log('[AutoPrint Debug]', { autoPrint, printMode, STORE_ID, config: localStorage.getItem(`printer_config_${STORE_ID}`) })
       if (autoPrint) {
         // Auto print langsung tanpa modal
         setTimeout(() => {
@@ -520,7 +522,7 @@ export default function CashierPage() {
                           {(tx as any).order_type==='dine_in'?'Dine In':(tx as any).order_type==='take_away'?'Take Away':'Online'}
                         </span>
                       )}
-                      {(tx as any).order_source && (tx as any).order_source!=='pos' && (
+                      {(tx as any).order_source && ['gofood','grabfood','shopeefood'].includes((tx as any).order_source) && (
                         <span className={cn('text-xs px-1.5 py-0.5 rounded-full font-medium',
                           (tx as any).order_source==='gofood'&&'bg-green-100 text-green-700',
                           (tx as any).order_source==='grabfood'&&'bg-emerald-100 text-emerald-700',
@@ -990,18 +992,9 @@ function TxDetailRow({ txId, total, onReprint }: { txId: string; total: number; 
           )}
         </div>
 
-        {/* Order type */}
-        {tx?.order_type && (
-          <div className="flex items-center gap-1.5">
-            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-              tx.order_type==='dine_in'?'bg-orange-100 text-orange-700':
-              tx.order_type==='take_away'?'bg-blue-100 text-blue-700':
-              'bg-green-100 text-green-700'
-            }`}>
-              {tx.order_type==='dine_in'?'Dine In':tx.order_type==='take_away'?'Take Away':'Online'}
-            </span>
-            {tx.online_order_no && <span className="text-xs text-gray-400">#{tx.online_order_no}</span>}
-          </div>
+        {/* Online order no */}
+        {tx?.online_order_no && (
+          <p className="text-xs text-gray-400">Order #{tx.online_order_no}</p>
         )}
       </div>
     </div>

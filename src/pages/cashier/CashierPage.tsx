@@ -91,7 +91,9 @@ export default function CashierPage() {
   const [paketPilihan,   setPaketPilihan]   = useState<{ product: Product; qty: number }[]>([])
   const [cartPakets,     setCartPakets]     = useState<CartPaketItem[]>([])
 
-  const [showVoidModal, setShowVoidModal] = useState(false)
+  const [showVoidModal,    setShowVoidModal]    = useState(false)
+  const [showPrinterModal, setShowPrinterModal] = useState(false)
+  const [printerConfigTs, setPrinterConfigTs] = useState(0)  // timestamp untuk reload
   const [expandedTxId, setExpandedTxId] = useState<string|null>(null)
   const [voidTx,        setVoidTx]        = useState<Transaction | null>(null)
   const [voidReason,    setVoidReason]    = useState('')
@@ -109,7 +111,7 @@ export default function CashierPage() {
   // Reload config saat toko berubah
   useEffect(() => {
     setPrinterConfig(getPrinterConfig(STORE_ID || userStoreId))
-  }, [STORE_ID, userStoreId])
+  }, [STORE_ID, userStoreId, printerConfigTs])
   const printMode = printerConfig.printMode || 'browser'
   // autoPrint bisa tersimpan sebagai boolean atau string
   const autoPrint = printerConfig.autoPrint === true || printerConfig.autoPrint === 'true' || printerConfig.autoPrint === 1
@@ -801,6 +803,11 @@ export default function CashierPage() {
         </div>
       )}
 
+      {/* PRINTER SETTING MINI MODAL */}
+      {showPrinterModal && (
+        <PrinterMiniModal storeId={STORE_ID} onClose={() => { setShowPrinterModal(false); setPrinterConfigTs(Date.now()) }} />
+      )}
+
       {/* STRUK / RECEIPT */}
       {showReceipt && lastTxData && (
         <ReceiptModal
@@ -996,6 +1003,79 @@ function TxDetailRow({ txId, total, onReprint }: { txId: string; total: number; 
         {tx?.online_order_no && (
           <p className="text-xs text-gray-400">Order #{tx.online_order_no}</p>
         )}
+      </div>
+    </div>
+  )
+}
+
+
+// ── PRINTER MINI MODAL ───────────────────────────────────────
+function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () => void }) {
+  const key = `printer_config_${storeId}`
+  const [printMode, setPrintMode] = useState<'browser'|'rawbt'>(() => {
+    try { return JSON.parse(localStorage.getItem(key) || '{}').printMode || 'browser' } catch { return 'browser' }
+  })
+  const [autoPrint, setAutoPrint] = useState<boolean>(() => {
+    try { return JSON.parse(localStorage.getItem(key) || '{}').autoPrint === true } catch { return false }
+  })
+  const [saved, setSaved] = useState(false)
+
+  function handleSave() {
+    localStorage.setItem(key, JSON.stringify({ printMode, autoPrint }))
+    setSaved(true)
+    setTimeout(() => { setSaved(false); onClose() }, 1000)
+    toast.success('Setting printer disimpan')
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-md shadow-lg">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h3 className="font-semibold text-gray-900">🖨️ Setting Printer</h3>
+          <button onClick={onClose} className="p-1 text-gray-400"><X size={18} /></button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          {/* Mode printer */}
+          <div className="space-y-2">
+            <button onClick={() => setPrintMode('browser')}
+              className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left ${printMode==='browser'?'border-gray-900 bg-gray-50':'border-gray-200'}`}>
+              <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${printMode==='browser'?'border-gray-900':'border-gray-300'}`}>
+                {printMode==='browser' && <div className="w-2 h-2 bg-gray-900 rounded-full" />}
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">🖥️ Browser Print (USB)</p>
+                <p className="text-xs text-gray-500">Buka dialog print browser</p>
+              </div>
+            </button>
+            <button onClick={() => setPrintMode('rawbt')}
+              className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left ${printMode==='rawbt'?'border-blue-600 bg-blue-50':'border-gray-200'}`}>
+              <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${printMode==='rawbt'?'border-blue-600':'border-gray-300'}`}>
+                {printMode==='rawbt' && <div className="w-2 h-2 bg-blue-600 rounded-full" />}
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">📱 RawBT (Bluetooth)</p>
+                <p className="text-xs text-gray-500">Android + printer thermal Bluetooth</p>
+              </div>
+            </button>
+          </div>
+
+          {/* Auto print toggle */}
+          <div className="flex items-center justify-between py-2 border-t border-gray-100">
+            <div>
+              <p className="text-sm font-medium text-gray-900">Print Otomatis</p>
+              <p className="text-xs text-gray-400">Langsung print tanpa pop up struk</p>
+            </div>
+            <button onClick={() => setAutoPrint(!autoPrint)}
+              className={`w-11 h-6 rounded-full transition-colors relative ${autoPrint?'bg-gray-900':'bg-gray-200'}`}>
+              <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${autoPrint?'left-[22px]':'left-0.5'}`} />
+            </button>
+          </div>
+
+          <button onClick={handleSave}
+            className="w-full py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold">
+            {saved ? '✓ Tersimpan!' : 'Simpan Setting'}
+          </button>
+        </div>
       </div>
     </div>
   )

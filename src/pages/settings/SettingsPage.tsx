@@ -38,6 +38,7 @@ export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('users')
   const isOwner        = user?.role === 'owner'
   const isOwnerManager = user?.role === 'owner' || user?.role === 'manager'
+  if (!user) return null  // Guard: jangan render sebelum user tersedia
 
   const tabs: { id: Tab; label: string; ownerOnly?: boolean }[] = [
     { id: 'users',       label: 'User'        },
@@ -76,7 +77,7 @@ export default function SettingsPage() {
         {tab === 'ppn'         && <PPNTab currentUser={user!} />}
         {tab === 'promo'       && <PromoTab currentUser={user!} />}
         {tab === 'tutup_tahun' && <TutupTahunTab currentUser={user!} />}
-        {tab === 'printer'     && <PrinterTab storeId={currentUser.store_id || ''} />}
+        {tab === 'printer'     && <PrinterTab storeId={user?.store_id || ''} />}
         {tab === 'reset'       && <ResetDataTab />}
       </div>
     </div>
@@ -1456,12 +1457,12 @@ function UserForm({ user, currentUser, stores, onClose }: {
 
   return (
     <Modal title={user?'Edit User':'Tambah User'} onClose={onClose}>
-      <div><Label>Nama</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus /></div>
-      <div><Label>Username</Label><input className="input" value={username} onChange={e=>setUname(e.target.value)} /></div>
-      <div><Label>Password {user?'(kosongkan jika tidak diubah)':''}</Label>
+      <div><Label required>Nama Lengkap</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus /></div>
+      <div><Label required>Username</Label><input className="input" value={username} onChange={e=>setUname(e.target.value)} /></div>
+      <div><Label required>Password {user?'(kosongkan jika tidak diubah)':''}</Label>
         <input className="input" type="password" value={password} onChange={e=>setPass(e.target.value)} placeholder={user?'••••':'Min. 4 karakter'} />
       </div>
-      <div><Label>Role</Label>
+      <div><Label required>Role</Label>
         <div className="grid grid-cols-2 gap-2">
           {(['kasir','gudang','produksi','manager'] as Role[]).map(r=>(
             <button key={r} onClick={()=>setRole(r)} className={`py-2 rounded-xl text-sm font-medium border capitalize transition-colors ${role===r?'bg-gray-900 text-white border-gray-900':'border-gray-200 text-gray-600'}`}>{r}</button>
@@ -1470,7 +1471,7 @@ function UserForm({ user, currentUser, stores, onClose }: {
       </div>
       {needStorePick && stores.length > 0 && (
         <div>
-          <Label>Toko</Label>
+          <Label required>Toko</Label>
           <select className="input" value={storeId} onChange={e=>setStore(e.target.value)}>
             {stores.map(s=><option key={s.id} value={s.id}>{s.name} · {s.city}</option>)}
           </select>

@@ -488,7 +488,7 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
           <input className="input" inputMode="decimal" value={price} onChange={e=>setPrice(e.target.value.replace(/[^0-9]/g,''))} placeholder="0" />
           <p className="text-[10px] text-gray-400 mt-1">Harga dasar jika tidak ada override</p>
         </div>
-        <div><Label>Satuan</Label>
+        <div><Label required>Satuan</Label>
           <input className="input" value={unit} onChange={e=>setUnit(e.target.value)} placeholder="pcs" />
         </div>
       </div>
@@ -556,7 +556,14 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
           <div className="px-4 pb-3 border-t border-gray-50 space-y-3 pt-3">
             <div className="grid grid-cols-2 gap-3">
               <div><Label required>Isi per Kemasan (pcs)</Label><input className="input" type="number" value={pkgQty} onChange={e=>setPkgQty(e.target.value)} placeholder="5" /></div>
-              <div><Label>Nama Kemasan</Label><input className="input" value={pkgUnit} onChange={e=>setPkgUnit(e.target.value)} placeholder="dus" /></div>
+              <div>
+                  <Label required>Nama Kemasan</Label>
+                  <select className="input" value={pkgUnit} onChange={e=>setPkgUnit(e.target.value)}>
+                    <option value="">-- Pilih kemasan *</option>
+                    {packaging?.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+                  </select>
+                  <p className="text-[10px] text-amber-600 mt-1">⚠ Harus sesuai nama di Stok Toko agar otomatis berkurang</p>
+                </div>
             </div>
           </div>
         )}
@@ -587,6 +594,11 @@ function KategoriForm({ kategori, currentCount, onClose }: { kategori: any; curr
 
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama kategori wajib diisi')
+    if (!sortOrder.toString().trim()) return toast.error('Urutan tampil wajib diisi')
+    // Cek duplikat urutan tampil
+    const allCats = await db.categories.toArray()
+    const dup = allCats.find(c => Number(c.sort_order) === Number(sortOrder) && c.id !== kategori?.id)
+    if (dup) return toast.error(`Urutan ${sortOrder} sudah dipakai oleh "${dup.name}"`)
     setSaving(true)
     try {
       const data: any = { id: kategori?.id||`cat-${name.toLowerCase().replace(/\s+/g,'-')}-${Date.now().toString(36)}`, name: name.trim(), description: desc||undefined, sort_order: Number(sortOrder)||currentCount+1 }
@@ -603,7 +615,7 @@ function KategoriForm({ kategori, currentCount, onClose }: { kategori: any; curr
     <Modal title={kategori?'Edit Kategori':'Tambah Kategori'} onClose={onClose}>
       <div><Label required>Nama Kategori</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus /></div>
       <div><Label>Deskripsi</Label><input className="input" value={desc} onChange={e=>setDesc(e.target.value)} /></div>
-      <div><Label>Urutan Tampil</Label><input className="input" type="number" min="1" value={sortOrder} onChange={e=>setSort(e.target.value)} /></div>
+      <div><Label required>Urutan Tampil</Label><input className="input" type="number" min="1" value={sortOrder} onChange={e=>setSort(e.target.value)} /></div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>

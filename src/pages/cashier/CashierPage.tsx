@@ -92,6 +92,7 @@ export default function CashierPage() {
   const [cartPakets,     setCartPakets]     = useState<CartPaketItem[]>([])
 
   const [showVoidModal, setShowVoidModal] = useState(false)
+  const [expandedTxId, setExpandedTxId] = useState<string|null>(null)
   const [voidTx,        setVoidTx]        = useState<Transaction | null>(null)
   const [voidReason,    setVoidReason]    = useState('')
   const [isVoiding,     setIsVoiding]     = useState(false)
@@ -442,7 +443,9 @@ export default function CashierPage() {
           <p className="text-xs text-gray-400">Transaksi hari ini</p>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             {transactions?.map((tx, idx) => (
-              <div key={tx.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''} ${(tx as any).status==='voided'?'opacity-50':''}`}>
+              <div key={tx.id} className={`${idx!==0?'border-t border-gray-50':''} ${(tx as any).status==='voided'?'opacity-50':''}`}>
+              <div onClick={() => setExpandedTxId(expandedTxId===tx.id ? null : tx.id)}
+                className="px-4 py-3 cursor-pointer active:bg-gray-50">
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
@@ -479,6 +482,11 @@ export default function CashierPage() {
                     )}
                   </div>
                 </div>
+              </div>
+              {/* Detail expandable */}
+              {expandedTxId === tx.id && (
+                <TxDetailRow txId={tx.id} total={tx.total} onReprint={(txData) => { setLastTxData(txData); setShowReceipt(true) }} />
+              )}
               </div>
             ))}
             {transactions?.length===0 && <div className="py-12 text-center text-sm text-gray-400">Belum ada transaksi hari ini</div>}
@@ -847,6 +855,43 @@ function CartItemRow({ item, onQtyChange, onRemove }: {
   )
 }
 
+
+// ── TX DETAIL ROW (expandable in history) ────────────────────
+function TxDetailRow({ txId, total, onReprint }: { txId: string; total: number; onReprint: (data: any) => void }) {
+  const [items, setItems] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    db.transaction_items.where('transaction_id').equals(txId).toArray().then(its => {
+      setItems(its)
+      setLoading(false)
+    })
+  }, [txId])
+
+  return (
+    <div className="bg-gray-50 border-t border-gray-100 px-4 py-3 space-y-1.5">
+      {loading ? (
+        <p className="text-xs text-gray-400">Memuat...</p>
+      ) : items.length === 0 ? (
+        <p className="text-xs text-gray-400">Tidak ada detail item</p>
+      ) : (
+        <>
+          {items.map(item => (
+            <div key={item.id} className="flex justify-between text-xs">
+              <span className="text-gray-700">{item.product_name} <span className="text-gray-400">×{(item.qty_eceran||0)+(item.qty_dus||0)}</span></span>
+              <span className="text-gray-700">{formatRupiah(item.subtotal||0)}</span>
+            </div>
+          ))}
+          <div className="flex justify-between text-xs font-semibold text-gray-900 pt-1 border-t border-gray-200">
+            <span>Total</span>
+            <span>{formatRupiah(total)}</span>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── RECEIPT / STRUK ──────────────────────────────────────────
 function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; printMode?: string; autoPrint?: boolean; onClose: () => void }) {
   const orderTypeLabel: Record<string, string> = {
@@ -858,38 +903,76 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
   }
 
   function handlePrint() {
-    const printContent = document.getElementById('receipt-content')
-    if (!printContent) return
-    
-    // Buat iframe tersembunyi untuk print (tidak diblock browser)
+    // Generate HTML receipt yang bersih untuk thermal printer
+    const W = 42  // lebar karakter 58mm printer
+    const line = '-'.repeat(W)
+    const center = (s: string) => s.padStart(Math.floor((W + s.length) / 2)).padEnd(W)
+    const row = (l: string, r: string) => {
+      const space = W - l.length - r.length
+      return l + (space > 0 ? ' '.repeat(space) : ' ') + r
+    }
+
+    const orderTypeLabel: Record<string,string> = { dine_in:'Dine In', take_away:'Take Away', online:'Online' }
+    const payLabel: Record<string,string> = { cash:'Tunai', qris:'QRIS', transfer:'Transfer', gopay:'GoPay', grab:'GrabPay', shopeefood:'ShopeePay' }
+    const now2 = new Date()
+    const dateStr = now2.toLocaleDateString('id-ID', { day:'numeric', month:'long', year:'numeric' })
+    const timeStr = now2.toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12:false })
+
+    let lines: string[] = []
+    lines.push(center(data.storeName))
+    lines.push(center('Coco Puff'))
+    lines.push(line)
+    lines.push(row(dateStr, timeStr))
+    lines.push(row('No.', data.receiptNo))
+    lines.push(row('Tipe', orderTypeLabel[data.orderType] || data.orderType))
+    if (data.onlineOrderNo) lines.push(row('Order', '#' + data.onlineOrderNo))
+    lines.push(line)
+
+    for (const item of data.items) {
+      lines.push(item.name.substring(0, W))
+      const qtyPrice = `  ${item.qty} x ${formatRupiah(item.price)}`
+      lines.push(row(qtyPrice, formatRupiah(item.subtotal)))
+      if (item.promoDiscount > 0) lines.push(row('  Promo', '-' + formatRupiah(item.promoDiscount)))
+    }
+    for (const p of data.pakets) {
+      lines.push(p.name.substring(0, W))
+      lines.push(row('', formatRupiah(p.subtotal)))
+    }
+
+    lines.push(line)
+    lines.push(row('Subtotal', formatRupiah(data.rawSubtotal)))
+    if (data.rawDiscount > 0) lines.push(row('Diskon', '-' + formatRupiah(data.rawDiscount)))
+    if (data.ppnAmount > 0) lines.push(row('PPN ' + data.ppnPct + '%', '+' + formatRupiah(data.ppnAmount)))
+    lines.push(line)
+    lines.push(row('TOTAL', formatRupiah(data.grandTotal)))
+    lines.push(row('Bayar (' + (payLabel[data.payMethod] || data.payMethod) + ')', formatRupiah(data.cashPaid)))
+    if (data.payMethod === 'cash' && data.change > 0) lines.push(row('Kembali', formatRupiah(data.change)))
+    lines.push(line)
+    lines.push(center('Terima kasih!'))
+    lines.push(center('Coco Puff - ' + data.storeName))
+    lines.push('')
+    lines.push('')
+    lines.push('')
+
+    const html = `<html><head><title>Struk</title><style>
+      * { margin: 0; padding: 0; }
+      body { font-family: 'Courier New', Courier, monospace; font-size: 11px; line-height: 1.4; padding: 4px; white-space: pre; }
+      @page { margin: 2mm; size: 58mm auto; }
+      @media print { body { width: 54mm; } }
+    </style></head><body>${lines.join('
+')}</body></html>`
+
     const iframe = document.createElement('iframe')
-    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;'
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;'
     document.body.appendChild(iframe)
-    
     const iframeDoc = iframe.contentWindow?.document
     if (!iframeDoc) { document.body.removeChild(iframe); return }
-    
-    iframeDoc.open()
-    iframeDoc.write(`
-      <html><head><title>Struk ${data.receiptNo}</title>
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Courier New', monospace; font-size: 12px; width: 280px; padding: 8px; }
-        @media print { body { width: 100%; } }
-      </style></head><body>
-      ${printContent.innerHTML}
-      </body></html>
-    `)
-    iframeDoc.close()
-    
+    iframeDoc.open(); iframeDoc.write(html); iframeDoc.close()
     setTimeout(() => {
-      try {
-        iframe.contentWindow?.focus()
-        iframe.contentWindow?.print()
-      } finally {
-        setTimeout(() => document.body.removeChild(iframe), 1000)
-      }
-    }, 250)
+      iframe.contentWindow?.focus()
+      iframe.contentWindow?.print()
+      setTimeout(() => { try { document.body.removeChild(iframe) } catch {} }, 2000)
+    }, 300)
   }
 
   function handleRawBT() {

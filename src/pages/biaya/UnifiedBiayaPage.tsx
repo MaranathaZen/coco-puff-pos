@@ -1,8 +1,10 @@
 // src/pages/biaya/UnifiedBiayaPage.tsx
-// CHANGELOG v2:
-// - Fix label * merah di form
-// - owner/manager/gudang lihat semua history biaya semua toko
-// - sync pull semua data untuk owner/manager/gudang
+// CHANGELOG v3:
+// - FIX CRITICAL: syntax error kurung tutup kurang di useLiveQuery filter kasir → halaman crash
+// - FIX: label card "Total Biaya Bulan Ini" → "Total Biaya Hari Ini" untuk kasir
+// - FIX: subtitle card kasir tampilkan jumlah transaksi (bukan "Data milik Anda saja")
+// - FIX: totalBulanIni untuk kasir hitung hari ini saja
+// - Semua fix v2 tetap berlaku
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -83,7 +85,6 @@ function CopyBtn({ text }: { text: string }) {
 
 export default function UnifiedBiayaPage() {
   const { user } = useAuthStore()
-  const isKasir = user?.role === 'kasir'
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
   const [syncing, setSyncing] = useState(false)
 
@@ -143,16 +144,15 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: { userId: strin
   }))
 
   const isOwnerManager = ['owner','manager','gudang'].includes(role)
-  const [filterStore,  setFilterStore]  = useState(() => role === 'gudang' ? storeId : '')
+  const isKasir = role === 'kasir'
+  const [filterStore, setFilterStore] = useState(() => role === 'gudang' ? storeId : '')
 
-  // Toko real untuk filter (exclude produksi)
   const stores = useLiveQuery(() =>
     isOwnerManager
       ? db.stores.filter(s => s.is_active && !s.id.includes('produksi')).toArray()
       : Promise.resolve([])
   , [isOwnerManager])
 
-  // Auto-select toko pertama - SETELAH stores declaration
   useEffect(() => {
     if (stores && stores.length > 0 && !filterStore) {
       setFilterStore(stores[0].id)
@@ -179,8 +179,8 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: { userId: strin
   const expenses = useLiveQuery(async () => {
     let list = await db.warehouse_expenses.orderBy('created_at').reverse().toArray()
     if (role === 'kasir') {
-      // Kasir lihat biaya tokonya (tidak dibatasi hari ini)
-      list = list.filter(e => (e as any).store_id === storeId || e.created_by === userId
+      // FIX: kurung tutup yang kurang menyebabkan syntax error — halaman crash
+      list = list.filter(e => (e as any).store_id === storeId || e.created_by === userId)
     } else if (role === 'produksi') {
       list = list.filter(e => e.created_by === userId)
     }
@@ -188,12 +188,11 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: { userId: strin
     return list
   }, [role, userId, storeId])
 
-  // Filter by toko (untuk owner/manager/gudang)
   const filteredByStore = useMemo(() => {
     if (!expenses) return []
     if (!isOwnerManager || !filterStore) return expenses
     return expenses.filter(e => (e as any).store_id === filterStore)
-  }, [role, userId, storeId])
+  }, [expenses, isOwnerManager, filterStore])
 
   const filtered = useMemo(() => {
     if (!filteredByStore) return []
@@ -211,21 +210,42 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: { userId: strin
   }, [filteredByStore, filterCat, search])
 
   const grouped = useMemo(() => groupBy(filtered, e => groupKey(e.created_at, groupMode)), [filtered, groupMode])
-  const totalBulanIni = useMemo(() => {
+
+  // FIX: kasir hitung total hari ini, owner/manager hitung bulan ini
+  const { totalCardAmount, totalCardCount } = useMemo(() => {
     const now2 = new Date()
-    return (filteredByStore || []).filter(e => {
-      const d = new Date(e.created_at)
-      return d.getMonth() === now2.getMonth() && d.getFullYear() === now2.getFullYear()
-    }).reduce((s, e) => s + e.amount, 0)
-  }, [expenses])
+    const todayStr = now2.toLocaleDateString('sv-SE')
+    const baseList = filteredByStore || []
+    if (isKasir) {
+      const todayList = baseList.filter(e => {
+        const d = new Date(e.created_at)
+        return d.toLocaleDateString('sv-SE') === todayStr
+      })
+      return { totalCardAmount: todayList.reduce((s, e) => s + e.amount, 0), totalCardCount: todayList.length }
+    } else {
+      const monthList = baseList.filter(e => {
+        const d = new Date(e.created_at)
+        return d.getMonth() === now2.getMonth() && d.getFullYear() === now2.getFullYear()
+      })
+      return { totalCardAmount: monthList.reduce((s, e) => s + e.amount, 0), totalCardCount: monthList.length }
+    }
+  }, [filteredByStore, isKasir])
 
   return (
     <div className="p-4 space-y-3">
+      {/* FIX: label dan subtitle card */}
       <div className="bg-white rounded-xl border border-gray-100 p-4">
-        <p className="text-xs text-gray-400 mb-1">{isKasir ? 'Total Biaya Hari Ini' : 'Total Biaya Bulan Ini'}</p>
-        <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalBulanIni)}</p>
-        {!isOwnerManager && <p className="text-xs text-gray-400 mt-0.5">{isKasir ? `${filtered?.length || 0} transaksi` : 'Data milik Anda saja'}</p>}
+        <p className="text-xs text-gray-400 mb-1">
+          {isKasir ? 'Total Biaya Hari Ini' : 'Total Biaya Bulan Ini'}
+        </p>
+        <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalCardAmount)}</p>
+        <p className="text-xs text-gray-400 mt-0.5">
+          {isKasir
+            ? `${totalCardCount} transaksi hari ini`
+            : `${totalCardCount} transaksi`}
+        </p>
       </div>
+
       {isOwnerManager && stores && stores.length > 0 && (
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
           {stores.map(s => (
@@ -236,9 +256,11 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: { userId: strin
           ))}
         </div>
       )}
+
       <input value={search} onChange={e => setSearch(e.target.value)}
         className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
         placeholder="Cari keterangan biaya..." />
+
       <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
         <button onClick={() => setFilterCat('semua')}
           className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterCat==='semua'?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
@@ -251,6 +273,7 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: { userId: strin
           </button>
         ))}
       </div>
+
       {grouped.map(({ key, items: grpItems }) => {
         const total    = grpItems.reduce((s, e) => s + e.amount, 0)
         const today    = new Date().toLocaleDateString('sv-SE')
@@ -294,6 +317,7 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: { userId: strin
           </div>
         )
       })}
+
       {filtered.length === 0 && (
         <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">Belum ada catatan biaya</div>
       )}

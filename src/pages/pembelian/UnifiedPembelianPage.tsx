@@ -1,8 +1,11 @@
 // src/pages/pembelian/UnifiedPembelianPage.tsx
-// CHANGELOG v2:
-// - owner/manager/gudang: filter toko + lihat semua history pembelian
-// - kasir: hanya pembelian toko sendiri (read-only)
-// - auto expand hari ini
+// CHANGELOG v3:
+// - FIX: label card "Total Pembelian Bulan Ini" → "Total Pembelian Hari Ini" untuk kasir
+// - FIX: subtitle card kasir tampilkan jumlah transaksi (bukan "Data toko ini saja")
+// - FIX: totalBulanIni untuk kasir hitung hari ini saja
+// - FIX: kasir tidak perlu filter hari ini di useLiveQuery — sudah ditangani di card hitung
+//   (kasir tetap lihat history, tapi card total hanya hari ini)
+// - Semua fix v2 tetap berlaku
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -70,7 +73,6 @@ function CopyBtn({ text }: { text: string }) {
 
 export default function UnifiedPembelianPage() {
   const { user } = useAuthStore()
-  const isKasir = user?.role === 'kasir'
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
   const [syncing, setSyncing] = useState(false)
 
@@ -141,15 +143,14 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   }))
 
   const isOwnerManager = ['owner','manager','gudang'].includes(role)
+  const isKasir = role === 'kasir'
 
-  // Toko real + Gudang (exclude produksi) untuk filter
   const stores = useLiveQuery(() =>
     isOwnerManager
       ? db.stores.filter(s => s.is_active && !s.id.includes('produksi')).toArray()
       : Promise.resolve([])
   , [isOwnerManager])
 
-  // Auto-select toko pertama - HARUS setelah stores declaration
   useEffect(() => {
     if (stores && stores.length > 0 && !filterStore) {
       setFilterStore(stores[0].id)
@@ -175,9 +176,10 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
 
   const purchases = useLiveQuery(async () => {
     let p = await db.purchases.orderBy('created_at').reverse().toArray()
+    // FIX: kasir lihat semua pembelian toko (tidak dibatasi hari ini di query)
+    // filter hari ini hanya untuk card total, history tetap tampil semua
     if (role === 'kasir') {
-      const today = new Date().toLocaleDateString('sv-SE')  // YYYY-MM-DD local time
-      p = p.filter(x => ((x as any).store_id === storeId || x.created_by === userId) && x.created_at.startsWith(today))
+      p = p.filter(x => (x as any).store_id === storeId || x.created_by === userId)
     }
     const pi   = await db.purchase_items.toArray()
     const mats = await db.materials.toArray()
@@ -197,7 +199,6 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   const filtered = useMemo(() => {
     if (!purchases) return []
     let list = purchases
-    // Filter by toko
     if (isOwnerManager && filterStore) {
       list = list.filter(p => (p as any).storeId === filterStore)
     }
@@ -213,23 +214,41 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
 
   const grouped = useMemo(() => groupBy(filtered, p => groupKey(p.created_at, groupMode)), [filtered, groupMode])
 
-  const totalBulanIni = useMemo(() => {
+  // FIX: kasir hitung total hari ini, owner/manager hitung bulan ini
+  const { totalCardAmount, totalCardCount } = useMemo(() => {
     const now2 = new Date()
-    return (filtered || []).filter(p => {
-      const d = new Date(p.created_at)
-      return d.getMonth() === now2.getMonth() && d.getFullYear() === now2.getFullYear()
-    }).reduce((s, p) => s + p.total_amount, 0)
-  }, [filtered])
+    const todayStr = now2.toLocaleDateString('sv-SE')
+    const baseList = filtered || []
+    if (isKasir) {
+      const todayList = baseList.filter(p => {
+        const d = new Date(p.created_at)
+        return d.toLocaleDateString('sv-SE') === todayStr
+      })
+      return { totalCardAmount: todayList.reduce((s, p) => s + p.total_amount, 0), totalCardCount: todayList.length }
+    } else {
+      const monthList = baseList.filter(p => {
+        const d = new Date(p.created_at)
+        return d.getMonth() === now2.getMonth() && d.getFullYear() === now2.getFullYear()
+      })
+      return { totalCardAmount: monthList.reduce((s, p) => s + p.total_amount, 0), totalCardCount: monthList.length }
+    }
+  }, [filtered, isKasir])
 
   return (
     <div className="p-4 space-y-3">
+      {/* FIX: label dan subtitle card */}
       <div className="bg-white rounded-xl border border-gray-100 p-4">
-        <p className="text-xs text-gray-400 mb-1">{isKasir ? 'Total Pembelian Hari Ini' : 'Total Pembelian Bulan Ini'}</p>
-        <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalBulanIni)}</p>
-        {!isOwnerManager && <p className="text-xs text-gray-400 mt-0.5">{isKasir ? `${filtered?.length || 0} transaksi` : 'Data toko ini saja'}</p>}
+        <p className="text-xs text-gray-400 mb-1">
+          {isKasir ? 'Total Pembelian Hari Ini' : 'Total Pembelian Bulan Ini'}
+        </p>
+        <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalCardAmount)}</p>
+        <p className="text-xs text-gray-400 mt-0.5">
+          {isKasir
+            ? `${totalCardCount} transaksi hari ini`
+            : `${totalCardCount} transaksi`}
+        </p>
       </div>
 
-      {/* Filter toko — hanya untuk owner/manager/gudang */}
       {isOwnerManager && stores && stores.length > 0 && (
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
           {stores.map(s => (
@@ -411,13 +430,9 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
         <div>
           <Label>Input Sebagai</Label>
           <select className="input" value={inputAsStore} onChange={e => setInputAsStore(e.target.value)}>
-            {allStores
-              .filter(s => !s.id.includes('produksi'))
-              .map(s => (
-                <option key={s.id} value={s.id}>
-                  {s.name.replace(' Malang','').replace(' Bali','')}
-                </option>
-              ))}
+            {allStores.filter(s => !s.id.includes('produksi')).map(s => (
+              <option key={s.id} value={s.id}>{s.name.replace(' Malang','').replace(' Bali','')}</option>
+            ))}
           </select>
         </div>
       )}

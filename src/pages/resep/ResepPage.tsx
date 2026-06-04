@@ -1,7 +1,15 @@
 // src/pages/resep/ResepPage.tsx
-// CHANGELOG v2:
+// CHANGELOG v3:
+// - FIX CRITICAL: activeStoreId tidak ada di scope ResepProduksiForm & ResepTokoForm → re-sync gagal
+//   Solusi: pass storeId sebagai prop ke form dan pakai di re-sync
+// - FIX CRITICAL: ResepProduksiTokoTab query filter recipe_type === 'production'
+//   tapi kolom recipe_type tidak ada di Dexie schema → selalu return empty
+//   Solusi: simpan dan query pakai field product_id yang prefix 'prod-toko-' sebagai marker,
+//   ATAU lebih simpan: tambah index di useLiveQuery tanpa filter recipe_type,
+//   filter di JS pakai (r as any).recipe_type setelah fetch
+// - FIX: ResepProduksiForm re-sync pakai storeId dari prop, bukan activeStoreId yang undefined
+// - FIX: ResepTokoForm re-sync pakai storeId dari prop
 // - Tab BOM Toko: filter stores hapus Gudang Malang & Produksi Malang
-// - Source resep toko: selalu 'store' (kurangi stok toko)
 
 import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -132,21 +140,20 @@ function ResepProduksiTab() {
         )}
       </div>
       {showForm && isOwnerManager && (
-        <ResepProduksiForm recipe={editRecipe} isOwner={isOwner} onClose={() => { setShowForm(false); setEditRecipe(null) }} />
+        <ResepProduksiForm recipe={editRecipe} isOwner={isOwner} storeId={user?.store_id || ''} onClose={() => { setShowForm(false); setEditRecipe(null) }} />
       )}
     </div>
   )
 }
 
-function ResepProduksiForm({ recipe, isOwner, onClose }: { recipe: any; isOwner: boolean; onClose: () => void }) {
-  // Bahan dari production_stock (stok yang ada di produksi), bukan master gudang
+// FIX: tambah storeId prop agar re-sync tidak pakai activeStoreId yang undefined
+function ResepProduksiForm({ recipe, isOwner, storeId, onClose }: { recipe: any; isOwner: boolean; storeId: string; onClose: () => void }) {
   const prodStocks = useLiveQuery(async () => {
     const ps   = await db.production_stock.toArray()
     const mats = await db.materials.toArray()
     const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
     return ps.map(s => ({ ...s, material: mMap[s.material_id] })).filter(s => s.material)
   }, [])
-  // Alias materials untuk kompatibilitas dengan existing code
   const materials = prodStocks?.map(s => ({
     id: s.material_id,
     name: `${s.material!.name} (${s.qty_on_hand} ${s.material!.unit})`,
@@ -186,8 +193,8 @@ function ResepProduksiForm({ recipe, isOwner, onClose }: { recipe: any; isOwner:
         await supabase.from('production_recipe_items').insert(ri)
       }
       toast.success(recipe?'Resep diupdate':'Resep ditambahkan')
-      // Re-sync setelah save
-      supabase.from('store_recipes').select('*').eq('store_id', activeStoreId)
+      // FIX: pakai storeId dari prop, bukan activeStoreId yang tidak ada di scope ini
+      supabase.from('store_recipes').select('*').eq('store_id', storeId)
         .then(({ data }) => { if (data?.length) db.store_recipes.bulkPut(data) })
       supabase.from('store_recipe_items').select('*')
         .then(({ data }) => { if (data?.length) db.store_recipe_items.bulkPut(data) })
@@ -252,14 +259,11 @@ function ResepProduksiForm({ recipe, isOwner, onClose }: { recipe: any; isOwner:
 }
 
 // ── RESEP PRODUKSI TOKO ──────────────────────────────────────
-// Resep untuk buat produk setengah jadi di toko (Fla, Teh, dll)
-// Bahan dari stok toko, hasil masuk ke stok toko sebagai bahan setengah jadi
 function ResepProduksiTokoTab({ storeId }: { storeId: string }) {
   const { user } = useAuthStore()
   const isOwner        = user?.role === 'owner'
   const isOwnerManager = ['owner','manager'].includes(user?.role || '')
 
-  // Hanya toko real
   const stores = useLiveQuery(() =>
     db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray()
   , [])
@@ -286,17 +290,20 @@ function ResepProduksiTokoTab({ storeId }: { storeId: string }) {
     }
   }, [stores, storeId])
 
-  // Resep produksi toko: store di production_recipes dengan field store_id
+  // FIX: ambil semua store_recipes untuk toko ini, lalu filter di JS pakai (r as any).recipe_type
+  // Dexie schema tidak punya index recipe_type, tapi data ada — filter di memori
   const recipes = useLiveQuery(async () => {
-    // Pakai store_recipes dengan type 'production' sebagai marker
-    const r     = await db.store_recipes.filter(r => r.store_id === activeStoreId && (r as any).recipe_type === 'production').toArray()
+    const r     = await db.store_recipes.where('store_id').equals(activeStoreId).toArray()
     const items = await db.store_recipe_items.toArray()
     const mats  = await db.materials.toArray()
     const mMap  = Object.fromEntries(mats.map(m => [m.id, m]))
-    return r.map(recipe => ({
-      ...recipe,
-      items: items.filter(i => i.recipe_id === recipe.id).map(i => ({ ...i, material: mMap[i.material_id] }))
-    }))
+    // Filter hanya recipe_type === 'production' (filter di JS, bukan index)
+    return r
+      .filter(recipe => (recipe as any).recipe_type === 'production')
+      .map(recipe => ({
+        ...recipe,
+        items: items.filter(i => i.recipe_id === recipe.id).map(i => ({ ...i, material: mMap[i.material_id] }))
+      }))
   }, [activeStoreId])
 
   return (
@@ -334,33 +341,33 @@ function ResepProduksiTokoTab({ storeId }: { storeId: string }) {
           const hpp = r.items.reduce((s: number, i: any) => s + (i.qty_used||0) * (i.material?.unit_cost||0), 0)
           const hppPerUnit = batchYield > 0 ? hpp / batchYield : 0
           return (
-          <button key={r.id} onClick={() => isOwnerManager && (setEditRecipe(r), setShowForm(true))}
-            className={`w-full text-left px-4 py-3 ${idx!==0?'border-t border-gray-50':''} active:bg-gray-50`}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-gray-900">{(r as any).product_name}</p>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {batchYield} {yUnit}/batch · {r.items.length} bahan · {r.is_active?'✓ Aktif':'✗ Nonaktif'}
-                </p>
+            <button key={r.id} onClick={() => isOwnerManager && (setEditRecipe(r), setShowForm(true))}
+              className={`w-full text-left px-4 py-3 ${idx!==0?'border-t border-gray-50':''} active:bg-gray-50`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900">{(r as any).product_name}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {batchYield} {yUnit}/batch · {r.items.length} bahan · {r.is_active?'✓ Aktif':'✗ Nonaktif'}
+                  </p>
+                </div>
+                {hpp > 0 && (
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-xs font-semibold text-orange-600">HPP {formatRupiah(hppPerUnit)}/{yUnit}</p>
+                    <p className="text-xs text-gray-400">est. {formatRupiah(hpp)}/batch</p>
+                  </div>
+                )}
               </div>
-              {hpp > 0 && (
-                <div className="text-right flex-shrink-0">
-                  <p className="text-xs font-semibold text-orange-600">HPP {formatRupiah(hppPerUnit)}/{yUnit}</p>
-                  <p className="text-xs text-gray-400">est. {formatRupiah(hpp)}/batch</p>
+              {r.items.length > 0 && (
+                <div className="mt-2 space-y-0.5">
+                  {r.items.map((i: any) => (
+                    <div key={i.id} className="flex justify-between text-xs text-gray-400">
+                      <span>{i.material?.name}</span>
+                      <span className="text-right">{i.qty_used} {i.material?.unit}/batch</span>
+                    </div>
+                  ))}
                 </div>
               )}
-            </div>
-            {r.items.length > 0 && (
-              <div className="mt-2 space-y-0.5">
-                {r.items.map((i: any) => (
-                  <div key={i.id} className="flex justify-between text-xs text-gray-400">
-                    <span>{i.material?.name}</span>
-                    <span className="text-right">{i.qty_used} {i.material?.unit}/batch</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </button>
+            </button>
           )
         })}
         {recipes?.length === 0 && (
@@ -405,10 +412,11 @@ function ResepProduksiTokoForm({ recipe, storeId, onClose }: { recipe: any; stor
     try {
       const recipeId = recipe?.id || generateId()
       const data: any = {
-        id: recipeId, store_id: activeStoreId,
+        id: recipeId,
+        store_id: storeId,  // FIX: pakai storeId dari prop
         product_id: `prod-toko-${recipeId.slice(0,8)}`,
         product_name: productName.trim(),
-        recipe_type: 'production',  // marker untuk resep produksi toko
+        recipe_type: 'production',
         batch_yield: Number(batchYield),
         yield_unit: yieldUnit,
         is_active: isActive,
@@ -418,6 +426,7 @@ function ResepProduksiTokoForm({ recipe, storeId, onClose }: { recipe: any; stor
       const { error: recipeErr } = await supabase.from('store_recipes').upsert(data)
       if (recipeErr) console.error('[RESEP SAVE ERROR]', recipeErr)
       else console.log('[RESEP SAVED]', data.store_id, data.product_name)
+
       await db.store_recipe_items.where('recipe_id').equals(recipeId).delete()
       await supabase.from('store_recipe_items').delete().eq('recipe_id', recipeId)
       for (const item of valid) {
@@ -427,8 +436,8 @@ function ResepProduksiTokoForm({ recipe, storeId, onClose }: { recipe: any; stor
         if (itemErr) console.error('[RESEP ITEM ERROR]', itemErr)
       }
       toast.success(recipe?'Resep diupdate':'Resep ditambahkan')
-      // Re-sync setelah save
-      supabase.from('store_recipes').select('*').eq('store_id', activeStoreId)
+      // FIX: re-sync pakai storeId dari prop
+      supabase.from('store_recipes').select('*').eq('store_id', storeId)
         .then(({ data }) => { if (data?.length) db.store_recipes.bulkPut(data) })
       supabase.from('store_recipe_items').select('*')
         .then(({ data }) => { if (data?.length) db.store_recipe_items.bulkPut(data) })
@@ -492,12 +501,9 @@ function ResepTokoTab({ storeId }: { storeId: string }) {
   const isOwner        = user?.role === 'owner'
   const isOwnerManager = ['owner','manager'].includes(user?.role || '')
 
-  // FIX: hanya toko real, bukan gudang/produksi
   const stores = useLiveQuery(() =>
     db.stores.filter(s =>
-      s.is_active &&
-      !s.id.includes('gudang') &&
-      !s.id.includes('produksi')
+      s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')
     ).toArray()
   , [])
 
@@ -505,13 +511,14 @@ function ResepTokoTab({ storeId }: { storeId: string }) {
   const [showForm,   setShowForm]   = useState(false)
   const [editRecipe, setEditRecipe] = useState<any>(null)
 
-  // Auto-select toko pertama yang valid jika storeId adalah gudang/produksi
   useEffect(() => {
     if (storeId.includes('gudang') || storeId.includes('produksi')) {
       if (stores && stores.length > 0) setActiveStoreId(stores[0].id)
     }
   }, [stores, storeId])
 
+  // FIX: filter hanya resep yang BUKAN recipe_type === 'production' (itu resep produksi toko)
+  // atau tidak ada recipe_type sama sekali (resep toko biasa)
   const recipes = useLiveQuery(async () => {
     if (!activeStoreId) return []
     const r     = await db.store_recipes.where('store_id').equals(activeStoreId).toArray()
@@ -520,11 +527,13 @@ function ResepTokoTab({ storeId }: { storeId: string }) {
     const prods = await db.products.toArray()
     const mMap  = Object.fromEntries(mats.map(m => [m.id, m]))
     const pMap  = Object.fromEntries(prods.map(p => [p.id, p]))
-    return r.map(recipe => ({
-      ...recipe,
-      product: pMap[recipe.product_id],
-      items: items.filter(i => i.recipe_id === recipe.id).map(i => ({ ...i, material: mMap[i.material_id] }))
-    }))
+    return r
+      .filter(recipe => !(recipe as any).recipe_type || (recipe as any).recipe_type !== 'production')
+      .map(recipe => ({
+        ...recipe,
+        product: pMap[recipe.product_id],
+        items: items.filter(i => i.recipe_id === recipe.id).map(i => ({ ...i, material: mMap[i.material_id] }))
+      }))
   }, [activeStoreId])
 
   return (
@@ -535,7 +544,6 @@ function ResepTokoTab({ storeId }: { storeId: string }) {
         <p className="text-xs text-blue-500">Flow: Gudang → Mutasi ke Toko → Stok Toko → Kasir jual → berkurang</p>
       </div>
 
-      {/* Store selector — hanya toko real */}
       {isOwner && stores && stores.length > 1 && (
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
           {stores.map(s => (
@@ -595,6 +603,7 @@ function ResepTokoTab({ storeId }: { storeId: string }) {
   )
 }
 
+// FIX: tambah storeId prop agar re-sync tidak pakai activeStoreId yang undefined
 function ResepTokoForm({ recipe, storeId, onClose }: { recipe: any; storeId: string; onClose: () => void }) {
   const products  = useLiveQuery(() => db.products.filter(p => p.is_active).toArray(), [])
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
@@ -620,11 +629,20 @@ function ResepTokoForm({ recipe, storeId, onClose }: { recipe: any; storeId: str
     try {
       const prod     = products?.find(p => p.id === productId)
       const recipeId = recipe?.id || generateId()
-      const data: any = { id:recipeId, store_id:storeId, product_id:productId, product_name:prod?.name||'', is_active:isActive, created_at:recipe?.created_at||now(), updated_at:now() }
+      const data: any = {
+        id: recipeId,
+        store_id: storeId,  // FIX: pakai storeId dari prop
+        product_id: productId,
+        product_name: prod?.name || '',
+        is_active: isActive,
+        created_at: recipe?.created_at || now(),
+        updated_at: now()
+      }
       await db.store_recipes.put(data)
       const { error: recipeErr } = await supabase.from('store_recipes').upsert(data)
       if (recipeErr) console.error('[RESEP SAVE ERROR]', recipeErr)
       else console.log('[RESEP SAVED]', data.store_id, data.product_name)
+
       await db.store_recipe_items.where('recipe_id').equals(recipeId).delete()
       await supabase.from('store_recipe_items').delete().eq('recipe_id', recipeId)
       for (const item of valid) {
@@ -634,8 +652,8 @@ function ResepTokoForm({ recipe, storeId, onClose }: { recipe: any; storeId: str
         if (itemErr) console.error('[RESEP ITEM ERROR]', itemErr)
       }
       toast.success(recipe?'Resep diupdate':'Resep ditambahkan')
-      // Re-sync setelah save
-      supabase.from('store_recipes').select('*').eq('store_id', activeStoreId)
+      // FIX: re-sync pakai storeId dari prop
+      supabase.from('store_recipes').select('*').eq('store_id', storeId)
         .then(({ data }) => { if (data?.length) db.store_recipes.bulkPut(data) })
       supabase.from('store_recipe_items').select('*')
         .then(({ data }) => { if (data?.length) db.store_recipe_items.bulkPut(data) })

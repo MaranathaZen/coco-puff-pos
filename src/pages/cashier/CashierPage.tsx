@@ -95,6 +95,7 @@ export default function CashierPage() {
   const [showPrinterModal, setShowPrinterModal] = useState(false)
   const [printerConfigTs, setPrinterConfigTs] = useState(0)  // timestamp untuk reload
   const [expandedTxId, setExpandedTxId] = useState<string|null>(null)
+  const [payFilter,    setPayFilter]    = useState<string>('semua')
   const [voidTx,        setVoidTx]        = useState<Transaction | null>(null)
   const [voidReason,    setVoidReason]    = useState('')
   const [isVoiding,     setIsVoiding]     = useState(false)
@@ -255,10 +256,22 @@ export default function CashierPage() {
     if (!voidTx || !voidReason.trim()) return toast.error('Alasan void wajib diisi')
     setIsVoiding(true)
     try {
-      const updated = { ...voidTx, status: 'voided' as const, void_reason: voidReason.trim(), voided_by: user!.id, voided_at: now() }
+      const isOwnerMgr = ['owner','manager'].includes(user?.role || '')
+      const newStatus = isOwnerMgr ? 'voided' : 'void_requested'
+      const updated: any = { 
+        ...voidTx, status: newStatus, void_reason: voidReason.trim(), 
+        voided_by: user!.id, voided_at: now() 
+      }
       await db.transactions.put(updated)
-      await supabase.from('transactions').update({ status: 'voided', void_reason: voidReason.trim(), voided_by: user!.id, voided_at: updated.voided_at }).eq('id', voidTx.id)
-      toast.success(`Transaksi ${voidTx.receipt_no} di-void`)
+      await supabase.from('transactions').update({ 
+        status: newStatus, void_reason: voidReason.trim(), 
+        voided_by: user!.id, voided_at: updated.voided_at 
+      }).eq('id', voidTx.id)
+      if (isOwnerMgr) {
+        toast.success(`Transaksi ${voidTx.receipt_no} di-void`)
+      } else {
+        toast.success(`Request void ${voidTx.receipt_no} dikirim ke owner`)
+      }
       setShowVoidModal(false); setVoidTx(null); setVoidReason('')
     } catch { toast.error('Gagal void transaksi') }
     finally { setIsVoiding(false) }
@@ -509,8 +522,17 @@ export default function CashierPage() {
       {mainTab === 'riwayat' && (
         <div className="flex-1 overflow-auto bg-gray-50 p-4 space-y-3">
           <p className="text-xs text-gray-400">Transaksi hari ini</p>
+          {/* Filter pembayaran */}
+          <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+            {(['semua','cash','qris','transfer','gopay','grab','shopeefood'] as const).map(pm => (
+              <button key={pm} onClick={() => setPayFilter(pm)}
+                className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-medium ${payFilter===pm?'bg-gray-900 text-white':'bg-white text-gray-500 border border-gray-200'}`}>
+                {pm==='semua'?'Semua':pm==='cash'?'Tunai':pm==='qris'?'QRIS':pm==='transfer'?'Transfer':pm==='gopay'?'GoPay':pm==='grab'?'GrabPay':'ShopeePay'}
+              </button>
+            ))}
+          </div>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            {transactions?.map((tx, idx) => (
+            {(payFilter === 'semua' ? transactions : transactions?.filter(tx => tx.payment_method === payFilter))?.map((tx, idx) => (
               <div key={tx.id} className={`${idx!==0?'border-t border-gray-50':''} ${(tx as any).status==='voided'?'opacity-50':''}`}>
               <div onClick={() => setExpandedTxId(expandedTxId===String(tx.id) ? null : String(tx.id))}
                 className="px-4 py-3 cursor-pointer active:bg-gray-50">
@@ -521,6 +543,7 @@ export default function CashierPage() {
                       <button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(tx.receipt_no); toast.success('ID disalin') }}
                         className="text-[10px] text-blue-400 px-1 py-0.5 rounded border border-blue-200">copy</button>
                       {(tx as any).status==='voided' && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-medium">VOID</span>}
+                      {(tx as any).status==='void_requested' && <span className="text-xs bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded-full font-medium">⏳ Req.Void</span>}
                       {/* Payment method badge */}
                       <span className={cn('text-xs px-1.5 py-0.5 rounded-full font-medium',
                         tx.payment_method==='cash'       && 'bg-gray-100 text-gray-700',

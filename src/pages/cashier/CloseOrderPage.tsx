@@ -231,6 +231,23 @@ export default function CloseOrderPage() {
                           </div>
                         </div>
                         <div className="px-4 py-3 border-b border-gray-100">
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Void Transaksi</p>
+                          {(report.voided_count||0) > 0 ? (
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-xs">
+                                <span className="text-gray-500">Jumlah Void</span>
+                                <span className="font-medium text-red-600">{report.voided_count} transaksi</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                <span className="text-gray-500">Total Void</span>
+                                <span className="font-medium text-red-600">-{formatRupiah(report.voided_amount||0)}</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-gray-400">Tidak ada void</p>
+                          )}
+                        </div>
+                        <div className="px-4 py-3 border-b border-gray-100">
                           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Laporan Kas</p>
                           <div className="space-y-1">
                             {[

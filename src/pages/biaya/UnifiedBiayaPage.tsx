@@ -252,8 +252,9 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: { userId: strin
       </div>
       {grouped.map(({ key, items: grpItems }) => {
         const total    = grpItems.reduce((s, e) => s + e.amount, 0)
-        const today    = new Date().toISOString().slice(0,10)
-        const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : key === today
+        const today    = new Date().toLocaleDateString('sv-SE')
+        const isFirst  = grouped.indexOf(grouped.find(g => g.key === key)!) === 0
+        const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : (key === today || isFirst)
         return (
           <div key={key}>
             <button onClick={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))}

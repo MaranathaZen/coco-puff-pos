@@ -138,7 +138,7 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
   const [filterStore, setFilterStore] = useState('')
   const [search,      setSearch]      = useState('')
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
-    const today = new Date().toISOString().slice(0,10)
+    const today = new Date().toLocaleDateString('sv-SE')
     return { [today]: true }
   })
 
@@ -267,8 +267,10 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
 
       {grouped.map(({ key, items: grpItems }) => {
         const total    = grpItems.reduce((s, m) => s + m.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0)
-        const today    = new Date().toISOString().slice(0,10)
-        const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : key === today
+        const today    = new Date().toLocaleDateString('sv-SE')
+        // Auto-expand hari ini (WIB) dan grup pertama jika belum ada yang di-expand
+        const isFirst  = grouped.indexOf(grouped.find(g => g.key === key)!) === 0
+        const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : (key === today || key.slice(0,10) === today || isFirst)
         return (
           <div key={key}>
             <button onClick={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))}

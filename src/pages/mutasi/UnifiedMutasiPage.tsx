@@ -223,15 +223,20 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
 
   const totalNilaiMutasi = useMemo(() => {
     const now2 = new Date()
+    const todayStr = now2.toLocaleDateString('sv-SE')
     return (mutations || [])
-      .filter(m => { const d = new Date(m.created_at); return d.getMonth() === now2.getMonth() && d.getFullYear() === now2.getFullYear() })
+      .filter(m => {
+        const d = new Date(m.created_at)
+        if (!isOwnerManager) return d.toLocaleDateString('sv-SE') === todayStr
+        return d.getMonth() === now2.getMonth() && d.getFullYear() === now2.getFullYear()
+      })
       .reduce((s, m) => s + m.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0)
   }, [mutations])
 
   return (
     <div className="p-4 space-y-3">
       <div className="bg-white rounded-xl border border-gray-100 p-4">
-        <p className="text-xs text-gray-400 mb-1">Total Nilai Mutasi Bulan Ini</p>
+        <p className="text-xs text-gray-400 mb-1">{isOwnerManager ? 'Total Nilai Mutasi Bulan Ini' : 'Total Mutasi Hari Ini'}</p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalNilaiMutasi)}</p>
         <p className="text-xs text-gray-400 mt-0.5">{mutations?.length || 0} transaksi</p>
       </div>

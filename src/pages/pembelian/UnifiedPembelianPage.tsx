@@ -70,6 +70,7 @@ function CopyBtn({ text }: { text: string }) {
 
 export default function UnifiedPembelianPage() {
   const { user } = useAuthStore()
+  const isKasir = user?.role === 'kasir'
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
   const [syncing, setSyncing] = useState(false)
 
@@ -223,7 +224,7 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   return (
     <div className="p-4 space-y-3">
       <div className="bg-white rounded-xl border border-gray-100 p-4">
-        <p className="text-xs text-gray-400 mb-1">Total Pembelian Bulan Ini</p>
+        <p className="text-xs text-gray-400 mb-1">{isKasir ? 'Total Pembelian Hari Ini' : 'Total Pembelian Bulan Ini'}</p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalBulanIni)}</p>
         {!isOwnerManager && <p className="text-xs text-gray-400 mt-0.5">Data toko ini saja</p>}
       </div>
@@ -246,8 +247,9 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
 
       {grouped.map(({ key, items: grpItems }) => {
         const total    = grpItems.reduce((s, p) => s + p.total_amount, 0)
-        const today    = new Date().toISOString().slice(0,10)
-        const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : key === today
+        const today    = new Date().toLocaleDateString('sv-SE')
+        const isFirst  = grouped.indexOf(grouped.find(g => g.key === key)!) === 0
+        const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : (key === today || isFirst)
         return (
           <div key={key}>
             <button onClick={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))}

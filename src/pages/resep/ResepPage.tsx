@@ -397,7 +397,7 @@ function ResepProduksiTokoForm({ recipe, storeId, onClose }: { recipe: any; stor
     try {
       const recipeId = recipe?.id || generateId()
       const data: any = {
-        id: recipeId, store_id: storeId,
+        id: recipeId, store_id: activeStoreId,
         product_id: `prod-toko-${recipeId.slice(0,8)}`,
         product_name: productName.trim(),
         recipe_type: 'production',  // marker untuk resep produksi toko
@@ -407,13 +407,16 @@ function ResepProduksiTokoForm({ recipe, storeId, onClose }: { recipe: any; stor
         created_at: recipe?.created_at || now(), updated_at: now()
       }
       await db.store_recipes.put(data)
-      await supabase.from('store_recipes').upsert(data)
+      const { error: recipeErr } = await supabase.from('store_recipes').upsert(data)
+      if (recipeErr) console.error('[RESEP SAVE ERROR]', recipeErr)
+      else console.log('[RESEP SAVED]', data.store_id, data.product_name)
       await db.store_recipe_items.where('recipe_id').equals(recipeId).delete()
       await supabase.from('store_recipe_items').delete().eq('recipe_id', recipeId)
       for (const item of valid) {
         const ri: any = { id:item.id||generateId(), recipe_id:recipeId, material_id:item.material_id, qty_used:Number(item.qty), source:'store' }
-        await db.store_recipe_items.add(ri)
-        await supabase.from('store_recipe_items').insert(ri)
+        await db.store_recipe_items.put(ri)
+        const { error: itemErr } = await supabase.from('store_recipe_items').upsert(ri)
+        if (itemErr) console.error('[RESEP ITEM ERROR]', itemErr)
       }
       toast.success(recipe?'Resep diupdate':'Resep ditambahkan'); onClose()
     } catch (e) { toast.error('Gagal menyimpan'); console.error(e) }
@@ -605,13 +608,16 @@ function ResepTokoForm({ recipe, storeId, onClose }: { recipe: any; storeId: str
       const recipeId = recipe?.id || generateId()
       const data: any = { id:recipeId, store_id:storeId, product_id:productId, product_name:prod?.name||'', is_active:isActive, created_at:recipe?.created_at||now(), updated_at:now() }
       await db.store_recipes.put(data)
-      await supabase.from('store_recipes').upsert(data)
+      const { error: recipeErr } = await supabase.from('store_recipes').upsert(data)
+      if (recipeErr) console.error('[RESEP SAVE ERROR]', recipeErr)
+      else console.log('[RESEP SAVED]', data.store_id, data.product_name)
       await db.store_recipe_items.where('recipe_id').equals(recipeId).delete()
       await supabase.from('store_recipe_items').delete().eq('recipe_id', recipeId)
       for (const item of valid) {
         const ri: any = { id:item.id||generateId(), recipe_id:recipeId, material_id:item.material_id, qty_used:Number(item.qty), source:'store' }
-        await db.store_recipe_items.add(ri)
-        await supabase.from('store_recipe_items').insert(ri)
+        await db.store_recipe_items.put(ri)
+        const { error: itemErr } = await supabase.from('store_recipe_items').upsert(ri)
+        if (itemErr) console.error('[RESEP ITEM ERROR]', itemErr)
       }
       toast.success(recipe?'Resep diupdate':'Resep ditambahkan'); onClose()
     } catch (e) { toast.error('Gagal menyimpan'); console.error(e) }

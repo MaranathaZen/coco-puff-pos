@@ -729,6 +729,16 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
     db.store_recipes.filter(r => r.store_id === activeStoreId && (r as any).recipe_type === 'production').toArray()
   , [activeStoreId])
 
+  // Auto-sync store_recipes saat tab dibuka
+  useEffect(() => {
+    if (!activeStoreId) return
+    supabase.from('store_recipes')
+      .select('*').eq('store_id', activeStoreId).eq('recipe_type', 'production')
+      .then(({ data }) => {
+        if (data?.length) db.store_recipes.bulkPut(data)
+      })
+  }, [activeStoreId])
+
   // Log produksi toko (simpan di production_logs dengan store_id)
   const logs = useLiveQuery(async () => {
     const today = new Date().toISOString().slice(0, 10)

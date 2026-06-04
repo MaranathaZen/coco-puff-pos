@@ -314,18 +314,29 @@ function ResepProduksiTokoTab({ storeId }: { storeId: string }) {
           <button key={r.id} onClick={() => isOwnerManager && (setEditRecipe(r), setShowForm(true))}
             className={`w-full text-left px-4 py-3 ${idx!==0?'border-t border-gray-50':''} active:bg-gray-50`}>
             <div className="flex items-center justify-between">
-              <div>
+              <div className="flex-1">
                 <p className="text-sm font-semibold text-gray-900">{(r as any).product_name}</p>
-                <p className="text-xs text-gray-400">{r.items.length} bahan · {r.is_active?'✓ Aktif':'✗ Nonaktif'}</p>
+                <p className="text-xs text-gray-400">
+                  {r.items.length} bahan · {(r as any).batch_yield || 1} {(r as any).yield_unit || 'pcs'}/batch · {r.is_active?'✓ Aktif':'✗ Nonaktif'}
+                </p>
+                {(() => {
+                  const hpp = r.items.reduce((s: number, i: any) => s + (i.qty_used||0) * (i.material?.unit_cost||0), 0)
+                  return hpp > 0 ? (
+                    <p className="text-xs text-orange-600 mt-0.5">
+                      HPP est. {formatRupiah(hpp)}/batch
+                      {(r as any).batch_yield > 0 ? ` · ${formatRupiah(hpp / (r as any).batch_yield)}/${(r as any).yield_unit||'pcs'}` : ''}
+                    </p>
+                  ) : null
+                })()}
               </div>
               <ChevronRight size={14} className="text-gray-300" />
             </div>
             {r.items.length > 0 && (
               <div className="mt-1.5 space-y-0.5">
-                {r.items.map(i => (
+                {r.items.map((i: any) => (
                   <div key={i.id} className="flex justify-between text-xs text-gray-400">
                     <span>{i.material?.name}</span>
-                    <span>{i.qty_used} {i.material?.unit}</span>
+                    <span>{i.qty_used} {i.material?.unit}/batch</span>
                   </div>
                 ))}
               </div>

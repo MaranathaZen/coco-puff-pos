@@ -248,7 +248,7 @@ export default function CashierPage() {
   const grandTotal    = afterDiscount + ppnAmount
   const totalQtyPilih = paketPilihan.reduce((s, p) => s + p.qty, 0)
   const change        = payMethod === 'cash' ? Number(cashPaid) - grandTotal : 0
-  const canVoid       = user?.role === 'owner' || user?.role === 'manager'
+  const canVoid       = ['owner','manager','kasir'].includes(user?.role || '')
   const isOnlineOrder = orderType === 'online'
 
   async function handleVoid() {
@@ -417,7 +417,7 @@ export default function CashierPage() {
             window.location.href = `rawbt:${encodeURIComponent(txt)}`
           } else {
             // Browser print via iframe
-            const W2 = 32
+            const W2 = 28
             const lineStr = '-'.repeat(W2)
             const rowFn = (l: string, r: string) => { const sp = W2-l.length-r.length; return l+(sp>0?' '.repeat(sp):' ')+r }
             const lines2: string[] = []
@@ -517,17 +517,22 @@ export default function CashierPage() {
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <p className="text-sm font-medium text-gray-900 font-mono">{tx.receipt_no}</p>
-                      {(tx as any).status==='voided' && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">VOID</span>}
-                      {(tx as any).order_type && (
-                        <span className={cn('text-xs px-1.5 py-0.5 rounded-full font-medium',
-                          (tx as any).order_type==='dine_in'   && 'bg-orange-100 text-orange-700',
-                          (tx as any).order_type==='take_away' && 'bg-blue-100 text-blue-700',
-                          (tx as any).order_type==='online'    && 'bg-green-100 text-green-700',
-                        )}>
-                          {(tx as any).order_type==='dine_in'?'Dine In':(tx as any).order_type==='take_away'?'Take Away':'Online'}
-                        </span>
-                      )}
+                      <p className="text-sm font-medium text-gray-900 font-mono text-xs">{tx.receipt_no}</p>
+                      <button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(tx.receipt_no); toast.success('ID disalin') }}
+                        className="text-[10px] text-blue-400 px-1 py-0.5 rounded border border-blue-200">copy</button>
+                      {(tx as any).status==='voided' && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-medium">VOID</span>}
+                      {/* Payment method badge */}
+                      <span className={cn('text-xs px-1.5 py-0.5 rounded-full font-medium',
+                        tx.payment_method==='cash'       && 'bg-gray-100 text-gray-700',
+                        tx.payment_method==='qris'       && 'bg-blue-100 text-blue-700',
+                        tx.payment_method==='transfer'   && 'bg-purple-100 text-purple-700',
+                        tx.payment_method==='gopay'      && 'bg-green-100 text-green-700',
+                        tx.payment_method==='grab'       && 'bg-emerald-100 text-emerald-700',
+                        tx.payment_method==='shopeefood' && 'bg-orange-100 text-orange-700',
+                      )}>
+                        {tx.payment_method==='cash'?'Tunai':tx.payment_method==='qris'?'QRIS':tx.payment_method==='transfer'?'Transfer':tx.payment_method==='gopay'?'GoPay':tx.payment_method==='grab'?'GrabPay':'ShopeePay'}
+                      </span>
+                      {/* Online platform badge */}
                       {(tx as any).order_source && ['gofood','grabfood','shopeefood'].includes((tx as any).order_source) && (
                         <span className={cn('text-xs px-1.5 py-0.5 rounded-full font-medium',
                           (tx as any).order_source==='gofood'&&'bg-green-100 text-green-700',
@@ -1097,7 +1102,7 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
 
   function handlePrint() {
     // Generate HTML receipt yang bersih untuk thermal printer
-    const W = 32  // lebar karakter 58mm printer
+    const W = 28  // lebar karakter 58mm printer
     const line = '-'.repeat(W)
     const center = (s: string) => s.padStart(Math.floor((W + s.length) / 2)).padEnd(W)
     const row = (l: string, r: string) => {
@@ -1151,8 +1156,8 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
     const html = `<html><head><title>Struk</title><style>
       * { margin: 0; padding: 0; }
       body { margin: 0; padding: 2px; }
-      pre { font-family: 'Courier New', Courier, monospace; font-size: 9px; line-height: 1.4; white-space: pre; }
-      @page { margin: 1mm; size: 58mm auto; }
+      pre { font-family: 'Courier New', Courier, monospace; font-size: 8px; line-height: 1.3; white-space: pre; }
+      @page { margin: 0mm; size: 58mm auto; }
       @media print { pre { width: 56mm; } }
     </style></head><body><pre>${lines.join('\n')}</pre></body></html>`
 

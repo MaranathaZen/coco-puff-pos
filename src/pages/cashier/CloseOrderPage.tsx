@@ -238,6 +238,7 @@ export default function CloseOrderPage() {
                               {l:'Saldo Awal',      v:report.saldo_awal},
                               {l:'Saldo Tambahan',  v:report.saldo_tambahan},
                               {l:'Penjualan Tunai', v:report.total_cash},
+                               {l:'Non Tunai',     v:(report.total_penjualan||0)-(report.total_cash||0)},
                               {l:'Total Setor',     v:report.total_setor,    neg:true},
                               {l:'Total Biaya',     v:report.total_biaya,    neg:true},
                               {l:'Saldo Akhir',     v:report.saldo_akhir,    bold:true},

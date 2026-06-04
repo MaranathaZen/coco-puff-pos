@@ -327,7 +327,7 @@ function BiayaForm({ userId, storeId, role, onClose }: { userId: string; storeId
       const data: any = {
         id: generateId(), expense_number: expNumber,
         store_id: activeStoreId, name: name.trim(),
-        amount: Number(amount), expense_date: now().slice(0,10),
+        amount: Number(amount), expense_date: new Date().toLocaleDateString('sv-SE'),
         category, payment_method: payMethod,
         transfer_to: transferTo || undefined,
         due_date:    dueDate    || undefined,

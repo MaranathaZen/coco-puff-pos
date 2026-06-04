@@ -176,8 +176,8 @@ export async function pullFromSupabase(storeId?: string) {
     await replaceTable(db.warehouse_stock,         wstock.data)
     await replaceTable(db.production_stock,        pstock.data)
     await replaceTable(db.finished_goods_stock,    fgstock.data)
-    await replaceTable(db.store_recipes,           storeRecipes.data)
-    await replaceTable(db.store_recipe_items,      storeRecipeItems.data)
+    if (storeRecipes.data?.length) await db.store_recipes.bulkPut(storeRecipes.data)
+    if (storeRecipeItems.data?.length) await db.store_recipe_items.bulkPut(storeRecipeItems.data)
     await replaceTable(db.production_recipe_items, recipeItems.data)
 
     const wMutIds  = new Set((wmuts.data  || []).map((m: any) => m.id))

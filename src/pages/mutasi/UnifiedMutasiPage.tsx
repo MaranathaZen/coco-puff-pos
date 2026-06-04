@@ -238,7 +238,7 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
       <div className="bg-white rounded-xl border border-gray-100 p-4">
         <p className="text-xs text-gray-400 mb-1">{isOwnerManager ? 'Total Nilai Mutasi Bulan Ini' : 'Total Mutasi Hari Ini'}</p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalNilaiMutasi)}</p>
-        <p className="text-xs text-gray-400 mt-0.5">{mutations?.length || 0} transaksi</p>
+        <p className="text-xs text-gray-400 mt-0.5">{isOwnerManager ? `${mutations?.length || 0} transaksi` : `${filtered?.length || 0} transaksi hari ini`}</p>
       </div>
 
       {isOwnerManager && stores && stores.length > 1 && (

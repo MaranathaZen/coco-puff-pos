@@ -226,7 +226,7 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
       <div className="bg-white rounded-xl border border-gray-100 p-4">
         <p className="text-xs text-gray-400 mb-1">{isKasir ? 'Total Pembelian Hari Ini' : 'Total Pembelian Bulan Ini'}</p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalBulanIni)}</p>
-        {!isOwnerManager && <p className="text-xs text-gray-400 mt-0.5">Data toko ini saja</p>}
+        {!isOwnerManager && <p className="text-xs text-gray-400 mt-0.5">{isKasir ? `${filtered?.length || 0} transaksi` : 'Data toko ini saja'}</p>}
       </div>
 
       {/* Filter toko — hanya untuk owner/manager/gudang */}

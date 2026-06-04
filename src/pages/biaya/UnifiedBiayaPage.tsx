@@ -224,7 +224,7 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: { userId: strin
       <div className="bg-white rounded-xl border border-gray-100 p-4">
         <p className="text-xs text-gray-400 mb-1">{isKasir ? 'Total Biaya Hari Ini' : 'Total Biaya Bulan Ini'}</p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalBulanIni)}</p>
-        {!isOwnerManager && <p className="text-xs text-gray-400 mt-0.5">Data milik Anda saja</p>}
+        {!isOwnerManager && <p className="text-xs text-gray-400 mt-0.5">{isKasir ? `${filtered?.length || 0} transaksi` : 'Data milik Anda saja'}</p>}
       </div>
       {isOwnerManager && stores && stores.length > 0 && (
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">

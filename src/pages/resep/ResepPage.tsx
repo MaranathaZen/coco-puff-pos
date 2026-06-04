@@ -185,7 +185,13 @@ function ResepProduksiForm({ recipe, isOwner, onClose }: { recipe: any; isOwner:
         await db.production_recipe_items.add(ri)
         await supabase.from('production_recipe_items').insert(ri)
       }
-      toast.success(recipe?'Resep diupdate':'Resep ditambahkan'); onClose()
+      toast.success(recipe?'Resep diupdate':'Resep ditambahkan')
+      // Re-sync setelah save
+      supabase.from('store_recipes').select('*').eq('store_id', activeStoreId)
+        .then(({ data }) => { if (data?.length) db.store_recipes.bulkPut(data) })
+      supabase.from('store_recipe_items').select('*')
+        .then(({ data }) => { if (data?.length) db.store_recipe_items.bulkPut(data) })
+      onClose()
     } catch { toast.error('Gagal menyimpan') }
     finally { setSaving(false) }
   }
@@ -322,39 +328,41 @@ function ResepProduksiTokoTab({ storeId }: { storeId: string }) {
       )}
 
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        {recipes?.map((r, idx) => (
+        {recipes?.map((r, idx) => {
+          const batchYield = (r as any).batch_yield || 1
+          const yUnit = (r as any).yield_unit || 'pcs'
+          const hpp = r.items.reduce((s: number, i: any) => s + (i.qty_used||0) * (i.material?.unit_cost||0), 0)
+          const hppPerUnit = batchYield > 0 ? hpp / batchYield : 0
+          return (
           <button key={r.id} onClick={() => isOwnerManager && (setEditRecipe(r), setShowForm(true))}
             className={`w-full text-left px-4 py-3 ${idx!==0?'border-t border-gray-50':''} active:bg-gray-50`}>
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-900">{(r as any).product_name}</p>
-                <p className="text-xs text-gray-400">
-                  {r.items.length} bahan · {(r as any).batch_yield || 1} {(r as any).yield_unit || 'pcs'}/batch · {r.is_active?'✓ Aktif':'✗ Nonaktif'}
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {batchYield} {yUnit}/batch · {r.items.length} bahan · {r.is_active?'✓ Aktif':'✗ Nonaktif'}
                 </p>
-                {(() => {
-                  const hpp = r.items.reduce((s: number, i: any) => s + (i.qty_used||0) * (i.material?.unit_cost||0), 0)
-                  return hpp > 0 ? (
-                    <p className="text-xs text-orange-600 mt-0.5">
-                      HPP est. {formatRupiah(hpp)}/batch
-                      {(r as any).batch_yield > 0 ? ` · ${formatRupiah(hpp / (r as any).batch_yield)}/${(r as any).yield_unit||'pcs'}` : ''}
-                    </p>
-                  ) : null
-                })()}
               </div>
-              <ChevronRight size={14} className="text-gray-300" />
+              {hpp > 0 && (
+                <div className="text-right flex-shrink-0">
+                  <p className="text-xs font-semibold text-orange-600">HPP {formatRupiah(hppPerUnit)}/{yUnit}</p>
+                  <p className="text-xs text-gray-400">est. {formatRupiah(hpp)}/batch</p>
+                </div>
+              )}
             </div>
             {r.items.length > 0 && (
-              <div className="mt-1.5 space-y-0.5">
+              <div className="mt-2 space-y-0.5">
                 {r.items.map((i: any) => (
                   <div key={i.id} className="flex justify-between text-xs text-gray-400">
                     <span>{i.material?.name}</span>
-                    <span>{i.qty_used} {i.material?.unit}/batch</span>
+                    <span className="text-right">{i.qty_used} {i.material?.unit}/batch</span>
                   </div>
                 ))}
               </div>
             )}
           </button>
-        ))}
+          )
+        })}
         {recipes?.length === 0 && (
           <div className="py-12 text-center">
             <FlaskConical size={28} className="text-gray-200 mx-auto mb-2" />
@@ -418,7 +426,13 @@ function ResepProduksiTokoForm({ recipe, storeId, onClose }: { recipe: any; stor
         const { error: itemErr } = await supabase.from('store_recipe_items').upsert(ri)
         if (itemErr) console.error('[RESEP ITEM ERROR]', itemErr)
       }
-      toast.success(recipe?'Resep diupdate':'Resep ditambahkan'); onClose()
+      toast.success(recipe?'Resep diupdate':'Resep ditambahkan')
+      // Re-sync setelah save
+      supabase.from('store_recipes').select('*').eq('store_id', activeStoreId)
+        .then(({ data }) => { if (data?.length) db.store_recipes.bulkPut(data) })
+      supabase.from('store_recipe_items').select('*')
+        .then(({ data }) => { if (data?.length) db.store_recipe_items.bulkPut(data) })
+      onClose()
     } catch (e) { toast.error('Gagal menyimpan'); console.error(e) }
     finally { setSaving(false) }
   }
@@ -619,7 +633,13 @@ function ResepTokoForm({ recipe, storeId, onClose }: { recipe: any; storeId: str
         const { error: itemErr } = await supabase.from('store_recipe_items').upsert(ri)
         if (itemErr) console.error('[RESEP ITEM ERROR]', itemErr)
       }
-      toast.success(recipe?'Resep diupdate':'Resep ditambahkan'); onClose()
+      toast.success(recipe?'Resep diupdate':'Resep ditambahkan')
+      // Re-sync setelah save
+      supabase.from('store_recipes').select('*').eq('store_id', activeStoreId)
+        .then(({ data }) => { if (data?.length) db.store_recipes.bulkPut(data) })
+      supabase.from('store_recipe_items').select('*')
+        .then(({ data }) => { if (data?.length) db.store_recipe_items.bulkPut(data) })
+      onClose()
     } catch (e) { toast.error('Gagal menyimpan'); console.error(e) }
     finally { setSaving(false) }
   }

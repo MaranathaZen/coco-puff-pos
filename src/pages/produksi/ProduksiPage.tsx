@@ -733,7 +733,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
   useEffect(() => {
     if (!activeStoreId) return
     Promise.all([
-      supabase.from('store_recipes').select('*').eq('store_id', activeStoreId).eq('recipe_type', 'production'),
+      supabase.from('store_recipes').select('*').eq('store_id', activeStoreId),
       supabase.from('store_recipe_items').select('*'),
     ]).then(([{ data: recs }, { data: items }]) => {
       if (recs?.length) db.store_recipes.bulkPut(recs)

@@ -234,24 +234,28 @@ export default function CashierPage() {
     return txs.map(t => ({ ...t, items: txItems.filter(i => i.transaction_id === t.id) }))
   }, [mainTab, STORE_ID])
 
-  // Pull void_requested dari Supabase untuk owner/manager
+  // Pull void_requested + semua transaksi hari ini dari Supabase untuk owner/manager
   useEffect(() => {
     if (!isOwnerManager || !STORE_ID) return
     const today = new Date().toLocaleDateString('sv-SE')
-    supabase.from('transactions')
-      .select('*')
-      .eq('store_id', STORE_ID)
-      .eq('status', 'void_requested')
-      .gte('created_at', today + 'T00:00:00')
-      .then(({ data }) => {
-        if (data?.length) {
-          db.transactions.bulkPut(data)
-          // Also pull items
-          const ids = data.map((t: any) => t.id)
-          supabase.from('transaction_items').select('*').in('transaction_id', ids)
-            .then(({ data: items }) => { if (items?.length) db.transaction_items.bulkPut(items) })
-        }
-      })
+    async function pullVoidRequests() {
+      // Pull semua transaksi hari ini (termasuk void_requested)
+      const { data } = await supabase.from('transactions')
+        .select('*')
+        .eq('store_id', STORE_ID)
+        .gte('created_at', today + 'T00:00:00+07:00')
+      if (data?.length) {
+        await db.transactions.bulkPut(data)
+        const ids = data.map((t: any) => t.id)
+        const { data: items } = await supabase.from('transaction_items')
+          .select('*').in('transaction_id', ids)
+        if (items?.length) await db.transaction_items.bulkPut(items)
+      }
+    }
+    pullVoidRequests()
+    // Auto-refresh setiap 30 detik
+    const interval = setInterval(pullVoidRequests, 30000)
+    return () => clearInterval(interval)
   }, [isOwnerManager, STORE_ID, mainTab])
 
   const totalPakets   = cartPakets.reduce((s, p) => s + p.subtotal, 0)

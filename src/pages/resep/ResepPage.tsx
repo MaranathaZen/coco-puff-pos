@@ -262,6 +262,18 @@ function ResepProduksiTokoTab({ storeId }: { storeId: string }) {
   const [showForm,   setShowForm]   = useState(false)
   const [editRecipe, setEditRecipe] = useState<any>(null)
 
+  // Auto-sync dari Supabase
+  useEffect(() => {
+    if (!activeStoreId) return
+    Promise.all([
+      supabase.from('store_recipes').select('*').eq('store_id', activeStoreId).eq('recipe_type', 'production'),
+      supabase.from('store_recipe_items').select('*'),
+    ]).then(([{ data: recs }, { data: items }]) => {
+      if (recs?.length) db.store_recipes.bulkPut(recs)
+      if (items?.length) db.store_recipe_items.bulkPut(items)
+    })
+  }, [activeStoreId])
+
   useEffect(() => {
     if (storeId.includes('gudang') || storeId.includes('produksi')) {
       if (stores && stores.length > 0) setActiveStoreId(stores[0].id)

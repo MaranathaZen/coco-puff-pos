@@ -226,12 +226,33 @@ export default function CashierPage() {
   }, [STORE_ID])
 
   const transactions = useLiveQuery(async () => {
-    const today   = new Date().toISOString().slice(0, 10)
+    const today   = new Date().toLocaleDateString('sv-SE')
     const txs     = await db.transactions.where('store_id').equals(STORE_ID)
-      .filter(t => t.created_at.startsWith(today)).reverse().sortBy('created_at')
+      .filter(t => t.created_at.startsWith(today) || t.created_at.slice(0,10) === today)
+      .reverse().sortBy('created_at')
     const txItems = await db.transaction_items.toArray()
     return txs.map(t => ({ ...t, items: txItems.filter(i => i.transaction_id === t.id) }))
   }, [mainTab, STORE_ID])
+
+  // Pull void_requested dari Supabase untuk owner/manager
+  useEffect(() => {
+    if (!isOwnerManager || !STORE_ID) return
+    const today = new Date().toLocaleDateString('sv-SE')
+    supabase.from('transactions')
+      .select('*')
+      .eq('store_id', STORE_ID)
+      .eq('status', 'void_requested')
+      .gte('created_at', today + 'T00:00:00')
+      .then(({ data }) => {
+        if (data?.length) {
+          db.transactions.bulkPut(data)
+          // Also pull items
+          const ids = data.map((t: any) => t.id)
+          supabase.from('transaction_items').select('*').in('transaction_id', ids)
+            .then(({ data: items }) => { if (items?.length) db.transaction_items.bulkPut(items) })
+        }
+      })
+  }, [isOwnerManager, STORE_ID, mainTab])
 
   const totalPakets   = cartPakets.reduce((s, p) => s + p.subtotal, 0)
   const rawSubtotal   = subtotal() + totalPakets
@@ -576,6 +597,30 @@ export default function CashierPage() {
                       <button onClick={()=>{setVoidTx(tx as any);setVoidReason('');setShowVoidModal(true)}}
                         className="text-xs text-red-400 border border-red-200 px-2 py-0.5 rounded-lg">Void</button>
                     )}
+                     {isOwnerManager && (tx as any).status==='void_requested' && (
+                       <div className="flex gap-1">
+                         <button onClick={async e => {
+                           e.stopPropagation()
+                           const txItems = await db.transaction_items.where('transaction_id').equals(tx.id).toArray()
+                           // Kembalikan stok
+                           for (const item of txItems) {
+                             const stk = await db.stock.where('store_id').equals(STORE_ID).and(s => s.product_id === item.product_id).first()
+                             if (stk) await db.stock.update(stk.id, { qty: (stk.qty||0) + (item.qty_eceran||0) })
+                           }
+                           const upd: any = { ...tx, status: 'voided' }
+                           await db.transactions.put(upd)
+                           await supabase.from('transactions').update({ status: 'voided' }).eq('id', tx.id)
+                           toast.success('Void disetujui, stok dikembalikan')
+                         }} className="text-xs text-white bg-red-500 px-2 py-0.5 rounded-lg">✓ Setuju</button>
+                         <button onClick={async e => {
+                           e.stopPropagation()
+                           const upd: any = { ...tx, status: 'completed' }
+                           await db.transactions.put(upd)
+                           await supabase.from('transactions').update({ status: 'completed' }).eq('id', tx.id)
+                           toast.success('Request void ditolak')
+                         }} className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-lg">✗ Tolak</button>
+                       </div>
+                     )}
                   </div>
                 </div>
               </div>

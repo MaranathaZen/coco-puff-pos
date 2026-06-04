@@ -178,8 +178,13 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
     let m = await db.warehouse_mutations.orderBy('created_at').reverse().toArray()
     if (role === 'produksi') m = m.filter(x => x.created_by === userId)
     else if (role === 'kasir') {
-      const today = new Date().toLocaleDateString('sv-SE')  // YYYY-MM-DD local time
-      m = m.filter(x => (x.destination_id === storeId || x.created_by === userId) && x.created_at.startsWith(today))
+      const today = new Date().toLocaleDateString('sv-SE')
+      m = m.filter(x => {
+        const matchStore = x.destination_id === storeId || x.created_by === userId || (x as any).acting_store_id === storeId
+        // Cek tanggal dengan timezone lokal
+        const txDate = new Date(x.created_at).toLocaleDateString('sv-SE')
+        return matchStore && txDate === today
+      })
     }
     else if (role === 'gudang') m = m.filter(x => x.created_by === userId || x.destination_id === storeId)
     const mi    = await db.warehouse_mutation_items.toArray()

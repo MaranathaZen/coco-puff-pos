@@ -678,21 +678,24 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
   // FIX CRITICAL: sync store_recipes + items setiap kali activeStoreId berubah
   // dan saat komponen pertama kali mount
   async function syncStoreRecipes(sid: string) {
-    setIsSyncing(true)
-    try {
-      const [{ data: recs }, { data: items }] = await Promise.all([
-        supabase.from('store_recipes').select('*').eq('store_id', sid),
-        supabase.from('store_recipe_items').select('*'),
-      ])
-      if (recs?.length) await db.store_recipes.bulkPut(recs)
-      if (items?.length) await db.store_recipe_items.bulkPut(items)
-      console.log('[ProduksiToko] sync done:', recs?.length, 'resep,', items?.length, 'items')
-    } catch (e) {
-      console.warn('[ProduksiToko] sync gagal:', e)
-    } finally {
-      setIsSyncing(false)
-    }
+  setIsSyncing(true)
+  try {
+    const [{ data: recs }, { data: items }, { data: logMats }] = await Promise.all([
+      supabase.from('store_recipes').select('*').eq('store_id', sid),
+      supabase.from('store_recipe_items').select('*'),
+      // FIX: sync production_log_materials untuk toko ini
+      supabase.from('production_log_materials').select('*'),
+    ])
+    if (recs?.length)    await db.store_recipes.bulkPut(recs)
+    if (items?.length)   await db.store_recipe_items.bulkPut(items)
+    if (logMats?.length) await db.production_log_materials.bulkPut(logMats)
+    console.log('[ProduksiToko] sync done:', recs?.length, 'resep,', items?.length, 'items,', logMats?.length, 'log materials')
+  } catch (e) {
+    console.warn('[ProduksiToko] sync gagal:', e)
+  } finally {
+    setIsSyncing(false)
   }
+}
 
   useEffect(() => {
     if (!activeStoreId) return

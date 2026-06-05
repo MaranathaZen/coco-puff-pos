@@ -352,7 +352,9 @@ function StokProduksiView({ isOwnerManager, setHeaderActions }: { isOwnerManager
         </div>
         <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
           {filteredBahan.map((s, idx) => (
-            <div key={s.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+            <div key={s.id}
+  onClick={() => { if (isOwnerManager) { setEditPs(s); setShowPsForm(true) } }}
+  className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${isOwnerManager ? 'cursor-pointer active:bg-gray-50' : ''}`}>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900">{s.material?.name}</p>
                 <p className="text-xs text-gray-400">{formatKategori(s.material?.category)} · Avg {formatRupiah(s.displayAvgCost)}/{s.material?.unit}</p>
@@ -633,7 +635,9 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: { storeI
 
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {filtered.map((s, idx) => (
-          <div key={s.id} className={`flex items-center px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
+          <div key={s.id}
+            onClick={() => { if (isOwnerManager) { setEditStock(s); } }}
+              className={`flex items-center px-4 py-3 ${idx!==0?'border-t border-gray-50':''} ${isOwnerManager?'cursor-pointer active:bg-gray-50':''}`}>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900">{s.displayName}</p>
               <div className="flex items-center gap-1.5 mt-0.5">

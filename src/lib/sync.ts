@@ -202,21 +202,31 @@ export async function pullFromSupabase(storeId?: string) {
     // ── FIX: Pull transaksi semua toko ─────────────────────────
     // Tanpa filter store_id supaya login gudang/owner bisa lihat semua toko
     const today = new Date().toLocaleDateString('sv-SE')
-    const [txs, txItems, shifts] = await Promise.all([
+    const [txs, shifts] = await Promise.all([
       supabase.from('transactions').select('*')
         .gte('created_at', today + 'T00:00:00+07:00')
         .order('created_at', { ascending: false }).limit(500),
-      supabase.from('transaction_items').select('*')
-        .order('created_at', { ascending: false }).limit(2000),
       supabase.from('shifts').select('*')
         .order('opened_at', { ascending: false }).limit(300),
     ])
     const txIds = new Set((txs.data || []).map((t: any) => t.id))
-    if (txs.data?.length)     await db.transactions.bulkPut(txs.data)
-    if (txItems.data?.length) await db.transaction_items.bulkPut(
-      (txItems.data || []).filter((i: any) => txIds.has(i.transaction_id))
-    )
-    if (shifts.data?.length)  await db.shifts.bulkPut(shifts.data)
+
+    // Pull transaction_items hanya untuk transaksi hari ini
+    let txItemsData: any[] = []
+    if (txIds.size > 0) {
+      const txIdArr = Array.from(txIds) as string[]
+      // Supabase in() max 100 items per query — batch jika perlu
+      for (let i = 0; i < txIdArr.length; i += 100) {
+        const batch = txIdArr.slice(i, i + 100)
+        const { data } = await supabase.from('transaction_items')
+          .select('*').in('transaction_id', batch)
+        if (data?.length) txItemsData = [...txItemsData, ...data]
+      }
+    }
+
+    if (txs.data?.length)      await db.transactions.bulkPut(txs.data)
+    if (txItemsData.length)    await db.transaction_items.bulkPut(txItemsData)
+    if (shifts.data?.length)   await db.shifts.bulkPut(shifts.data)
 
     console.log(`[SYNC] Pull selesai — toko: ${sid}`)
   } catch (e) {

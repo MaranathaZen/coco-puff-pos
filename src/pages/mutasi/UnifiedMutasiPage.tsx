@@ -151,12 +151,11 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
   , [])
 
   // Auto-select gudang sebagai default filter (hanya untuk owner/manager)
+  // FIX: default ke 'semua' bukan gudang, supaya semua mutasi langsung terlihat
   useEffect(() => {
     if (!isOwnerManager) return
     if (stores && stores.length > 0 && !filterStore) {
-      const gudang = stores.find(s => s.id.includes('gudang'))
-      if (gudang) setFilterStore(gudang.id)
-      else setFilterStore(stores[0].id)
+      setFilterStore('semua')
     }
   }, [stores, isOwnerManager])
 
@@ -181,16 +180,13 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
     let m = await db.warehouse_mutations.orderBy('created_at').reverse().toArray()
     if (role === 'produksi') m = m.filter(x => x.created_by === userId)
     else if (role === 'kasir') {
-  const today = new Date().toLocaleDateString('sv-SE')
-  m = m.filter(x =>
-    x.created_at.slice(0, 10) === today &&
-    (
-      x.destination_id === storeId ||
-      x.created_by === userId ||
-      (x as any).acting_store_id === storeId
-    )
-  )
-}
+      // FIX: kasir lihat semua mutasi tokonya — tidak difilter oleh filterStore
+      m = m.filter(x =>
+        x.destination_id === storeId ||
+        x.created_by === userId ||
+        (x as any).acting_store_id === storeId
+      )
+    }
     else if (role === 'gudang') m = m.filter(x => x.created_by === userId || x.destination_id === storeId)
     const mi    = await db.warehouse_mutation_items.toArray()
     const mats  = await db.materials.toArray()
@@ -211,11 +207,12 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
     if (!mutations) return []
     let list = mutations
     if (filterType !== 'semua') list = list.filter(m => m.mutation_type === filterType)
-    // FIX: filterStore hanya berlaku untuk owner/manager, bukan kasir
+    // FIX: filterStore untuk owner/manager — match destination ATAU source (acting_store_id)
     if (isOwnerManager && filterStore && filterStore !== 'semua') {
       list = list.filter(m =>
         m.destination_id === filterStore ||
-        (m as any).acting_store_id === filterStore
+        (m as any).acting_store_id === filterStore ||
+        (m as any).created_by_store === filterStore
       )
     }
     if (search) {
@@ -276,6 +273,10 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
 
       {isOwnerManager && stores && stores.length > 1 && (
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+          <button onClick={() => setFilterStore('semua')}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore==='semua'?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
+            Semua
+          </button>
           {[
             ...((stores||[]).filter(s => s.id.includes('gudang'))),
             ...((stores||[]).filter(s => s.id.includes('produksi'))),
@@ -559,8 +560,11 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
         created_by: userId, acting_store_id: effectiveStoreId,
         created_at: now(), confirmed_at: now(), confirmed_by: userId,
       }
-      await db.warehouse_mutations.add(mut)
-      await supabase.from('warehouse_mutations').insert(mut)
+      // FIX: pakai put (upsert) di Dexie dan upsert di Supabase
+      // supaya retry tidak conflict kalau sebelumnya gagal di tengah jalan
+      await db.warehouse_mutations.put(mut)
+      const { error: mutErr } = await supabase.from('warehouse_mutations').upsert(mut)
+      if (mutErr) { console.error('[MUT INSERT ERROR]', mutErr); throw new Error(mutErr.message) }
 
       for (const item of valid) {
         const snapshotCost = getSnapshotCost(item.material_id)
@@ -568,8 +572,9 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           id: generateId(), mutation_id: mutId, material_id: item.material_id,
           qty: Number(item.qty), unit_cost: snapshotCost,
         }
-        await db.warehouse_mutation_items.add(mi)
-        await supabase.from('warehouse_mutation_items').insert(mi)
+        await db.warehouse_mutation_items.put(mi as any)
+        const { error: miErr } = await supabase.from('warehouse_mutation_items').upsert(mi)
+        if (miErr) console.error('[MUT ITEM ERROR]', miErr)
 
         if (effectiveRole === 'kasir') {
           const ss = await db.stock.filter(s =>

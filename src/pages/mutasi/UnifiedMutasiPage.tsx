@@ -181,13 +181,16 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
     let m = await db.warehouse_mutations.orderBy('created_at').reverse().toArray()
     if (role === 'produksi') m = m.filter(x => x.created_by === userId)
     else if (role === 'kasir') {
-      // FIX: kasir lihat semua mutasi tokonya — tidak difilter oleh filterStore
-      m = m.filter(x =>
-        x.destination_id === storeId ||
-        x.created_by === userId ||
-        (x as any).acting_store_id === storeId
-      )
-    }
+  const today = new Date().toLocaleDateString('sv-SE')
+  m = m.filter(x =>
+    x.created_at.slice(0, 10) === today &&
+    (
+      x.destination_id === storeId ||
+      x.created_by === userId ||
+      (x as any).acting_store_id === storeId
+    )
+  )
+}
     else if (role === 'gudang') m = m.filter(x => x.created_by === userId || x.destination_id === storeId)
     const mi    = await db.warehouse_mutation_items.toArray()
     const mats  = await db.materials.toArray()

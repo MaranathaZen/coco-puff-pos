@@ -179,8 +179,12 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
     // FIX: kasir lihat semua pembelian toko (tidak dibatasi hari ini di query)
     // filter hari ini hanya untuk card total, history tetap tampil semua
     if (role === 'kasir') {
-      p = p.filter(x => (x as any).store_id === storeId || x.created_by === userId)
-    }
+  const today = new Date().toLocaleDateString('sv-SE')
+  p = p.filter(x =>
+    x.created_at.slice(0, 10) === today &&
+    ((x as any).store_id === storeId || x.created_by === userId)
+  )
+}
     const pi   = await db.purchase_items.toArray()
     const mats = await db.materials.toArray()
     const sups = await db.suppliers.toArray()

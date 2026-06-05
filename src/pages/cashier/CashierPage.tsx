@@ -1,14 +1,11 @@
 // src/pages/cashier/CashierPage.tsx
-// CHANGELOG v3:
-// - FIX: deductStockFromRecipes exclude recipe_type === 'production' (resep produksi toko)
-//   Sebelumnya semua store_recipes ikut dicocokkan, termasuk resep produksi toko yang punya
-//   product_id = 'prod-toko-xxx' yang tidak match dengan product_id transaksi
-// - FIX: transactions useLiveQuery kasir filter hari ini di query (bukan hanya di card)
-//   Sebelumnya semua transaksi toko tampil, sekarang hanya hari ini
-// - FIX: Promotion type include 'buy1get1' (sudah ada di kode, fix di types)
-// - FIX: PPN setting load dari db lewat fallback key yang benar
-// - TAMBAH: UI promo manager — kasir bisa lihat semua promo aktif toko
-// - TAMBAH: Diskon manual per item di cart (kasir bisa beri diskon)
+// CHANGELOG v4:
+// - HAPUS: diskon manual per item (kasir tidak kontrol diskon)
+// - HAPUS: tab Promo (tidak perlu, kasir cukup lihat badge di produk)
+// - PPN hanya tampil di modal konfirmasi bayar (bukan di sidebar)
+// - Badge promo tetap ada di tombol produk (sudah ada sebelumnya)
+// - Semua diskon dikontrol owner/manager via menu Promo di Setting
+// - FIX: transactions filter hari ini di query
 
 import { useState, useEffect, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -23,7 +20,6 @@ type OrderType = 'dine_in' | 'take_away' | 'online'
 import {
   ShoppingCart, Plus, Minus, Trash2, X, CheckCircle,
   Package, History, WifiOff, Bike, RefreshCw, UtensilsCrossed, ShoppingBag,
-  Tag, Percent,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -34,7 +30,7 @@ interface CartPaketItem {
   paket: PaketItem; pilihan: { product: Product; qty: number }[]; subtotal: number
 }
 
-type MainTab = 'pos' | 'riwayat' | 'promo'
+type MainTab = 'pos' | 'riwayat'
 type OnlinePlatform = 'gofood' | 'grabfood' | 'shopeefood'
 
 const PLATFORM_PAYMENT: Record<OnlinePlatform, PaymentMethod> = {
@@ -69,12 +65,11 @@ export default function CashierPage() {
   const [selectedStoreId, setSelectedStoreId] = useState(defaultStoreId)
   const STORE_ID = isOwnerManager ? selectedStoreId : defaultStoreId
 
-  const { items, addItem, removeItem, updateQty, clearCart, total, subtotal, totalDiscount } = useCartStore()
+  const { items, addItem, removeItem, updateQty, clearCart, subtotal, totalDiscount } = useCartStore()
 
-  // FIX: PPN — coba dari db.settings dengan beberapa key fallback
+  // PPN dari settings
   const ppnSetting = useLiveQuery(async () => {
     try {
-      // Coba berbagai kemungkinan key
       const keys = ['ppn_percent', 'ppn', 'tax_percent']
       for (const key of keys) {
         const s = await (db as any).settings?.get?.(key)
@@ -115,23 +110,12 @@ export default function CashierPage() {
   const [lastTxData,     setLastTxData]     = useState<any>(null)
   const [showReceipt,    setShowReceipt]    = useState(false)
 
-  // Diskon manual — map product_id → nominal diskon
-  const [manualDiscounts, setManualDiscounts] = useState<Record<string, number>>({})
-  const [showDiscountModal, setShowDiscountModal] = useState(false)
-  const [discountTarget, setDiscountTarget] = useState<{ productId: string; name: string; price: number } | null>(null)
-  const [discountInput, setDiscountInput] = useState('')
-  const [discountType, setDiscountType] = useState<'percent' | 'nominal'>('percent')
-
   const userStoreId = user?.store_id || ''
   const getPrinterConfig = (sid: string) => {
-    try { return JSON.parse(localStorage.getItem(`printer_config_${sid}`) || '{}') }
-    catch { return {} }
+    try { return JSON.parse(localStorage.getItem(`printer_config_${sid}`) || '{}') } catch { return {} }
   }
   const [printerConfig, setPrinterConfig] = useState(() => getPrinterConfig(userStoreId))
-  useEffect(() => {
-    const cfg = getPrinterConfig(STORE_ID || userStoreId)
-    setPrinterConfig(cfg)
-  }, [STORE_ID, userStoreId, printerConfigTs])
+  useEffect(() => { setPrinterConfig(getPrinterConfig(STORE_ID || userStoreId)) }, [STORE_ID, userStoreId, printerConfigTs])
   const getPrintModeNow = () => (getPrinterConfig(STORE_ID || userStoreId).printMode || 'browser')
   const getAutoPrintNow = () => {
     const cfg = getPrinterConfig(STORE_ID || userStoreId)
@@ -197,7 +181,7 @@ export default function CashierPage() {
         const priceRecord = priceMap[p.id]
         let basePrice = p.base_price
         if (priceRecord) {
-          if (orderType === 'dine_in'   && (priceRecord as any).price_dine_in  > 0) basePrice = (priceRecord as any).price_dine_in
+          if (orderType === 'dine_in'    && (priceRecord as any).price_dine_in  > 0) basePrice = (priceRecord as any).price_dine_in
           else if (orderType === 'take_away' && (priceRecord as any).price_take_away > 0) basePrice = (priceRecord as any).price_take_away
           else if (orderType === 'online'    && (priceRecord as any).price_online    > 0) basePrice = (priceRecord as any).price_online
           else if (priceRecord.override_price > 0) basePrice = priceRecord.override_price
@@ -211,7 +195,6 @@ export default function CashierPage() {
           if (promo.promo_type === 'buy1get1') {
             promoBuy1Get1  = true
             promoName      = promo.name || 'Buy 1 Get 1'
-            promoDiscount  = 0
             effectivePrice = basePrice
           } else {
             promoDiscount  = promo.promo_type === 'percent' ? basePrice * promo.value / 100 : promo.value
@@ -223,17 +206,6 @@ export default function CashierPage() {
       })
   }, [selectedCat, STORE_ID, orderType])
 
-  // Semua promo aktif untuk tab Promo
-  const allPromos = useLiveQuery(async () => {
-    const nowStr = new Date().toISOString()
-    const promos = await db.promotions.where('store_id').equals(STORE_ID)
-      .filter(p => p.is_active && p.valid_from <= nowStr && p.valid_until >= nowStr)
-      .toArray()
-    const prods = await db.products.toArray()
-    const pMap = Object.fromEntries(prods.map(p => [p.id, p]))
-    return promos.map(p => ({ ...p, product: pMap[p.product_id] }))
-  }, [STORE_ID])
-
   const [pakets, setPakets] = useState<PaketItem[]>([])
   useLiveQuery(async () => {
     const { data } = await supabase.from('packages').select('*').eq('is_active', true)
@@ -241,14 +213,11 @@ export default function CashierPage() {
     if (data) setPakets(data)
   }, [STORE_ID])
 
-  // FIX: transactions — kasir hanya hari ini (filter di query, bukan hanya di card)
+  // FIX: filter hari ini di query
   const transactions = useLiveQuery(async () => {
     const today = new Date().toLocaleDateString('sv-SE')
-    let txs = await db.transactions.where('store_id').equals(STORE_ID)
-      .filter(t => {
-        const txDate = t.created_at.slice(0, 10)
-        return txDate === today
-      })
+    const txs = await db.transactions.where('store_id').equals(STORE_ID)
+      .filter(t => t.created_at.slice(0, 10) === today)
       .reverse().sortBy('created_at')
     const txItems = await db.transaction_items.toArray()
     return txs.map(t => ({ ...t, items: txItems.filter(i => i.transaction_id === t.id) }))
@@ -264,8 +233,7 @@ export default function CashierPage() {
       if (data?.length) {
         await db.transactions.bulkPut(data)
         const ids = data.map((t: any) => t.id)
-        const { data: txItems } = await supabase.from('transaction_items')
-          .select('*').in('transaction_id', ids)
+        const { data: txItems } = await supabase.from('transaction_items').select('*').in('transaction_id', ids)
         if (txItems?.length) await db.transaction_items.bulkPut(txItems)
       }
     }
@@ -277,23 +245,14 @@ export default function CashierPage() {
   const totalPakets = cartPakets.reduce((s, p) => s + p.subtotal, 0)
   const rawSubtotal = subtotal() + totalPakets
 
-  // Hitung diskon promo (buy1get1 + regular)
+  // Diskon dari promo owner (otomatis, kasir tidak bisa ubah)
   const buy1get1Discount = items.reduce((s, item) => {
     if ((item.product as any).promo_buy1get1 && item.qty >= 2) {
-      const freeQty = Math.floor(item.qty / 2)
-      return s + freeQty * item.unit_price
+      return s + Math.floor(item.qty / 2) * item.unit_price
     }
     return s
   }, 0)
-  const promoDiscount = totalDiscount() + buy1get1Discount
-
-  // Diskon manual total
-  const manualDiscountTotal = items.reduce((s, item) => {
-    const d = manualDiscounts[item.product.id] || 0
-    return s + d * item.qty
-  }, 0)
-
-  const rawDiscount   = promoDiscount + manualDiscountTotal
+  const rawDiscount   = totalDiscount() + buy1get1Discount
   const afterDiscount = rawSubtotal - rawDiscount
   const ppnAmount     = ppnPct > 0 ? Math.round(afterDiscount * ppnPct / 100) : 0
   const grandTotal    = afterDiscount + ppnAmount
@@ -301,26 +260,6 @@ export default function CashierPage() {
   const change        = payMethod === 'cash' ? Number(cashPaid) - grandTotal : 0
   const canVoid       = ['owner','manager','kasir'].includes(user?.role || '')
   const isOnlineOrder = orderType === 'online'
-
-  // Fungsi diskon manual
-  function applyManualDiscount() {
-    if (!discountTarget) return
-    const val = Number(discountInput)
-    if (isNaN(val) || val < 0) return toast.error('Nominal tidak valid')
-    let nominal = val
-    if (discountType === 'percent') {
-      if (val > 100) return toast.error('Persen maksimal 100%')
-      nominal = Math.round(discountTarget.price * val / 100)
-    }
-    if (nominal > discountTarget.price) return toast.error('Diskon melebihi harga')
-    setManualDiscounts(prev => ({ ...prev, [discountTarget.productId]: nominal }))
-    setShowDiscountModal(false)
-    setDiscountInput('')
-    toast.success(`Diskon ${formatRupiah(nominal)} diterapkan`)
-  }
-  function removeManualDiscount(productId: string) {
-    setManualDiscounts(prev => { const n = { ...prev }; delete n[productId]; return n })
-  }
 
   async function handleVoid() {
     if (!voidTx || !voidReason.trim()) return toast.error('Alasan void wajib diisi')
@@ -339,7 +278,6 @@ export default function CashierPage() {
   }
 
   function openPaketModal(paket: PaketItem) { setSelectedPaket(paket); setPaketPilihan([]); setShowPaketModal(true) }
-
   function tambahPilihanRasa(product: Product) {
     const tot = paketPilihan.reduce((s, p) => s + p.qty, 0)
     if (tot >= selectedPaket!.qty_total) { toast.error(`Maksimal ${selectedPaket!.qty_total} pcs`); return }
@@ -362,26 +300,12 @@ export default function CashierPage() {
   }
   function hapusPaketCart(i: number) { setCartPakets(prev => prev.filter((_, idx) => idx !== i)) }
 
-  // FIX: deductStockFromRecipes — exclude recipe_type === 'production' (resep produksi toko)
-  // Resep produksi toko punya product_id = 'prod-toko-xxx' dan tidak match dengan produk menu
   async function deductStockFromRecipes(txItems: any[], storeId: string) {
     try {
-      // FIX: hanya ambil resep TOKO (bukan resep produksi toko)
-      // Recipe produksi toko ditandai dengan recipe_type === 'production' atau product_id prefix 'prod-toko-'
-      const allRecipes  = await db.store_recipes.where('store_id').equals(storeId).filter(r => r.is_active).toArray()
-      // Filter: hanya resep BOM kasir (bukan resep produksi toko)
-      const recipes     = allRecipes.filter(r =>
-        !(r as any).recipe_type || (r as any).recipe_type === 'bom' || (r as any).recipe_type === ''
-        // Exclude yang punya recipe_type === 'production'
-        // Juga exclude yang product_id-nya prefix 'prod-toko-' (marker resep produksi toko)
-        ? !((r as any).recipe_type === 'production' || r.product_id?.startsWith('prod-toko-'))
-        : false
-      )
-      // Sederhanakan: exclude recipe_type === 'production' dan product_id prefix 'prod-toko-'
+      const allRecipes = await db.store_recipes.where('store_id').equals(storeId).filter(r => r.is_active).toArray()
       const bomRecipes = allRecipes.filter(r =>
         (r as any).recipe_type !== 'production' && !r.product_id?.startsWith('prod-toko-')
       )
-
       const recipeItems = await db.store_recipe_items.toArray()
       for (const txItem of txItems) {
         const recipe = bomRecipes.find(r => r.product_id === txItem.product_id)
@@ -391,13 +315,9 @@ export default function CashierPage() {
         if (totalQty <= 0) continue
         for (const ri of riList) {
           const qty = ri.qty_used * totalQty
-          const src = (ri as any).source || 'store'
-          if (src === 'store') {
+          if ((ri as any).source === 'store' || !(ri as any).source) {
             const storeStock = await db.stock.filter(s =>
-              s.store_id === storeId && (
-                s.ingredient_id === ri.material_id ||
-                (s as any).material_id === ri.material_id
-              )
+              s.store_id === storeId && (s.ingredient_id === ri.material_id || (s as any).material_id === ri.material_id)
             ).first()
             if (storeStock) {
               const newQty = Math.max(0, storeStock.qty_on_hand - qty)
@@ -425,8 +345,7 @@ export default function CashierPage() {
         id: txId, store_id: STORE_ID, shift_id: activeShift.id, cashier_id: user!.id, receipt_no: receiptNo,
         subtotal: rawSubtotal, discount: rawDiscount, ppn_amount: ppnAmount, ppn_percent: ppnPct,
         total: grandTotal, payment_method: finalPay, cash_paid: paidAmt, change_given: paidAmt - grandTotal,
-        status: 'completed',
-        order_type:      orderType,
+        status: 'completed', order_type: orderType,
         order_source:    isOnlineOrder ? onlinePlatform : 'pos',
         online_order_no: isOnlineOrder ? onlineOrderNo.trim() : null,
         online_buyer:    isOnlineOrder ? (onlineBuyer.trim() || null) : null,
@@ -436,21 +355,16 @@ export default function CashierPage() {
         const pkg = item.product.auto_package ? calcPackaging(item.qty, item.product.pkg_qty) : { dus: 0, eceran: item.qty }
         let itemPromoDiscount = (item.product as any).promo_discount || 0
         if ((item.product as any).promo_buy1get1 && item.qty >= 2) {
-          const freeQty = Math.floor(item.qty / 2)
-          itemPromoDiscount = freeQty * item.unit_price
+          itemPromoDiscount = Math.floor(item.qty / 2) * item.unit_price
         }
-        // Tambahkan diskon manual
-        const manDisc = (manualDiscounts[item.product.id] || 0) * item.qty
-        const totalItemDiscount = itemPromoDiscount + manDisc
-        const itemSubtotal = item.qty * item.unit_price - totalItemDiscount
+        const itemSubtotal = item.qty * item.unit_price - itemPromoDiscount
         return {
           id: generateId(), transaction_id: txId,
           product_id: item.product.id, product_name: item.product.name,
           qty_eceran: pkg.eceran, qty_dus: pkg.dus,
-          unit_price: item.unit_price, discount: item.discount + (manualDiscounts[item.product.id] || 0),
+          unit_price: item.unit_price, discount: item.discount,
           promo_id: (item.product as any).promo_id || null,
           promo_discount: itemPromoDiscount,
-          manual_discount: manDisc,
           subtotal: Math.max(0, itemSubtotal), item_type: 'unit',
         }
       })
@@ -458,7 +372,7 @@ export default function CashierPage() {
         id: generateId(), transaction_id: txId, product_id: p.product.id,
         product_name: p.product.name, qty_eceran: p.qty, qty_dus: 0,
         unit_price: cp.paket.price / cp.paket.qty_total, discount: 0,
-        promo_id: null, promo_discount: 0, manual_discount: 0,
+        promo_id: null, promo_discount: 0,
         subtotal: (cp.paket.price / cp.paket.qty_total) * p.qty,
         item_type: 'package', package_id: cp.paket.id,
       })))
@@ -477,23 +391,19 @@ export default function CashierPage() {
         orderType, onlinePlatform: isOnlineOrder ? onlinePlatform : null,
         onlineOrderNo: isOnlineOrder ? onlineOrderNo : null,
         items: items.map(i => {
-          const isBuy1Get1 = (i.product as any).promo_buy1get1 && i.qty >= 2
+          const isBuy1Get1   = (i.product as any).promo_buy1get1 && i.qty >= 2
           const b1g1Discount = isBuy1Get1 ? Math.floor(i.qty / 2) * i.unit_price : 0
-          const manDisc = (manualDiscounts[i.product.id] || 0) * i.qty
-          const totalItemDisc = b1g1Discount + (isBuy1Get1 ? 0 : (i.product as any).promo_discount * i.qty) + manDisc
           return {
             name: i.product.name, qty: i.qty, price: i.unit_price,
-            subtotal: i.qty * i.unit_price - totalItemDisc,
+            subtotal: isBuy1Get1 ? i.qty * i.unit_price - b1g1Discount : i.subtotal,
             promoName: (i.product as any).promo_name,
-            promoDiscount: b1g1Discount + (isBuy1Get1 ? 0 : (i.product as any).promo_discount * i.qty),
-            manualDiscount: manDisc,
+            promoDiscount: isBuy1Get1 ? b1g1Discount : ((i.product as any).promo_discount || 0) * i.qty,
           }
         }),
         pakets: cartPakets.map(cp => ({ name: cp.paket.name, subtotal: cp.subtotal })),
       })
 
-      clearCart(); setCartPakets([]); setShowCheckout(false); setCashPaid('')
-      setOnlineOrderNo(''); setOnlineBuyer(''); setManualDiscounts({})
+      clearCart(); setCartPakets([]); setShowCheckout(false); setCashPaid(''); setOnlineOrderNo(''); setOnlineBuyer('')
 
       const autoPrintNow = getAutoPrintNow()
       const printModeNow = getPrintModeNow()
@@ -506,9 +416,7 @@ export default function CashierPage() {
             txt += `${new Date().toLocaleDateString('id-ID')} ${new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}\n`
             txt += line2 + '\n'
             for (const item of txItems) txt += item.product_name.substring(0,W) + '\n'
-            txt += line2 + '\n'
-            txt += 'TOTAL'.padEnd(22) + formatRupiah(grandTotal).padStart(10) + '\n'
-            txt += '\n\n\n'
+            txt += line2 + '\n' + 'TOTAL'.padEnd(22) + formatRupiah(grandTotal).padStart(10) + '\n\n\n\n'
             window.location.href = `rawbt:${encodeURIComponent(txt)}`
           } else {
             const W2 = 28; const lineStr = '-'.repeat(W2)
@@ -520,17 +428,12 @@ export default function CashierPage() {
             lines2.push(rowFn(new Date().toLocaleDateString('id-ID'), new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})))
             lines2.push(rowFn('No.', receiptNo))
             lines2.push(lineStr)
-            for (const item of txItems) {
-              lines2.push(item.product_name.substring(0,W2))
-              lines2.push('  '+item.qty_eceran+' x '+formatRupiah(item.unit_price))
-            }
+            for (const item of txItems) { lines2.push(item.product_name.substring(0,W2)); lines2.push('  '+item.qty_eceran+' x '+formatRupiah(item.unit_price)) }
             lines2.push(lineStr)
             lines2.push(rowFn('TOTAL', formatRupiah(grandTotal)))
             lines2.push(rowFn('Bayar ('+finalPay+')', formatRupiah(paidAmt)))
             if (paidAmt > grandTotal) lines2.push(rowFn('Kembali', formatRupiah(paidAmt-grandTotal)))
-            lines2.push(lineStr)
-            lines2.push('Terima kasih!'.padStart(Math.floor((W2+13)/2)))
-            lines2.push('')
+            lines2.push(lineStr); lines2.push('Terima kasih!'.padStart(Math.floor((W2+13)/2))); lines2.push('')
             const html2 = `<html><head><style>*{margin:0;padding:0;}pre{font-family:'Courier New',monospace;font-size:11px;line-height:1.5;white-space:pre;}@page{margin:1mm;size:58mm auto;}</style></head><body><pre>${lines2.join('\n')}</pre></body></html>`
             const iframe2 = document.createElement('iframe')
             iframe2.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;'
@@ -559,7 +462,6 @@ export default function CashierPage() {
         </div>
       )}
 
-      {/* Header */}
       <div className="bg-white border-b border-gray-100 flex-shrink-0">
         {isOwnerManager && allStores && allStores.length > 1 && (
           <div className="flex gap-1.5 px-3 pt-2 overflow-x-auto scrollbar-hide">
@@ -573,16 +475,12 @@ export default function CashierPage() {
         )}
         <div className="flex border-b border-gray-50">
           {([
-            { id: 'pos',     label: 'Kasir'  },
+            { id: 'pos',     label: 'Kasir' },
             { id: 'riwayat', label: 'Riwayat', icon: <History size={13} /> },
-            { id: 'promo',   label: 'Promo',   icon: <Tag size={13} /> },
           ] as { id: MainTab; label: string; icon?: React.ReactNode }[]).map(tab => (
             <button key={tab.id} onClick={() => setMainTab(tab.id)}
               className={`flex-1 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center justify-center gap-1 ${mainTab===tab.id?'border-gray-900 text-gray-900':'border-transparent text-gray-400'}`}>
               {tab.icon}{tab.label}
-              {tab.id === 'promo' && (allPromos?.length || 0) > 0 && (
-                <span className="ml-0.5 bg-green-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center">{allPromos?.length}</span>
-              )}
             </button>
           ))}
         </div>
@@ -598,62 +496,7 @@ export default function CashierPage() {
         )}
       </div>
 
-      {/* TAB PROMO */}
-      {mainTab === 'promo' && (
-        <div className="flex-1 overflow-auto bg-gray-50 p-4 space-y-3">
-          <p className="text-xs text-gray-400">Promo aktif hari ini</p>
-          {!allPromos?.length && (
-            <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">
-              <Tag size={28} className="text-gray-200 mx-auto mb-2" />
-              Belum ada promo aktif
-            </div>
-          )}
-          <div className="space-y-2">
-            {allPromos?.map(promo => (
-              <div key={promo.id} className="bg-white rounded-xl border border-gray-100 p-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={cn('text-xs font-bold px-2 py-0.5 rounded-full',
-                        promo.promo_type === 'buy1get1' ? 'bg-purple-100 text-purple-700' :
-                        promo.promo_type === 'percent'  ? 'bg-green-100 text-green-700' :
-                        'bg-blue-100 text-blue-700')}>
-                        {promo.promo_type === 'buy1get1' ? 'B1G1' :
-                         promo.promo_type === 'percent'  ? `${promo.value}% OFF` :
-                         `Diskon ${formatRupiah(promo.value)}`}
-                      </span>
-                      <p className="text-sm font-semibold text-gray-900">{promo.name}</p>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Produk: <strong>{(promo as any).product?.name || promo.product_id}</strong>
-                    </p>
-                    {promo.promo_type === 'buy1get1' && (
-                      <p className="text-xs text-purple-600 mt-0.5">Beli 2 bayar 1 — otomatis diterapkan di kasir</p>
-                    )}
-                    {promo.promo_type === 'percent' && (
-                      <p className="text-xs text-green-600 mt-0.5">
-                        Hemat {promo.value}% = {formatRupiah(Math.round(((promo as any).product?.base_price || 0) * promo.value / 100))} per item
-                      </p>
-                    )}
-                    {promo.promo_type === 'fixed' && (
-                      <p className="text-xs text-blue-600 mt-0.5">Hemat {formatRupiah(promo.value)} per item</p>
-                    )}
-                    <p className="text-xs text-gray-400 mt-1">
-                      Berlaku: {new Date(promo.valid_from).toLocaleDateString('id-ID')} – {new Date(promo.valid_until).toLocaleDateString('id-ID')}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
-            <p className="text-xs font-medium text-amber-800">Catatan</p>
-            <p className="text-xs text-amber-700 mt-0.5">Promo otomatis diterapkan saat produk ditambahkan ke keranjang. Untuk diskon manual, klik item di keranjang.</p>
-          </div>
-        </div>
-      )}
-
-      {/* TAB RIWAYAT */}
+      {/* RIWAYAT */}
       {mainTab === 'riwayat' && (
         <div className="flex-1 overflow-auto bg-gray-50 p-4 space-y-3">
           <p className="text-xs text-gray-400">Transaksi hari ini</p>
@@ -673,7 +516,7 @@ export default function CashierPage() {
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <p className="text-sm font-medium text-gray-900 font-mono text-xs">{tx.receipt_no}</p>
+                        <p className="text-xs font-mono text-gray-900">{tx.receipt_no}</p>
                         <button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(tx.receipt_no); toast.success('ID disalin') }}
                           className="text-[10px] text-blue-400 px-1 py-0.5 rounded border border-blue-200">copy</button>
                         {(tx as any).status==='voided' && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-medium">VOID</span>}
@@ -685,9 +528,9 @@ export default function CashierPage() {
                           {tx.payment_method==='cash'?'Tunai':tx.payment_method==='qris'?'QRIS':tx.payment_method==='transfer'?'Transfer':tx.payment_method==='gopay'?'GoPay':tx.payment_method==='grab'?'GrabPay':'ShopeePay'}
                         </span>
                       </div>
-                      <p className="text-xs text-gray-400 mt-0.5">{formatDate(tx.created_at)} · {PAYMENT_LABELS[tx.payment_method as PaymentMethod]??tx.payment_method}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{formatDate(tx.created_at)}</p>
                       {(tx as any).online_order_no && <p className="text-xs text-gray-500 font-mono">#{(tx as any).online_order_no}</p>}
-                      {(tx as any).void_reason     && <p className="text-xs text-red-400">Alasan: {(tx as any).void_reason}</p>}
+                      {(tx as any).void_reason && <p className="text-xs text-red-400">Alasan: {(tx as any).void_reason}</p>}
                     </div>
                     <div className="flex items-center gap-2 ml-2">
                       <p className={`text-sm font-semibold ${(tx as any).status==='voided'?'line-through text-gray-400':'text-gray-900'}`}>{formatRupiah(tx.total)}</p>
@@ -707,21 +550,21 @@ export default function CashierPage() {
                             const upd: any = { ...tx, status: 'voided' }
                             await db.transactions.put(upd)
                             await supabase.from('transactions').update({ status: 'voided' }).eq('id', tx.id)
-                            toast.success('Void disetujui, stok dikembalikan')
-                          }} className="text-xs text-white bg-red-500 px-2 py-0.5 rounded-lg">✓ Setuju</button>
+                            toast.success('Void disetujui')
+                          }} className="text-xs text-white bg-red-500 px-2 py-0.5 rounded-lg">✓</button>
                           <button onClick={async e => {
                             e.stopPropagation()
                             const upd: any = { ...tx, status: 'completed' }
                             await db.transactions.put(upd)
                             await supabase.from('transactions').update({ status: 'completed' }).eq('id', tx.id)
-                            toast.success('Request void ditolak')
-                          }} className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-lg">✗ Tolak</button>
+                            toast.success('Ditolak')
+                          }} className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-lg">✗</button>
                         </div>
                       )}
                     </div>
                   </div>
                 </div>
-                {expandedTxId !== null && expandedTxId === String(tx.id) && (
+                {expandedTxId === String(tx.id) && (
                   <TxDetailRow txId={String(tx.id)} total={tx.total} onReprint={(txData) => { setLastTxData(txData); setShowReceipt(true) }} />
                 )}
               </div>
@@ -731,7 +574,7 @@ export default function CashierPage() {
         </div>
       )}
 
-      {/* TAB POS */}
+      {/* POS */}
       {mainTab === 'pos' && (
         <div className="flex flex-1 min-h-0">
           <div className="flex-1 flex flex-col min-w-0">
@@ -752,7 +595,6 @@ export default function CashierPage() {
                 </div>
               </div>
             )}
-
             <div className="bg-white border-b border-gray-100 px-3 py-2 flex gap-2 overflow-x-auto scrollbar-hide flex-shrink-0 items-center">
               <button onClick={() => setSelectedCat('all')}
                 className={cn('px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap flex-shrink-0',selectedCat==='all'?'bg-gray-900 text-white':'bg-gray-100 text-gray-600')}>
@@ -768,7 +610,6 @@ export default function CashierPage() {
                 <RefreshCw size={14} className={isSyncing?'animate-spin text-blue-500':''} />
               </button>
             </div>
-
             {pakets.length > 0 && (
               <div className="bg-gray-50 border-b border-gray-100 px-3 py-2 flex gap-2 overflow-x-auto scrollbar-hide flex-shrink-0">
                 <span className="text-xs font-medium text-gray-500 self-center mr-1 flex-shrink-0">Paket:</span>
@@ -780,7 +621,6 @@ export default function CashierPage() {
                 ))}
               </div>
             )}
-
             <div className="flex-1 overflow-auto p-3">
               {products && products.length === 0 && !isSyncing && (
                 <div className="text-center py-16">
@@ -795,7 +635,7 @@ export default function CashierPage() {
                 </div>
               )}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {products?.map(prod => <ProductCard key={prod.id} product={prod} orderType={orderType} onAdd={() => addItem(prod)} />)}
+                {products?.map(prod => <ProductCard key={prod.id} product={prod} onAdd={() => addItem(prod)} />)}
               </div>
             </div>
           </div>
@@ -821,22 +661,7 @@ export default function CashierPage() {
                 <div className="text-center text-gray-400 py-12 text-sm"><ShoppingCart size={32} className="mx-auto mb-2 opacity-30" />Keranjang kosong</div>
               ) : (
                 <>
-                  {items.map(item => (
-                    <CartItemRow
-                      key={item.product.id}
-                      item={item}
-                      manualDiscount={manualDiscounts[item.product.id] || 0}
-                      onQtyChange={q => updateQty(item.product.id, q)}
-                      onRemove={() => { removeItem(item.product.id); removeManualDiscount(item.product.id) }}
-                      onDiscount={() => {
-                        setDiscountTarget({ productId: item.product.id, name: item.product.name, price: item.unit_price })
-                        setDiscountInput('')
-                        setDiscountType('percent')
-                        setShowDiscountModal(true)
-                      }}
-                      onRemoveDiscount={() => removeManualDiscount(item.product.id)}
-                    />
-                  ))}
+                  {items.map(item => <CartItemRow key={item.product.id} item={item} onQtyChange={q=>updateQty(item.product.id,q)} onRemove={()=>removeItem(item.product.id)} />)}
                   {cartPakets.map((cp,i) => (
                     <div key={i} className="bg-gray-50 rounded-xl p-2 border border-gray-100">
                       <div className="flex items-center justify-between mb-1">
@@ -852,9 +677,8 @@ export default function CashierPage() {
             {(items.length>0||cartPakets.length>0) && (
               <div className="p-4 border-t border-gray-100 space-y-2">
                 <div className="flex justify-between text-sm text-gray-600"><span>Subtotal</span><span>{formatRupiah(rawSubtotal)}</span></div>
-                {promoDiscount>0 && <div className="flex justify-between text-sm text-green-600"><span>Diskon Promo</span><span>-{formatRupiah(promoDiscount)}</span></div>}
-                {manualDiscountTotal>0 && <div className="flex justify-between text-sm text-blue-600"><span>Diskon Manual</span><span>-{formatRupiah(manualDiscountTotal)}</span></div>}
-                {ppnAmount>0 && <div className="flex justify-between text-sm text-gray-600"><span>PPN {ppnPct}%</span><span>+{formatRupiah(ppnAmount)}</span></div>}
+                {rawDiscount>0 && <div className="flex justify-between text-sm text-green-600"><span>Diskon</span><span>-{formatRupiah(rawDiscount)}</span></div>}
+                {/* PPN tidak tampil di sidebar — hanya di konfirmasi bayar */}
                 <div className="flex justify-between font-semibold text-gray-900 text-base border-t border-gray-100 pt-2"><span>Total</span><span>{formatRupiah(grandTotal)}</span></div>
                 <button onClick={() => setShowCheckout(true)} className="w-full py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold">Bayar</button>
               </div>
@@ -885,23 +709,19 @@ export default function CashierPage() {
               orderType==='dine_in'?'bg-orange-50 text-orange-700':orderType==='take_away'?'bg-blue-50 text-blue-700':'bg-green-50 text-green-700')}>
               {ORDER_TYPES.find(o=>o.id===orderType)?.icon}
               {orderTypeLabel}
-              {isOnlineOrder && onlinePlatform && <span className="ml-1 opacity-70">· {onlinePlatform==='gofood'?'GoFood':onlinePlatform==='grabfood'?'GrabFood':'ShopeeFood'}</span>}
+              {isOnlineOrder && <span className="ml-1 opacity-70">· {onlinePlatform==='gofood'?'GoFood':onlinePlatform==='grabfood'?'GrabFood':'ShopeeFood'}</span>}
             </div>
-            <div className="bg-gray-50 rounded-2xl p-4 space-y-1 max-h-40 overflow-auto">
+            <div className="bg-gray-50 rounded-2xl p-4 space-y-1 max-h-48 overflow-auto">
               {items.map(i => {
-                const manDisc = (manualDiscounts[i.product.id] || 0) * i.qty
-                const isBuy1Get1 = (i.product as any).promo_buy1get1 && i.qty >= 2
-                const b1g1Disc  = isBuy1Get1 ? Math.floor(i.qty/2) * i.unit_price : 0
-                const promoDisc = isBuy1Get1 ? b1g1Disc : ((i.product as any).promo_discount || 0) * i.qty
-                const totalDisc = promoDisc + manDisc
+                const isBuy1Get1  = (i.product as any).promo_buy1get1 && i.qty >= 2
+                const promoDisc   = isBuy1Get1 ? Math.floor(i.qty/2)*i.unit_price : ((i.product as any).promo_discount||0)*i.qty
                 return (
                   <div key={i.product.id} className="text-sm">
                     <div className="flex justify-between">
                       <span className="text-gray-700">{i.product.name} ×{i.qty}</span>
-                      <span>{formatRupiah(i.qty * i.unit_price - totalDisc)}</span>
+                      <span>{formatRupiah(i.qty*i.unit_price - promoDisc)}</span>
                     </div>
                     {promoDisc > 0 && <p className="text-xs text-green-600">🎁 {(i.product as any).promo_name} (-{formatRupiah(promoDisc)})</p>}
-                    {manDisc > 0 && <p className="text-xs text-blue-600">✂️ Diskon manual (-{formatRupiah(manDisc)})</p>}
                   </div>
                 )
               })}
@@ -912,11 +732,11 @@ export default function CashierPage() {
                 </div>
               ))}
             </div>
+            {/* Total breakdown — PPN tampil di sini */}
             <div className="space-y-1.5 border border-gray-100 rounded-xl p-3">
               <div className="flex justify-between text-sm text-gray-600"><span>Subtotal</span><span>{formatRupiah(rawSubtotal)}</span></div>
-              {promoDiscount>0   && <div className="flex justify-between text-sm text-green-600"><span>Diskon Promo</span><span>-{formatRupiah(promoDiscount)}</span></div>}
-              {manualDiscountTotal>0 && <div className="flex justify-between text-sm text-blue-600"><span>Diskon Manual</span><span>-{formatRupiah(manualDiscountTotal)}</span></div>}
-              {ppnAmount>0       && <div className="flex justify-between text-sm text-gray-600"><span>PPN {ppnPct}%</span><span>+{formatRupiah(ppnAmount)}</span></div>}
+              {rawDiscount>0 && <div className="flex justify-between text-sm text-green-600"><span>Diskon</span><span>-{formatRupiah(rawDiscount)}</span></div>}
+              {ppnAmount>0 && <div className="flex justify-between text-sm text-gray-600"><span>PPN {ppnPct}%</span><span>+{formatRupiah(ppnAmount)}</span></div>}
               <div className="flex justify-between font-bold text-gray-900 border-t border-gray-100 pt-1.5"><span>Total</span><span>{formatRupiah(grandTotal)}</span></div>
             </div>
             {isOnlineOrder && (
@@ -947,7 +767,8 @@ export default function CashierPage() {
                   value={cashPaid} onChange={e => setCashPaid(e.target.value.replace(/[^0-9]/g,''))} autoFocus />
                 {/* Quick cash buttons */}
                 <div className="flex gap-2 mt-2">
-                  {[grandTotal, Math.ceil(grandTotal/5000)*5000, Math.ceil(grandTotal/10000)*10000, Math.ceil(grandTotal/50000)*50000].filter((v,i,a)=>a.indexOf(v)===i).slice(0,4).map(v => (
+                  {[grandTotal, Math.ceil(grandTotal/5000)*5000, Math.ceil(grandTotal/10000)*10000, Math.ceil(grandTotal/50000)*50000]
+                    .filter((v,i,a) => a.indexOf(v)===i).slice(0,4).map(v => (
                     <button key={v} onClick={() => setCashPaid(String(v))}
                       className="flex-1 py-1.5 text-xs rounded-lg bg-gray-100 text-gray-700 font-medium">{formatRupiah(v)}</button>
                   ))}
@@ -961,42 +782,6 @@ export default function CashierPage() {
               {isProcessing ? <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"/> : <CheckCircle size={18}/>}
               {isProcessing ? 'Memproses...' : 'Konfirmasi Bayar'}
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL DISKON MANUAL */}
-      {showDiscountModal && discountTarget && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-gray-900 flex items-center gap-2"><Percent size={16}/>Diskon Manual</h3>
-              <button onClick={() => setShowDiscountModal(false)}><X size={18} className="text-gray-400"/></button>
-            </div>
-            <div className="bg-gray-50 rounded-xl p-3">
-              <p className="text-sm font-medium text-gray-900">{discountTarget.name}</p>
-              <p className="text-xs text-gray-500">Harga: {formatRupiah(discountTarget.price)}</p>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => setDiscountType('percent')}
-                className={`flex-1 py-2 rounded-xl text-sm font-medium border ${discountType==='percent'?'bg-gray-900 text-white border-gray-900':'border-gray-200 text-gray-600'}`}>
-                Persen (%)
-              </button>
-              <button onClick={() => setDiscountType('nominal')}
-                className={`flex-1 py-2 rounded-xl text-sm font-medium border ${discountType==='nominal'?'bg-gray-900 text-white border-gray-900':'border-gray-200 text-gray-600'}`}>
-                Nominal (Rp)
-              </button>
-            </div>
-            <input className="input text-lg font-semibold" inputMode="decimal" autoFocus
-              placeholder={discountType==='percent' ? 'Contoh: 10 (= 10%)' : 'Contoh: 5000'}
-              value={discountInput} onChange={e => setDiscountInput(e.target.value.replace(/[^0-9]/g,''))} />
-            {discountInput && discountType==='percent' && Number(discountInput) <= 100 && (
-              <p className="text-sm text-blue-600">= Diskon {formatRupiah(Math.round(discountTarget.price * Number(discountInput) / 100))} per item</p>
-            )}
-            <div className="flex gap-3">
-              <button onClick={() => setShowDiscountModal(false)} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-              <button onClick={applyManualDiscount} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium">Terapkan</button>
-            </div>
           </div>
         </div>
       )}
@@ -1074,7 +859,7 @@ export default function CashierPage() {
 }
 
 // ── PRODUCT CARD ─────────────────────────────────────────────
-function ProductCard({ product, orderType, onAdd }: { product: any; orderType: OrderType; onAdd: () => void }) {
+function ProductCard({ product, onAdd }: { product: any; onAdd: () => void }) {
   const hasPromo   = product.promo_discount > 0
   const isBuy1Get1 = product.promo_buy1get1
   return (
@@ -1104,53 +889,34 @@ function ProductCard({ product, orderType, onAdd }: { product: any; orderType: O
   )
 }
 
-// ── CART ITEM ROW — dengan tombol diskon ──────────────────────
-function CartItemRow({ item, manualDiscount, onQtyChange, onRemove, onDiscount, onRemoveDiscount }: {
+// ── CART ITEM ROW — bersih tanpa diskon manual ────────────────
+function CartItemRow({ item, onQtyChange, onRemove }: {
   item: { product: any; qty: number; subtotal: number; unit_price: number; discount: number }
-  manualDiscount: number
   onQtyChange: (qty: number) => void
   onRemove: () => void
-  onDiscount: () => void
-  onRemoveDiscount: () => void
 }) {
-  const isBuy1Get1    = (item.product as any).promo_buy1get1 && item.qty >= 2
-  const b1g1Discount  = isBuy1Get1 ? Math.floor(item.qty / 2) * item.unit_price : 0
-  const promoDiscTotal = isBuy1Get1 ? b1g1Discount : ((item.product as any).promo_discount || 0) * item.qty
-  const manDiscTotal  = manualDiscount * item.qty
-  const finalSubtotal = item.qty * item.unit_price - promoDiscTotal - manDiscTotal
+  const isBuy1Get1   = (item.product as any).promo_buy1get1 && item.qty >= 2
+  const b1g1Discount = isBuy1Get1 ? Math.floor(item.qty / 2) * item.unit_price : 0
+  const promoDisc    = isBuy1Get1 ? b1g1Discount : ((item.product as any).promo_discount || 0) * item.qty
+  const finalSubtotal = item.qty * item.unit_price - promoDisc
 
   return (
-    <div className="bg-gray-50 rounded-xl p-2 border border-gray-100">
-      <div className="flex items-center gap-2">
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-800 truncate">{item.product.name}</p>
-          <div className="flex items-center gap-1 flex-wrap">
-            <p className="text-xs font-semibold text-gray-900">{formatRupiah(finalSubtotal)}</p>
-            {isBuy1Get1 && <span className="text-[10px] text-purple-500">B1G1 -{formatRupiah(b1g1Discount)}</span>}
-            {!isBuy1Get1 && (item.product as any).promo_name && (
-              <span className="text-[10px] text-green-600">🎁{(item.product as any).promo_name}</span>
-            )}
-            {manualDiscount > 0 && <span className="text-[10px] text-blue-600">✂️-{formatRupiah(manDiscTotal)}</span>}
-          </div>
-        </div>
-        <div className="flex items-center gap-1">
-          <button onClick={() => onQtyChange(item.qty-1)} className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center"><Minus size={12}/></button>
-          <span className="w-6 text-center text-sm font-medium">{item.qty}</span>
-          <button onClick={() => onQtyChange(item.qty+1)} className="w-7 h-7 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center"><Plus size={12}/></button>
-          <button onClick={onRemove} className="w-7 h-7 rounded-full text-red-400 flex items-center justify-center ml-1"><Trash2 size={12}/></button>
+    <div className="flex items-center gap-2 bg-gray-50 rounded-xl p-2">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-gray-800 truncate">{item.product.name}</p>
+        <div className="flex items-center gap-1 flex-wrap">
+          <p className="text-xs font-semibold text-gray-900">{formatRupiah(finalSubtotal)}</p>
+          {isBuy1Get1 && <span className="text-[10px] text-purple-500">🎁 B1G1</span>}
+          {!isBuy1Get1 && (item.product as any).promo_name && (
+            <span className="text-[10px] text-green-600">🎁 {(item.product as any).promo_name}</span>
+          )}
         </div>
       </div>
-      {/* Tombol diskon manual */}
-      <div className="flex items-center gap-1.5 mt-1.5">
-        {manualDiscount > 0 ? (
-          <button onClick={onRemoveDiscount} className="text-[10px] text-blue-600 border border-blue-200 rounded-full px-2 py-0.5 flex items-center gap-1">
-            ✂️ Diskon {formatRupiah(manualDiscount)}/pcs <X size={8}/>
-          </button>
-        ) : (
-          <button onClick={onDiscount} className="text-[10px] text-gray-400 border border-gray-200 rounded-full px-2 py-0.5 flex items-center gap-1">
-            <Percent size={9}/> Tambah Diskon
-          </button>
-        )}
+      <div className="flex items-center gap-1">
+        <button onClick={() => onQtyChange(item.qty-1)} className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center"><Minus size={12}/></button>
+        <span className="w-6 text-center text-sm font-medium">{item.qty}</span>
+        <button onClick={() => onQtyChange(item.qty+1)} className="w-7 h-7 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center"><Plus size={12}/></button>
+        <button onClick={onRemove} className="w-7 h-7 rounded-full text-red-400 flex items-center justify-center ml-1"><Trash2 size={12}/></button>
       </div>
     </div>
   )
@@ -1161,22 +927,15 @@ function TxDetailRow({ txId, total, onReprint }: { txId: string; total: number; 
   const [items,   setItems]   = useState<any[]>([])
   const [tx,      setTx]      = useState<any>(null)
   const [loading, setLoading] = useState(true)
-
   useEffect(() => {
     Promise.all([
       db.transaction_items.where('transaction_id').equals(txId).toArray(),
       db.transactions.get(txId),
     ]).then(([its, txData]) => { setItems(its); setTx(txData); setLoading(false) })
   }, [txId])
-
   if (loading) return <div className="bg-gray-50 border-t border-gray-100 px-4 py-2 text-xs text-gray-400">Memuat...</div>
-
-  const payMethod = tx?.payment_method || ''
-  const cashPaid  = tx?.cash_paid || tx?.total || 0
-  const change    = tx?.change_amount || 0
   const payLabel: Record<string,string> = { cash:'Tunai', qris:'QRIS', transfer:'Transfer', gopay:'GoPay', grab:'GrabPay', shopeefood:'ShopeePay' }
   const payColor: Record<string,string> = { cash:'bg-gray-100 text-gray-700', qris:'bg-blue-100 text-blue-700', transfer:'bg-purple-100 text-purple-700', gopay:'bg-green-100 text-green-700', grab:'bg-emerald-100 text-emerald-700', shopeefood:'bg-orange-100 text-orange-700' }
-
   return (
     <div className="bg-gray-50 border-t border-gray-100 px-4 py-3 space-y-2">
       <div className="space-y-1">
@@ -1185,30 +944,21 @@ function TxDetailRow({ txId, total, onReprint }: { txId: string; total: number; 
             <span className="text-gray-700 flex-1 pr-2">
               {item.product_name}
               <span className="text-gray-400 ml-1">×{(item.qty_eceran||0)+(item.qty_dus||0)}</span>
-              {(item.promo_discount || 0) > 0 && <span className="text-green-600 ml-1">-{formatRupiah(item.promo_discount)}</span>}
-              {(item.manual_discount || 0) > 0 && <span className="text-blue-600 ml-1">✂️-{formatRupiah(item.manual_discount)}</span>}
+              {(item.promo_discount||0)>0 && <span className="text-green-600 ml-1">-{formatRupiah(item.promo_discount)}</span>}
             </span>
             <span className="text-gray-700 font-medium">{formatRupiah(item.subtotal||0)}</span>
           </div>
         ))}
       </div>
       <div className="border-t border-gray-200 pt-2 space-y-1">
-        {tx?.ppn_amount > 0 && (
-          <div className="flex justify-between text-xs text-gray-500">
-            <span>PPN {tx.ppn_percent}%</span><span>+{formatRupiah(tx.ppn_amount)}</span>
-          </div>
-        )}
-        <div className="flex justify-between text-xs font-semibold text-gray-900">
-          <span>Total</span><span>{formatRupiah(total)}</span>
-        </div>
+        {tx?.ppn_amount>0 && <div className="flex justify-between text-xs text-gray-500"><span>PPN {tx.ppn_percent}%</span><span>+{formatRupiah(tx.ppn_amount)}</span></div>}
+        <div className="flex justify-between text-xs font-semibold text-gray-900"><span>Total</span><span>{formatRupiah(total)}</span></div>
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${payColor[payMethod]||'bg-gray-100 text-gray-600'}`}>
-              {payLabel[payMethod]||payMethod}
-            </span>
-            {cashPaid > 0 && <span className="text-xs text-gray-500">{formatRupiah(cashPaid)}</span>}
-          </div>
-          {change > 0 && <span className="text-xs text-gray-500">Kembali {formatRupiah(change)}</span>}
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${payColor[tx?.payment_method]||'bg-gray-100 text-gray-600'}`}>
+            {payLabel[tx?.payment_method]||tx?.payment_method}
+          </span>
+          {tx?.cash_paid>0 && <span className="text-xs text-gray-500">{formatRupiah(tx.cash_paid)}</span>}
+          {(tx?.change_given||0)>0 && <span className="text-xs text-gray-500">Kembali {formatRupiah(tx.change_given)}</span>}
         </div>
         {tx?.online_order_no && <p className="text-xs text-gray-400">Order #{tx.online_order_no}</p>}
       </div>
@@ -1220,63 +970,43 @@ function TxDetailRow({ txId, total, onReprint }: { txId: string; total: number; 
 function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () => void }) {
   const key = `printer_config_${storeId}`
   const [printMode, setPrintMode] = useState<'browser'|'rawbt'>(() => {
-    try { return JSON.parse(localStorage.getItem(key) || '{}').printMode || 'browser' } catch { return 'browser' }
+    try { return JSON.parse(localStorage.getItem(key)||'{}').printMode||'browser' } catch { return 'browser' }
   })
   const [autoPrint, setAutoPrint] = useState<boolean>(() => {
-    try { return JSON.parse(localStorage.getItem(key) || '{}').autoPrint === true } catch { return false }
+    try { return JSON.parse(localStorage.getItem(key)||'{}').autoPrint===true } catch { return false }
   })
   const [saved, setSaved] = useState(false)
-
   function handleSave() {
     localStorage.setItem(key, JSON.stringify({ printMode, autoPrint }))
-    setSaved(true)
-    setTimeout(() => { setSaved(false); onClose() }, 1000)
+    setSaved(true); setTimeout(() => { setSaved(false); onClose() }, 1000)
     toast.success('Setting printer disimpan')
   }
-
   return (
     <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50 p-4">
       <div className="bg-white rounded-2xl w-full max-w-md shadow-lg">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900">🖨️ Setting Printer</h3>
-          <button onClick={onClose} className="p-1 text-gray-400"><X size={18} /></button>
+          <button onClick={onClose}><X size={18} className="text-gray-400"/></button>
         </div>
         <div className="px-5 py-4 space-y-4">
           <div className="space-y-2">
-            <button onClick={() => setPrintMode('browser')}
-              className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left ${printMode==='browser'?'border-gray-900 bg-gray-50':'border-gray-200'}`}>
-              <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${printMode==='browser'?'border-gray-900':'border-gray-300'}`}>
-                {printMode==='browser' && <div className="w-2 h-2 bg-gray-900 rounded-full" />}
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-900">🖥️ Browser Print (USB)</p>
-                <p className="text-xs text-gray-500">Buka dialog print browser</p>
-              </div>
-            </button>
-            <button onClick={() => setPrintMode('rawbt')}
-              className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left ${printMode==='rawbt'?'border-blue-600 bg-blue-50':'border-gray-200'}`}>
-              <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${printMode==='rawbt'?'border-blue-600':'border-gray-300'}`}>
-                {printMode==='rawbt' && <div className="w-2 h-2 bg-blue-600 rounded-full" />}
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-900">📱 RawBT (Bluetooth)</p>
-                <p className="text-xs text-gray-500">Android + printer thermal Bluetooth</p>
-              </div>
-            </button>
+            {[{v:'browser',l:'🖥️ Browser Print (USB)',d:'Buka dialog print browser'},{v:'rawbt',l:'📱 RawBT (Bluetooth)',d:'Android + printer thermal Bluetooth'}].map(m => (
+              <button key={m.v} onClick={() => setPrintMode(m.v as any)}
+                className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left ${printMode===m.v?m.v==='rawbt'?'border-blue-600 bg-blue-50':'border-gray-900 bg-gray-50':'border-gray-200'}`}>
+                <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${printMode===m.v?m.v==='rawbt'?'border-blue-600':'border-gray-900':'border-gray-300'}`}>
+                  {printMode===m.v && <div className={`w-2 h-2 rounded-full ${m.v==='rawbt'?'bg-blue-600':'bg-gray-900'}`}/>}
+                </div>
+                <div><p className="text-sm font-semibold text-gray-900">{m.l}</p><p className="text-xs text-gray-500">{m.d}</p></div>
+              </button>
+            ))}
           </div>
           <div className="flex items-center justify-between py-2 border-t border-gray-100">
-            <div>
-              <p className="text-sm font-medium text-gray-900">Print Otomatis</p>
-              <p className="text-xs text-gray-400">Langsung print tanpa pop up struk</p>
-            </div>
-            <button onClick={() => setAutoPrint(!autoPrint)}
-              className={`w-11 h-6 rounded-full transition-colors relative ${autoPrint?'bg-gray-900':'bg-gray-200'}`}>
-              <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${autoPrint?'left-[22px]':'left-0.5'}`} />
+            <div><p className="text-sm font-medium text-gray-900">Print Otomatis</p><p className="text-xs text-gray-400">Langsung print tanpa pop up struk</p></div>
+            <button onClick={() => setAutoPrint(!autoPrint)} className={`w-11 h-6 rounded-full transition-colors relative ${autoPrint?'bg-gray-900':'bg-gray-200'}`}>
+              <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${autoPrint?'left-[22px]':'left-0.5'}`}/>
             </button>
           </div>
-          <button onClick={handleSave} className="w-full py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold">
-            {saved ? '✓ Tersimpan!' : 'Simpan Setting'}
-          </button>
+          <button onClick={handleSave} className="w-full py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold">{saved?'✓ Tersimpan!':'Simpan Setting'}</button>
         </div>
       </div>
     </div>
@@ -1285,42 +1015,36 @@ function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () =
 
 // ── RECEIPT MODAL ─────────────────────────────────────────────
 function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; printMode?: string; autoPrint?: boolean; onClose: () => void }) {
-  const orderTypeLabel: Record<string, string> = { dine_in: 'Dine In', take_away: 'Take Away', online: 'Online' }
-  const payLabel: Record<string, string> = { cash: 'Tunai', qris: 'QRIS', transfer: 'Transfer', gopay: 'GoPay', grab: 'GrabPay', shopeefood: 'ShopeePay' }
+  const orderTypeLabel: Record<string,string> = { dine_in:'Dine In', take_away:'Take Away', online:'Online' }
+  const payLabel: Record<string,string> = { cash:'Tunai', qris:'QRIS', transfer:'Transfer', gopay:'GoPay', grab:'GrabPay', shopeefood:'ShopeePay' }
 
   function handlePrint() {
     const W = 28; const line = '-'.repeat(W)
-    const center = (s: string) => s.padStart(Math.floor((W + s.length) / 2)).padEnd(W)
-    const row = (l: string, r: string) => { const space = W - l.length - r.length; return l + (space > 0 ? ' '.repeat(space) : ' ') + r }
+    const center = (s: string) => s.padStart(Math.floor((W+s.length)/2)).padEnd(W)
+    const row = (l: string, r: string) => { const sp = W-l.length-r.length; return l+(sp>0?' '.repeat(sp):' ')+r }
     const now2 = new Date()
     let lines: string[] = []
-    lines.push(center(data.storeName))
-    lines.push(center('Coco Puff'))
-    lines.push(line)
-    lines.push(row(now2.toLocaleDateString('id-ID', {day:'numeric',month:'long',year:'numeric'}), now2.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})))
-    lines.push(row('No.', data.receiptNo.length > 20 ? data.receiptNo.substring(0,20)+'...' : data.receiptNo))
-    lines.push(row('Tipe', orderTypeLabel[data.orderType] || data.orderType))
-    if (data.onlineOrderNo) lines.push(row('Order', '#' + data.onlineOrderNo))
+    lines.push(center(data.storeName)); lines.push(center('Coco Puff')); lines.push(line)
+    lines.push(row(now2.toLocaleDateString('id-ID',{day:'numeric',month:'long',year:'numeric'}), now2.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})))
+    lines.push(row('No.', data.receiptNo.length>20?data.receiptNo.substring(0,20)+'...':data.receiptNo))
+    lines.push(row('Tipe', orderTypeLabel[data.orderType]||data.orderType))
+    if (data.onlineOrderNo) lines.push(row('Order', '#'+data.onlineOrderNo))
     lines.push(line)
     for (const item of data.items) {
-      lines.push(item.name.substring(0, W))
+      lines.push(item.name.substring(0,W))
       lines.push(row(`  ${item.qty} x ${formatRupiah(item.price)}`, formatRupiah(item.subtotal)))
-      if (item.promoDiscount > 0) lines.push(row('  Promo', '-' + formatRupiah(item.promoDiscount)))
-      if (item.manualDiscount > 0) lines.push(row('  Diskon', '-' + formatRupiah(item.manualDiscount)))
+      if (item.promoDiscount>0) lines.push(row('  Promo', '-'+formatRupiah(item.promoDiscount)))
     }
-    for (const p of data.pakets) { lines.push(p.name.substring(0, W)); lines.push(row('', formatRupiah(p.subtotal))) }
+    for (const p of data.pakets) { lines.push(p.name.substring(0,W)); lines.push(row('',formatRupiah(p.subtotal))) }
     lines.push(line)
     lines.push(row('Subtotal', formatRupiah(data.rawSubtotal)))
-    if (data.rawDiscount > 0) lines.push(row('Diskon', '-' + formatRupiah(data.rawDiscount)))
-    if (data.ppnAmount > 0) lines.push(row('PPN ' + data.ppnPct + '%', '+' + formatRupiah(data.ppnAmount)))
+    if (data.rawDiscount>0) lines.push(row('Diskon', '-'+formatRupiah(data.rawDiscount)))
+    if (data.ppnAmount>0)   lines.push(row('PPN '+data.ppnPct+'%', '+'+formatRupiah(data.ppnAmount)))
     lines.push(line)
     lines.push(row('TOTAL', formatRupiah(data.grandTotal)))
-    lines.push(row('Bayar (' + (payLabel[data.payMethod] || data.payMethod) + ')', formatRupiah(data.cashPaid)))
-    if (data.payMethod === 'cash' && data.change > 0) lines.push(row('Kembali', formatRupiah(data.change)))
-    lines.push(line)
-    lines.push(center('Terima kasih!'))
-    lines.push(center('Coco Puff - ' + data.storeName))
-    lines.push(''); lines.push(''); lines.push('')
+    lines.push(row('Bayar ('+(payLabel[data.payMethod]||data.payMethod)+')', formatRupiah(data.cashPaid)))
+    if (data.payMethod==='cash'&&data.change>0) lines.push(row('Kembali', formatRupiah(data.change)))
+    lines.push(line); lines.push(center('Terima kasih!')); lines.push(center('Coco Puff - '+data.storeName)); lines.push(''); lines.push(''); lines.push('')
     const html = `<html><head><title>Struk</title><style>*{margin:0;padding:0;}body{margin:0;padding:2px;}pre{font-family:'Courier New',Courier,monospace;font-size:8px;line-height:1.3;white-space:pre;}@page{margin:0mm;size:58mm auto;}@media print{pre{width:56mm;}}</style></head><body><pre>${lines.join('\n')}</pre></body></html>`
     const iframe = document.createElement('iframe')
     iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;'
@@ -1328,39 +1052,34 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
     const iframeDoc = iframe.contentWindow?.document
     if (!iframeDoc) { document.body.removeChild(iframe); return }
     iframeDoc.open(); iframeDoc.write(html); iframeDoc.close()
-    setTimeout(() => { iframe.contentWindow?.focus(); iframe.contentWindow?.print(); setTimeout(() => { try { document.body.removeChild(iframe) } catch {} }, 2000) }, 300)
+    setTimeout(() => { iframe.contentWindow?.focus(); iframe.contentWindow?.print(); setTimeout(()=>{try{document.body.removeChild(iframe)}catch{}},2000) }, 300)
   }
 
   function handleRawBT() {
-    const line = '-'.repeat(32); const nl = '\n'
-    let txt = ''
-    txt += data.storeName.toUpperCase().padStart((32+data.storeName.length)/2|0) + nl + 'COCO PUFF'.padStart(20) + nl + line + nl
-    txt += `No: ${data.receiptNo}` + nl + `Tgl: ${new Date().toLocaleDateString('id-ID')} ${new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}` + nl
-    txt += `Tipe: ${data.orderType==='dine_in'?'Dine In':data.orderType==='take_away'?'Take Away':'Online'}` + nl
-    if (data.onlineOrderNo) txt += `Order: #${data.onlineOrderNo}` + nl
-    txt += line + nl
+    const line = '-'.repeat(32); const nl = '\n'; let txt = ''
+    txt += data.storeName.toUpperCase().padStart((32+data.storeName.length)/2|0)+nl+'COCO PUFF'.padStart(20)+nl+line+nl
+    txt += `No: ${data.receiptNo}`+nl+`Tgl: ${new Date().toLocaleDateString('id-ID')} ${new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}`+nl
+    txt += `Tipe: ${data.orderType==='dine_in'?'Dine In':data.orderType==='take_away'?'Take Away':'Online'}`+nl
+    if (data.onlineOrderNo) txt += `Order: #${data.onlineOrderNo}`+nl
+    txt += line+nl
     for (const item of data.items) {
-      txt += item.name.substring(0,22) + nl
-      txt += `  ${item.qty} x ${formatRupiah(item.price)}`.padEnd(22) + formatRupiah(item.subtotal).padStart(10) + nl
-      if (item.promoDiscount > 0) txt += `  Promo: -${formatRupiah(item.promoDiscount)}` + nl
-      if (item.manualDiscount > 0) txt += `  Diskon: -${formatRupiah(item.manualDiscount)}` + nl
+      txt += item.name.substring(0,22)+nl
+      txt += `  ${item.qty} x ${formatRupiah(item.price)}`.padEnd(22)+formatRupiah(item.subtotal).padStart(10)+nl
+      if (item.promoDiscount>0) txt += `  Promo: -${formatRupiah(item.promoDiscount)}`+nl
     }
-    txt += line + nl
-    txt += 'Subtotal'.padEnd(22) + formatRupiah(data.rawSubtotal).padStart(10) + nl
-    if (data.rawDiscount > 0) txt += 'Diskon'.padEnd(22) + ('-'+formatRupiah(data.rawDiscount)).padStart(10) + nl
-    if (data.ppnAmount > 0)   txt += `PPN ${data.ppnPct}%`.padEnd(22) + ('+'+formatRupiah(data.ppnAmount)).padStart(10) + nl
-    txt += 'TOTAL'.padEnd(22) + formatRupiah(data.grandTotal).padStart(10) + nl
-    txt += 'Bayar'.padEnd(22) + formatRupiah(data.cashPaid).padStart(10) + nl
-    if (data.payMethod==='cash' && data.change>0) txt += 'Kembali'.padEnd(22) + formatRupiah(data.change).padStart(10) + nl
-    txt += line + nl + 'Terima kasih!'.padStart(22) + nl + nl + nl + nl
+    txt += line+nl
+    txt += 'Subtotal'.padEnd(22)+formatRupiah(data.rawSubtotal).padStart(10)+nl
+    if (data.rawDiscount>0) txt += 'Diskon'.padEnd(22)+('-'+formatRupiah(data.rawDiscount)).padStart(10)+nl
+    if (data.ppnAmount>0)   txt += `PPN ${data.ppnPct}%`.padEnd(22)+('+'+formatRupiah(data.ppnAmount)).padStart(10)+nl
+    txt += 'TOTAL'.padEnd(22)+formatRupiah(data.grandTotal).padStart(10)+nl
+    txt += 'Bayar'.padEnd(22)+formatRupiah(data.cashPaid).padStart(10)+nl
+    if (data.payMethod==='cash'&&data.change>0) txt += 'Kembali'.padEnd(22)+formatRupiah(data.change).padStart(10)+nl
+    txt += line+nl+'Terima kasih!'.padStart(22)+nl+nl+nl+nl
     window.location.href = `rawbt:${encodeURIComponent(txt)}`
-    setTimeout(() => { navigator.clipboard.writeText(txt).then(() => toast.success('Teks struk disalin ke clipboard')).catch(() => {}) }, 1000)
+    setTimeout(() => { navigator.clipboard.writeText(txt).then(()=>toast.success('Teks struk disalin')).catch(()=>{}) }, 1000)
   }
 
-  useEffect(() => {
-    if (!autoPrint) return
-    setTimeout(() => { if (printMode === 'rawbt') handleRawBT(); else handlePrint() }, 300)
-  }, [])
+  useEffect(() => { if (autoPrint) setTimeout(()=>{ if (printMode==='rawbt') handleRawBT(); else handlePrint() },300) }, [])
 
   const now = new Date()
   return (
@@ -1368,45 +1087,44 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
       <div className="bg-white rounded-2xl w-full max-w-sm shadow-lg max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
           <h3 className="font-semibold text-gray-900">Struk Pembayaran</h3>
-          <button onClick={onClose} className="p-1 text-gray-400"><X size={18} /></button>
+          <button onClick={onClose}><X size={18} className="text-gray-400"/></button>
         </div>
         <div className="flex-1 overflow-auto p-4">
           <div className="font-mono text-xs space-y-1" style={{fontFamily:'Courier New, monospace'}}>
             <div className="text-center font-bold text-sm">{data.storeName}</div>
             <div className="text-center text-xs text-gray-500">Coco Puff</div>
-            <div className="border-t border-dashed border-gray-300 my-2" />
+            <div className="border-t border-dashed border-gray-300 my-2"/>
             <div className="flex justify-between"><span>{now.toLocaleDateString('id-ID',{day:'numeric',month:'long',year:'numeric'})}</span><span>{now.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}</span></div>
             <div className="flex justify-between"><span>No.</span><span className="font-bold">{data.receiptNo}</span></div>
-            <div className="flex justify-between"><span>Tipe</span><span>{orderTypeLabel[data.orderType] || data.orderType}</span></div>
+            <div className="flex justify-between"><span>Tipe</span><span>{orderTypeLabel[data.orderType]||data.orderType}</span></div>
             {data.onlineOrderNo && <div className="flex justify-between"><span>Order</span><span>#{data.onlineOrderNo}</span></div>}
-            <div className="border-t border-dashed border-gray-300 my-2" />
+            <div className="border-t border-dashed border-gray-300 my-2"/>
             {data.items.map((item: any, i: number) => (
               <div key={i}>
                 <div className="flex justify-between"><span className="flex-1 pr-2">{item.name}</span><span>{formatRupiah(item.subtotal)}</span></div>
-                <div className="flex justify-between text-gray-400"><span>{item.qty} × {formatRupiah(item.price)}</span></div>
-                {item.promoDiscount > 0 && <div className="flex justify-between text-green-600"><span>🎁 {item.promoName}</span><span>-{formatRupiah(item.promoDiscount)}</span></div>}
-                {item.manualDiscount > 0 && <div className="flex justify-between text-blue-600"><span>✂️ Diskon manual</span><span>-{formatRupiah(item.manualDiscount)}</span></div>}
+                <div className="text-gray-400">{item.qty} × {formatRupiah(item.price)}</div>
+                {item.promoDiscount>0 && <div className="flex justify-between text-green-600"><span>🎁 {item.promoName}</span><span>-{formatRupiah(item.promoDiscount)}</span></div>}
               </div>
             ))}
             {data.pakets.map((p: any, i: number) => (
               <div key={i} className="flex justify-between"><span className="flex-1 pr-2">{p.name}</span><span>{formatRupiah(p.subtotal)}</span></div>
             ))}
-            <div className="border-t border-dashed border-gray-300 my-2" />
+            <div className="border-t border-dashed border-gray-300 my-2"/>
             <div className="flex justify-between"><span>Subtotal</span><span>{formatRupiah(data.rawSubtotal)}</span></div>
-            {data.rawDiscount > 0 && <div className="flex justify-between text-green-600"><span>Diskon</span><span>-{formatRupiah(data.rawDiscount)}</span></div>}
-            {data.ppnAmount > 0 && <div className="flex justify-between"><span>PPN {data.ppnPct}%</span><span>+{formatRupiah(data.ppnAmount)}</span></div>}
+            {data.rawDiscount>0 && <div className="flex justify-between text-green-600"><span>Diskon</span><span>-{formatRupiah(data.rawDiscount)}</span></div>}
+            {data.ppnAmount>0 && <div className="flex justify-between"><span>PPN {data.ppnPct}%</span><span>+{formatRupiah(data.ppnAmount)}</span></div>}
             <div className="flex justify-between font-bold text-sm border-t border-dashed border-gray-300 pt-1 mt-1"><span>TOTAL</span><span>{formatRupiah(data.grandTotal)}</span></div>
-            <div className="flex justify-between"><span>Bayar ({payLabel[data.payMethod] || data.payMethod})</span><span>{formatRupiah(data.cashPaid)}</span></div>
-            {data.payMethod === 'cash' && data.change > 0 && <div className="flex justify-between font-bold"><span>Kembali</span><span>{formatRupiah(data.change)}</span></div>}
-            <div className="border-t border-dashed border-gray-300 my-2" />
+            <div className="flex justify-between"><span>Bayar ({payLabel[data.payMethod]||data.payMethod})</span><span>{formatRupiah(data.cashPaid)}</span></div>
+            {data.payMethod==='cash'&&data.change>0 && <div className="flex justify-between font-bold"><span>Kembali</span><span>{formatRupiah(data.change)}</span></div>}
+            <div className="border-t border-dashed border-gray-300 my-2"/>
             <div className="text-center text-xs text-gray-400">Terima kasih atas kunjungan Anda</div>
             <div className="text-center text-xs text-gray-400">Coco Puff — {data.storeName}</div>
           </div>
         </div>
         <div className="px-4 pb-4 space-y-2 flex-shrink-0">
-          <button onClick={printMode === 'rawbt' ? handleRawBT : handlePrint}
+          <button onClick={printMode==='rawbt'?handleRawBT:handlePrint}
             className={`w-full py-3 rounded-xl text-white text-sm font-semibold ${printMode==='rawbt'?'bg-blue-600':'bg-gray-900'}`}>
-            {printMode === 'rawbt' ? '📱 Print via RawBT' : '🖨️ Print Struk'}
+            {printMode==='rawbt'?'📱 Print via RawBT':'🖨️ Print Struk'}
           </button>
           <button onClick={onClose} className="w-full py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Tutup</button>
         </div>

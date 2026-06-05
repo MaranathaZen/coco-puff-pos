@@ -449,11 +449,42 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
         }
       }
 
-      const existing2 = await db.finished_goods_stock.filter(f => f.product_name === productName.trim()).first()
+      // FIX: cari material yang namanya sama dengan produk yang dihasilkan
+      // Kalau ada di materials → pakai ID-nya supaya konsisten dengan resep BOM kasir
+      // Kalau tidak ada → buat material baru sekalian supaya stok kasir bisa match
+      const existingMat = await db.materials.filter(m =>
+        m.name.toLowerCase() === productName.trim().toLowerCase()
+      ).first()
+
+      let fgsProductId: string
+      if (existingMat) {
+        // Pakai ID material yang sudah ada
+        fgsProductId = existingMat.id
+      } else {
+        // Buat material baru dengan ID yang konsisten
+        const newMatId = `mat-${generateId().slice(0,8)}`
+        const newMat: any = {
+          id: newMatId, name: productName.trim(), unit: selectedRecipe?.yield_unit || 'pcs',
+          unit_cost: hppPerUnit, min_stock: 0, category: 'bahan_setengah_jadi',
+          is_active: true, created_at: now(), updated_at: now(),
+        }
+        await db.materials.put(newMat)
+        await supabase.from('materials').upsert(newMat)
+        fgsProductId = newMatId
+      }
+
+      // Update HPP di materials supaya resep BOM bisa hitung biaya
+      if (hppPerUnit > 0) {
+        await db.materials.update(fgsProductId, { unit_cost: hppPerUnit, avg_cost: hppPerUnit, updated_at: now() } as any)
+        await supabase.from('materials').update({ unit_cost: hppPerUnit, avg_cost: hppPerUnit }).eq('id', fgsProductId)
+      }
+
+      const existing2 = await db.finished_goods_stock.filter(f =>
+        f.product_name === productName.trim() || f.product_id === fgsProductId
+      ).first()
       const fgsId     = existing2?.id || generateId()
-      const fgsProdId = existing2?.product_id || `fgs-${generateId().slice(0,8)}`
       const newFgsQty = (existing2?.qty_on_hand || 0) + finalYield
-      const fgsData: any = { id: fgsId, product_id: fgsProdId, product_name: productName.trim(), qty_on_hand: newFgsQty, hpp_per_unit: hppPerUnit, last_updated: now() }
+      const fgsData: any = { id: fgsId, product_id: fgsProductId, product_name: productName.trim(), qty_on_hand: newFgsQty, hpp_per_unit: hppPerUnit, last_updated: now() }
       await db.finished_goods_stock.put(fgsData)
       if (existing2) {
         await supabase.from('finished_goods_stock').update({ qty_on_hand: newFgsQty, hpp_per_unit: hppPerUnit, last_updated: now() }).eq('id', fgsId)

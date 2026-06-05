@@ -69,16 +69,16 @@ export default function CashierPage() {
 
   // PPN dari settings
   const ppnSetting = useLiveQuery(async () => {
-  try {
-    const store = await db.stores.get(STORE_ID)
-    if (!store) return 0
-    const enabled = (store as any).ppn_enabled
-    const rate    = (store as any).ppn_rate
-    if (!enabled) return 0
-    return Number(rate) || 0
-  } catch { return 0 }
-}, [STORE_ID])
-const ppnPct = ppnSetting ?? 0
+    try {
+      const keys = ['ppn_percent', 'ppn', 'tax_percent']
+      for (const key of keys) {
+        const s = await (db as any).settings?.get?.(key)
+        if (s?.value !== undefined) return Number(s.value) || 0
+      }
+      return 0
+    } catch { return 0 }
+  }, [])
+  const ppnPct = ppnSetting ?? 0
 
   const [mainTab,       setMainTab]       = useState<MainTab>('pos')
   const [orderType,     setOrderType]     = useState<OrderType>('take_away')
@@ -270,8 +270,13 @@ const ppnPct = ppnSetting ?? 0
       const updated: any = { ...voidTx, status: newStatus, void_reason: voidReason.trim(), voided_by: user!.id, voided_at: now() }
       await db.transactions.put(updated)
       await supabase.from('transactions').update({ status: newStatus, void_reason: voidReason.trim(), voided_by: user!.id, voided_at: updated.voided_at }).eq('id', voidTx.id)
-      if (isOwnerMgr) toast.success(`Transaksi ${voidTx.receipt_no} di-void`)
-      else            toast.success(`Request void ${voidTx.receipt_no} dikirim ke owner`)
+      // FIX: kembalikan stok kalau owner/manager langsung void
+      if (isOwnerMgr) {
+        await restoreStockFromVoid(voidTx.id, STORE_ID)
+        toast.success(`Transaksi ${voidTx.receipt_no} di-void & stok dikembalikan`)
+      } else {
+        toast.success(`Request void ${voidTx.receipt_no} dikirim ke owner`)
+      }
       setShowVoidModal(false); setVoidTx(null); setVoidReason('')
     } catch { toast.error('Gagal void transaksi') }
     finally { setIsVoiding(false) }
@@ -307,6 +312,9 @@ const ppnPct = ppnSetting ?? 0
         (r as any).recipe_type !== 'production' && !r.product_id?.startsWith('prod-toko-')
       )
       const recipeItems = await db.store_recipe_items.toArray()
+      const allMaterials = await db.materials.toArray()
+      const matMap = Object.fromEntries(allMaterials.map(m => [m.id, m]))
+
       for (const txItem of txItems) {
         const recipe = bomRecipes.find(r => r.product_id === txItem.product_id)
         if (!recipe) continue
@@ -316,18 +324,90 @@ const ppnPct = ppnSetting ?? 0
         for (const ri of riList) {
           const qty = ri.qty_used * totalQty
           if ((ri as any).source === 'store' || !(ri as any).source) {
-            const storeStock = await db.stock.filter(s =>
-              s.store_id === storeId && (s.ingredient_id === ri.material_id || (s as any).material_id === ri.material_id)
+            // FIX: cari stok dulu pakai ID, kalau tidak ada cari pakai nama material
+            let storeStock = await db.stock.filter(s =>
+              s.store_id === storeId && (
+                s.ingredient_id === ri.material_id ||
+                (s as any).material_id === ri.material_id
+              )
             ).first()
+
+            // Fallback: cari berdasarkan nama material (untuk kasus ID tidak match)
+            if (!storeStock) {
+              const matName = matMap[ri.material_id]?.name?.toLowerCase()
+              if (matName) {
+                const allStocks = await db.stock.where('store_id').equals(storeId).toArray()
+                for (const s of allStocks) {
+                  const sMatId = s.ingredient_id || (s as any).material_id || ''
+                  const sMat   = matMap[sMatId]
+                  if (sMat?.name?.toLowerCase() === matName) {
+                    storeStock = s
+                    break
+                  }
+                }
+              }
+            }
+
             if (storeStock) {
               const newQty = Math.max(0, storeStock.qty_on_hand - qty)
+              await db.stock.update(storeStock.id, { qty_on_hand: newQty, last_updated: now() })
+              supabase.from('stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', storeStock.id).then(() => {})
+            } else {
+              console.warn('[BOM] Stok tidak ditemukan untuk:', matMap[ri.material_id]?.name || ri.material_id)
+            }
+          }
+        }
+      }
+    } catch (e) { console.warn('[BOM]', e) }
+  }
+
+  // FIX: kembalikan stok saat void disetujui
+  async function restoreStockFromVoid(txId: string, storeId: string) {
+    try {
+      const txItems = await db.transaction_items.where('transaction_id').equals(txId).toArray()
+      const allRecipes  = await db.store_recipes.where('store_id').equals(storeId).filter(r => r.is_active).toArray()
+      const bomRecipes  = allRecipes.filter(r =>
+        (r as any).recipe_type !== 'production' && !r.product_id?.startsWith('prod-toko-')
+      )
+      const recipeItems = await db.store_recipe_items.toArray()
+      const allMaterials = await db.materials.toArray()
+      const matMap = Object.fromEntries(allMaterials.map(m => [m.id, m]))
+
+      for (const txItem of txItems) {
+        const recipe = bomRecipes.find(r => r.product_id === txItem.product_id)
+        if (!recipe) continue
+        const riList   = recipeItems.filter(ri => ri.recipe_id === recipe.id)
+        const totalQty = (txItem.qty_eceran || 0) + (txItem.qty_dus || 0)
+        if (totalQty <= 0) continue
+        for (const ri of riList) {
+          const qty = ri.qty_used * totalQty
+          if ((ri as any).source === 'store' || !(ri as any).source) {
+            let storeStock = await db.stock.filter(s =>
+              s.store_id === storeId && (
+                s.ingredient_id === ri.material_id ||
+                (s as any).material_id === ri.material_id
+              )
+            ).first()
+            if (!storeStock) {
+              const matName = matMap[ri.material_id]?.name?.toLowerCase()
+              if (matName) {
+                const allStocks = await db.stock.where('store_id').equals(storeId).toArray()
+                for (const s of allStocks) {
+                  const sMatId = s.ingredient_id || (s as any).material_id || ''
+                  const sMat   = matMap[sMatId]
+                  if (sMat?.name?.toLowerCase() === matName) { storeStock = s; break }
+                }
+              }
+            }
+            if (storeStock) {
+              const newQty = storeStock.qty_on_hand + qty
               await db.stock.update(storeStock.id, { qty_on_hand: newQty, last_updated: now() })
               supabase.from('stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', storeStock.id).then(() => {})
             }
           }
         }
       }
-    } catch (e) { console.warn('[BOM]', e) }
+    } catch (e) { console.warn('[VOID RESTORE]', e) }
   }
 
   async function handleCheckout() {
@@ -542,15 +622,12 @@ const ppnPct = ppnSetting ?? 0
                         <div className="flex gap-1">
                           <button onClick={async e => {
                             e.stopPropagation()
-                            const txItems = await db.transaction_items.where('transaction_id').equals(tx.id).toArray()
-                            for (const item of txItems) {
-                              const stk = await db.stock.where('store_id').equals(STORE_ID).and(s => s.product_id === item.product_id).first()
-                              if (stk) await db.stock.update(stk.id, { qty: (stk.qty||0) + (item.qty_eceran||0) })
-                            }
+                            // FIX: kembalikan stok saat void disetujui
+                            await restoreStockFromVoid(tx.id, STORE_ID)
                             const upd: any = { ...tx, status: 'voided' }
                             await db.transactions.put(upd)
                             await supabase.from('transactions').update({ status: 'voided' }).eq('id', tx.id)
-                            toast.success('Void disetujui')
+                            toast.success('Void disetujui & stok dikembalikan')
                           }} className="text-xs text-white bg-red-500 px-2 py-0.5 rounded-lg">✓</button>
                           <button onClick={async e => {
                             e.stopPropagation()

@@ -1,8 +1,11 @@
 // src/pages/produksi/ProduksiPage.tsx
-// CHANGELOG v2:
-// - FIX Bug 3: loading state + skeleton saat sync, feedback lebih cepat
-// - FIX Bug 3: sync lebih efisien — hanya pull yang belum ada / perlu update
-// - Tidak ada perubahan logic produksi / kirim produk
+// CHANGELOG v3:
+// - FIX CRITICAL: query recipes di ProduksiTokoTab pakai .where('store_id').equals()
+//   lalu filter recipe_type di JS — bukan langsung filter di .filter() karena
+//   recipe_type tidak ada di Dexie index sehingga data tidak terdeteksi
+// - FIX: sync store_recipes + items diperkuat — pull SEMUA items (tidak filter store_id)
+//   karena store_recipe_items tidak punya store_id, hanya recipe_id
+// - FIX: auto-sync dipanggil saat komponen mount + activeStoreId berubah
 
 import { useState, useEffect, useMemo, createContext, useContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -75,7 +78,6 @@ function CopyBtn({ text }: { text: string }) {
   )
 }
 
-// FIX Bug 3: loading skeleton
 function LoadingSkeleton() {
   return (
     <div className="p-4 space-y-3 animate-pulse">
@@ -96,15 +98,14 @@ export default function ProduksiPage() {
   const { user } = useAuthStore()
   const role = user?.role || 'produksi'
   const isOwnerManager = ['owner','manager'].includes(role)
-  const canSeeToko = ['owner','manager','kasir'].includes(role)
+  const canSeeToko   = ['owner','manager','kasir'].includes(role)
   const canSeeDivisi = ['owner','manager','produksi'].includes(role)
   const defaultTab: ProduksiTab = canSeeDivisi ? 'divisi' : 'toko'
-  const [activeTab, setActiveTab] = useState<ProduksiTab>(defaultTab)
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [isInitialLoad, setIsInitialLoad] = useState(true)
+  const [activeTab,      setActiveTab]      = useState<ProduksiTab>(defaultTab)
+  const [isSyncing,      setIsSyncing]      = useState(false)
+  const [isInitialLoad,  setIsInitialLoad]  = useState(true)
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
 
-  // FIX Bug 3: cek apakah data lokal sudah ada sebelum tampil loading
   const hasLocalData = useLiveQuery(async () => {
     const count = await db.production_recipes.count()
     return count > 0
@@ -114,18 +115,11 @@ export default function ProduksiPage() {
     if (hasLocalData !== undefined) setIsInitialLoad(false)
   }, [hasLocalData])
 
-  async function generateLogNumber(): Promise<string> {
-  const ds = new Date().toISOString().slice(0,10).replace(/-/g,'')
-  const prefix = `PROD-${ds}-`
-  const existing = await db.production_logs.filter(l => (l as any).log_number?.startsWith(prefix)).toArray()
-  return `${prefix}${String(existing.length + 1).padStart(3,'0')}`
-}
-
-async function syncData() {
+  async function syncData() {
     setIsSyncing(true)
     try {
-      // FIX Bug 3: parallel fetch semua sekaligus, bukan sequential
-      const [mats, pstock, fgs, recipes, recipeItems, logs, mutations, mutItems, partners, products, stores] = await Promise.all([
+      const storeId = user?.store_id || ''
+      const [mats, pstock, fgs, recipes, recipeItems, logs, mutations, mutItems, partners, products, stores, storeRecipes, storeRecipeItems] = await Promise.all([
         supabase.from('materials').select('*').eq('is_active', true),
         supabase.from('production_stock').select('*'),
         supabase.from('finished_goods_stock').select('*'),
@@ -137,21 +131,26 @@ async function syncData() {
         supabase.from('partners').select('*'),
         supabase.from('products').select('*').eq('is_active', true),
         supabase.from('stores').select('*').eq('is_active', true),
+        // FIX: selalu sync store_recipes + items saat syncData dipanggil
+        storeId ? supabase.from('store_recipes').select('*').eq('store_id', storeId) : Promise.resolve({ data: [] }),
+        supabase.from('store_recipe_items').select('*'),
       ])
 
-      // Semua tulis ke Dexie sekaligus — tidak perlu await satu per satu
       await Promise.all([
-        mats.data?.length      ? db.materials.bulkPut(mats.data)                       : Promise.resolve(),
-        pstock.data !== null   ? (async () => { await db.production_stock.clear();      if (pstock.data?.length)   await db.production_stock.bulkPut(pstock.data)      })() : Promise.resolve(),
-        fgs.data?.length       ? db.finished_goods_stock.bulkPut(fgs.data)                : Promise.resolve(),
-        recipes.data !== null  ? (async () => { await db.production_recipes.clear();    if (recipes.data?.length)  await db.production_recipes.bulkPut(recipes.data)    })() : Promise.resolve(),
+        mats.data?.length        ? db.materials.bulkPut(mats.data)                          : Promise.resolve(),
+        pstock.data !== null     ? (async () => { await db.production_stock.clear();         if (pstock.data?.length)      await db.production_stock.bulkPut(pstock.data)      })() : Promise.resolve(),
+        fgs.data?.length         ? db.finished_goods_stock.bulkPut(fgs.data)                : Promise.resolve(),
+        recipes.data !== null    ? (async () => { await db.production_recipes.clear();       if (recipes.data?.length)     await db.production_recipes.bulkPut(recipes.data)    })() : Promise.resolve(),
         recipeItems.data !== null ? (async () => { await db.production_recipe_items.clear(); if (recipeItems.data?.length) await db.production_recipe_items.bulkPut(recipeItems.data) })() : Promise.resolve(),
-        logs.data?.length      ? db.production_logs.bulkPut(logs.data)                 : Promise.resolve(),
-        mutations.data?.length ? db.production_mutations.bulkPut(mutations.data)       : Promise.resolve(),
-        mutItems.data?.length  ? db.production_mutation_items.bulkPut(mutItems.data)   : Promise.resolve(),
-        partners.data?.length  ? db.partners.bulkPut(partners.data)                    : Promise.resolve(),
-        products.data?.length  ? db.products.bulkPut(products.data)                    : Promise.resolve(),
-        stores.data?.length    ? db.stores.bulkPut(stores.data)                        : Promise.resolve(),
+        logs.data?.length        ? db.production_logs.bulkPut(logs.data)                    : Promise.resolve(),
+        mutations.data?.length   ? db.production_mutations.bulkPut(mutations.data)          : Promise.resolve(),
+        mutItems.data?.length    ? db.production_mutation_items.bulkPut(mutItems.data)      : Promise.resolve(),
+        partners.data?.length    ? db.partners.bulkPut(partners.data)                       : Promise.resolve(),
+        products.data?.length    ? db.products.bulkPut(products.data)                       : Promise.resolve(),
+        stores.data?.length      ? db.stores.bulkPut(stores.data)                           : Promise.resolve(),
+        // FIX: store_recipes dan items selalu di-upsert (bulkPut), tidak pernah di-clear
+        (storeRecipes as any).data?.length    ? db.store_recipes.bulkPut((storeRecipes as any).data)         : Promise.resolve(),
+        (storeRecipeItems as any).data?.length ? db.store_recipe_items.bulkPut((storeRecipeItems as any).data) : Promise.resolve(),
       ])
 
       toast.success('Data produksi diperbarui')
@@ -175,7 +174,6 @@ async function syncData() {
         </div>
       </div>
 
-      {/* FIX Bug 3: tampilkan progress saat sync */}
       {isSyncing && (
         <div className="px-4 py-2 flex-shrink-0">
           <div className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 flex items-center gap-2">
@@ -185,7 +183,6 @@ async function syncData() {
         </div>
       )}
 
-      {/* Tab selector hanya jika bisa akses keduanya */}
       {canSeeDivisi && canSeeToko && (
         <div className="bg-white border-b border-gray-100 flex flex-shrink-0">
           <button onClick={() => setActiveTab('divisi')}
@@ -234,6 +231,7 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
   )
 }
 
+// ── DIVISI PRODUKSI ───────────────────────────────────────────
 function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerManager?: boolean }) {
   const setToolbar = useContext(ToolbarCtx)
   const [showForm,       setShowForm]       = useState(false)
@@ -266,7 +264,6 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
     const mMap    = Object.fromEntries(matDefs.map(m => [m.id, m]))
     return l.map(log => {
       const logMats   = mats.filter(m => m.log_id === log.id).map(m => ({ ...m, material: mMap[m.material_id] }))
-      // Gunakan avg_cost produksi jika ada, fallback ke unit_cost material
       const totalCost = logMats.reduce((s, m) => s + m.qty_used * (m.material?.unit_cost || 0), 0)
       const hpp       = log.total_yield > 0 ? totalCost / log.total_yield : 0
       return { ...log, recipe: rMap[log.recipe_id], materials: logMats, total_cost: totalCost, hpp_per_unit: hpp }
@@ -275,7 +272,7 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
 
   const todayTotal = useMemo(() => {
     if (!logs) return { count: 0, yield: 0 }
-    const today    = new Date().toISOString().slice(0, 10)
+    const today     = new Date().toISOString().slice(0, 10)
     const todayLogs = logs.filter(l => l.created_at.slice(0,10) === today)
     return { count: todayLogs.length, yield: todayLogs.reduce((s, l) => s + l.total_yield, 0) }
   }, [logs])
@@ -389,14 +386,13 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
 }
 
 function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isOwnerManager?: boolean; onClose: () => void }) {
-  // Owner/manager bisa input produksi atas nama divisi produksi atau toko lain
   const allStores = useLiveQuery(() =>
     isOwnerManager
       ? db.stores.filter(s => s.is_active).toArray()
       : Promise.resolve([])
   , [isOwnerManager])
-  const defaultInputStore = ''  // kosong = divisi produksi
-  const [inputAsStore, setInputAsStore] = useState(defaultInputStore)
+
+  const [inputAsStore, setInputAsStore] = useState('')
   const recipes = useLiveQuery(() => db.production_recipes.filter(r => r.is_active).toArray(), [])
 
   const [recipeId,    setRecipeId]    = useState('')
@@ -411,16 +407,13 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
   const totalYield     = actualYield && Number(actualYield) > 0 ? Number(actualYield) : estimatedYield
 
   useEffect(() => {
-    if (selectedRecipe) {
-      setProduct((selectedRecipe as any).product_name || selectedRecipe.name)
-    }
+    if (selectedRecipe) setProduct((selectedRecipe as any).product_name || selectedRecipe.name)
   }, [recipeId])
 
   async function handleSave() {
     if (!recipeId)               return toast.error('Pilih resep')
     if (!productName.trim())     return toast.error('Nama produk wajib diisi')
     if (Number(batchCount) <= 0) return toast.error('Jumlah batch harus lebih dari 0')
-
     setSaving(true)
     try {
       const recipeItems = await db.production_recipe_items.where('recipe_id').equals(recipeId).toArray()
@@ -462,35 +455,13 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
       const fgsId     = existing2?.id || generateId()
       const fgsProdId = existing2?.product_id || `fgs-${generateId().slice(0,8)}`
       const newFgsQty = (existing2?.qty_on_hand || 0) + finalYield
-      const fgsData: any = {
-        id:           fgsId,
-        product_id:   fgsProdId,
-        product_name: productName.trim(),
-        qty_on_hand:  newFgsQty,
-        hpp_per_unit: hppPerUnit,
-        last_updated: now(),
-      }
-      // Simpan ke Dexie
+      const fgsData: any = { id: fgsId, product_id: fgsProdId, product_name: productName.trim(), qty_on_hand: newFgsQty, hpp_per_unit: hppPerUnit, last_updated: now() }
       await db.finished_goods_stock.put(fgsData)
-      // Simpan ke Supabase — coba upsert dulu, fallback ke insert+update
       if (existing2) {
-        // Update existing
-        const { error: fgsErr } = await supabase.from('finished_goods_stock')
-          .update({ qty_on_hand: newFgsQty, hpp_per_unit: hppPerUnit, last_updated: now() })
-          .eq('id', fgsId)
-        if (fgsErr) console.error('[FGS UPDATE ERROR]', fgsErr)
+        await supabase.from('finished_goods_stock').update({ qty_on_hand: newFgsQty, hpp_per_unit: hppPerUnit, last_updated: now() }).eq('id', fgsId)
       } else {
-        // Insert baru — log untuk debug
-        console.log('[FGS INSERT]', JSON.stringify(fgsData))
-        const { error: fgsErr } = await supabase.from('finished_goods_stock').insert(fgsData)
-        if (fgsErr) {
-          console.error('[FGS INSERT ERROR]', fgsErr)
-          // Coba upsert sebagai fallback
-          const { error: upsertErr } = await supabase.from('finished_goods_stock').upsert(fgsData)
-          if (upsertErr) console.error('[FGS UPSERT FALLBACK ERROR]', upsertErr)
-        } else {
-          console.log('[FGS INSERT SUCCESS]', fgsData.product_name, fgsData.qty_on_hand)
-        }
+        const { error } = await supabase.from('finished_goods_stock').insert(fgsData)
+        if (error) await supabase.from('finished_goods_stock').upsert(fgsData)
       }
 
       toast.success(`Produksi ${logNumber} dicatat: ${totalYield} ${selectedRecipe?.yield_unit || 'pcs'}`)
@@ -553,8 +524,7 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
       </div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving}
-          className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
           {saving ? 'Menyimpan...' : 'Simpan'}
         </button>
       </div>
@@ -580,41 +550,26 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
     if (!valid.length) return toast.error('Tambahkan minimal 1 produk')
     if ((type === 'to_store' || type === 'return_from_store') && !destId) return toast.error('Pilih toko tujuan')
     if (type === 'to_partner' && !destId) return toast.error('Pilih franchise tujuan')
-
-    // Validasi stok cukup
     for (const item of valid) {
       const fg = fgStocks?.find(f => f.product_id === item.product_id)
       if (fg && type !== 'return_from_store' && Number(item.qty) > fg.qty_on_hand) {
         return toast.error(`Stok ${fg.product_name} tidak cukup (tersedia: ${fg.qty_on_hand})`)
       }
     }
-
     setSaving(true)
     try {
       let destName = ''
       if (type === 'to_store' || type === 'return_from_store') destName = stores?.find(s => s.id === destId)?.name || ''
       else if (type === 'to_partner') destName = partners?.find(p => p.id === destId)?.name || ''
-
       const mutId = generateId()
-      const mut: any = {
-        id: mutId, mutation_type: type,
-        destination_id: destId || undefined, destination_name: destName || undefined,
-        notes: notes || undefined, status: 'confirmed',
-        created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId,
-      }
+      const mut: any = { id: mutId, mutation_type: type, destination_id: destId || undefined, destination_name: destName || undefined, notes: notes || undefined, status: 'confirmed', created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId }
       await db.production_mutations.add(mut)
       await supabase.from('production_mutations').insert(mut)
-
       for (const item of valid) {
         const fg = fgStocks?.find(s => s.product_id === item.product_id)
-        const mi: any = {
-          id: generateId(), mutation_id: mutId,
-          product_id: item.product_id, product_name: fg?.product_name || '',
-          qty: Number(item.qty),
-        }
+        const mi: any = { id: generateId(), mutation_id: mutId, product_id: item.product_id, product_name: fg?.product_name || '', qty: Number(item.qty) }
         await db.production_mutation_items.add(mi)
         await supabase.from('production_mutation_items').insert(mi)
-
         if (fg) {
           const isReturn = type === 'return_from_store'
           const newQty   = isReturn ? fg.qty_on_hand + Number(item.qty) : Math.max(0, fg.qty_on_hand - Number(item.qty))
@@ -658,9 +613,7 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
       <div>
         <Label required>Produk</Label>
         {(!fgStocks || fgStocks.length === 0) ? (
-          <div className="bg-gray-50 rounded-xl p-4 text-center text-sm text-gray-400">
-            Belum ada produk jadi di stok
-          </div>
+          <div className="bg-gray-50 rounded-xl p-4 text-center text-sm text-gray-400">Belum ada produk jadi di stok</div>
         ) : (
           <div className="space-y-2">
             {items.map((item, i) => {
@@ -672,10 +625,8 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
                     <option value="">Pilih produk</option>
                     {fgStocks?.map(s => <option key={s.product_id} value={s.product_id}>{s.product_name} (stok: {s.qty_on_hand})</option>)}
                   </select>
-                  <input className="input text-sm" type="number"
-                    placeholder={fg ? `Qty (max ${fg.qty_on_hand})` : 'Qty'}
-                    value={item.qty}
-                    onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,qty:e.target.value} : x))} />
+                  <input className="input text-sm" type="number" placeholder={fg ? `Qty (max ${fg.qty_on_hand})` : 'Qty'}
+                    value={item.qty} onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,qty:e.target.value} : x))} />
                   {items.length > 1 && <button onClick={() => setItems(p => p.filter((_,idx) => idx!==i))} className="text-xs text-red-500">Hapus</button>}
                 </div>
               )
@@ -693,8 +644,7 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
       <div><Label>Catatan</Label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opsional" /></div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving}
-          className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
           {saving ? 'Menyimpan...' : 'Simpan'}
         </button>
       </div>
@@ -703,11 +653,10 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
 }
 
 // ── PRODUKSI TOKO ─────────────────────────────────────────────
-// Kasir/toko buat bahan setengah jadi (Fla, Teh, dll) dari bahan baku toko
 function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: string; role: string }) {
   const isOwnerManager = ['owner','manager'].includes(role)
+  const [isSyncing, setIsSyncing] = useState(false)
 
-  // Filter toko real untuk owner/manager
   const stores = useLiveQuery(() =>
     isOwnerManager
       ? db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray()
@@ -716,36 +665,52 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
 
   const [activeStoreId, setActiveStoreId] = useState(storeId)
   const [showForm, setShowForm] = useState(false)
-  const [search, setSearch] = useState('')
 
   useEffect(() => {
-    if (isOwnerManager && storeId.includes('gudang') || storeId.includes('produksi')) {
+    if (isOwnerManager && (storeId.includes('gudang') || storeId.includes('produksi'))) {
       if (stores && stores.length > 0) setActiveStoreId(stores[0].id)
     }
   }, [stores])
 
-  // Resep produksi toko dari store_recipes dengan recipe_type='production'
-  const recipes = useLiveQuery(() =>
-    db.store_recipes.filter(r => r.store_id === activeStoreId && (r as any).recipe_type === 'production').toArray()
-  , [activeStoreId])
+  // FIX CRITICAL: sync store_recipes + items setiap kali activeStoreId berubah
+  // dan saat komponen pertama kali mount
+  async function syncStoreRecipes(sid: string) {
+    setIsSyncing(true)
+    try {
+      const [{ data: recs }, { data: items }] = await Promise.all([
+        supabase.from('store_recipes').select('*').eq('store_id', sid),
+        supabase.from('store_recipe_items').select('*'),
+      ])
+      if (recs?.length) await db.store_recipes.bulkPut(recs)
+      if (items?.length) await db.store_recipe_items.bulkPut(items)
+      console.log('[ProduksiToko] sync done:', recs?.length, 'resep,', items?.length, 'items')
+    } catch (e) {
+      console.warn('[ProduksiToko] sync gagal:', e)
+    } finally {
+      setIsSyncing(false)
+    }
+  }
 
-  // Auto-sync store_recipes + items saat tab dibuka
   useEffect(() => {
     if (!activeStoreId) return
-    Promise.all([
-      supabase.from('store_recipes').select('*').eq('store_id', activeStoreId),
-      supabase.from('store_recipe_items').select('*'),
-    ]).then(([{ data: recs }, { data: items }]) => {
-      if (recs?.length) db.store_recipes.bulkPut(recs)
-      if (items?.length) db.store_recipe_items.bulkPut(items)
-    })
+    syncStoreRecipes(activeStoreId)
   }, [activeStoreId])
 
-  // Log produksi toko (simpan di production_logs dengan store_id)
+  // FIX CRITICAL: query pakai .where('store_id').equals() dulu
+  // lalu filter recipe_type === 'production' di JS
+  // JANGAN langsung .filter() dengan kedua kondisi sekaligus karena
+  // recipe_type tidak ada di Dexie index → data tidak ter-cache dengan benar
+  const recipes = useLiveQuery(async () => {
+    // Step 1: ambil semua store_recipes untuk toko ini (pakai index store_id)
+    const all = await db.store_recipes.where('store_id').equals(activeStoreId).toArray()
+    // Step 2: filter recipe_type di JavaScript (bukan di Dexie query)
+    return all.filter(r => (r as any).recipe_type === 'production')
+  }, [activeStoreId])
+
   const logs = useLiveQuery(async () => {
-    const today = new Date().toISOString().slice(0, 10)
+    const today = new Date().toLocaleDateString('sv-SE')
     const all = await db.production_logs
-      .filter(l => (l as any).store_id === activeStoreId && l.created_at.startsWith(today))
+      .filter(l => (l as any).store_id === activeStoreId && l.created_at.slice(0, 10) === today)
       .reverse().sortBy('created_at')
     const rMap = Object.fromEntries((await db.store_recipes.toArray()).map(r => [r.id, r]))
     return all.map(l => ({ ...l, recipe: rMap[(l as any).recipe_id] }))
@@ -755,7 +720,6 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
 
   return (
     <div className="p-4 space-y-4">
-      {/* Store selector untuk owner/manager */}
       {isOwnerManager && stores && stores.length > 1 && (
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
           {stores.map(s => (
@@ -767,7 +731,6 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
         </div>
       )}
 
-      {/* Summary */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400">Produksi Hari Ini</p>
@@ -776,17 +739,36 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400">Resep Tersedia</p>
-          <p className="text-lg font-bold text-blue-600">{recipes?.length || 0}</p>
+          <p className="text-lg font-bold text-blue-600">
+            {isSyncing ? '...' : (recipes?.length || 0)}
+          </p>
           <p className="text-xs text-gray-400">jenis produk</p>
         </div>
       </div>
 
-      <button onClick={() => setShowForm(true)}
-        className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white py-3 rounded-xl text-sm font-semibold">
+      {isSyncing && (
+        <div className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 flex items-center gap-2">
+          <RefreshCw size={12} className="animate-spin text-blue-500 flex-shrink-0" />
+          <p className="text-xs text-blue-600">Memuat resep...</p>
+        </div>
+      )}
+
+      <button onClick={() => setShowForm(true)} disabled={isSyncing}
+        className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50">
         + Catat Produksi Toko
       </button>
 
-      {/* Log hari ini */}
+      {!isSyncing && recipes?.length === 0 && (
+        <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-center">
+          <p className="text-sm font-medium text-amber-800">Belum ada resep produksi toko</p>
+          <p className="text-xs text-amber-600 mt-1">Buat resep di menu Resep → Resep Produksi Toko</p>
+          <button onClick={() => syncStoreRecipes(activeStoreId)}
+            className="mt-2 text-xs text-blue-600 border border-blue-200 px-3 py-1 rounded-lg">
+            Sync ulang resep
+          </button>
+        </div>
+      )}
+
       {logs && logs.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
           <div className="px-4 py-2.5 border-b border-gray-50">
@@ -807,13 +789,6 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
         </div>
       )}
 
-      {recipes?.length === 0 && (
-        <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-center">
-          <p className="text-sm font-medium text-amber-800">Belum ada resep produksi toko</p>
-          <p className="text-xs text-amber-600 mt-1">Buat resep di menu Resep → Resep Produksi Toko</p>
-        </div>
-      )}
-
       {showForm && (
         <ProduksiTokoForm
           userId={userId}
@@ -829,10 +804,10 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
 function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
   userId: string; storeId: string; recipes: any[]; onClose: () => void
 }) {
-  const [recipeId,    setRecipeId]    = useState('')
-  const [batchCount,  setBatchCount]  = useState('1')
-  const [notes,       setNotes]       = useState('')
-  const [saving,      setSaving]      = useState(false)
+  const [recipeId,   setRecipeId]   = useState('')
+  const [batchCount, setBatchCount] = useState('1')
+  const [notes,      setNotes]      = useState('')
+  const [saving,     setSaving]     = useState(false)
 
   const selectedRecipe = recipes.find(r => r.id === recipeId)
   const batchYield = (selectedRecipe as any)?.batch_yield || 1
@@ -840,27 +815,20 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
   const finalYield = Number(batchCount) * batchYield
 
   async function handleSave() {
-    if (!recipeId) return toast.error('Pilih resep')
+    if (!recipeId)               return toast.error('Pilih resep')
     if (Number(batchCount) <= 0) return toast.error('Batch harus lebih dari 0')
     setSaving(true)
     try {
-      const logId = generateId()
-      // Generate nomor produksi toko
-      const ds = new Date().toISOString().slice(0,10).replace(/-/g,'')
-      const prefix = `PTOKO-${ds}-`
+      const logId    = generateId()
+      const ds       = new Date().toISOString().slice(0,10).replace(/-/g,'')
+      const prefix   = `PTOKO-${ds}-`
       const existing = await db.production_logs.filter(l => (l as any).log_number?.startsWith(prefix)).toArray()
       const logNumber = `${prefix}${String(existing.length + 1).padStart(3,'0')}`
 
       const logData: any = {
-        id:          logId,
-        log_number:  logNumber,
-        recipe_id:   recipeId,
-        batch_count: Number(batchCount),
-        total_yield: finalYield,
-        notes:       notes || undefined,
-        created_by:  userId,
-        store_id:    storeId,  // tag toko
-        created_at:  now(),
+        id: logId, log_number: logNumber, recipe_id: recipeId,
+        batch_count: Number(batchCount), total_yield: finalYield,
+        notes: notes || undefined, created_by: userId, store_id: storeId, created_at: now(),
       }
       await db.production_logs.add(logData)
       const { error } = await supabase.from('production_logs').insert(logData)
@@ -869,7 +837,7 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
       // Kurangi bahan dari stok toko
       const recipeItems = await db.store_recipe_items.where('recipe_id').equals(recipeId).toArray()
       for (const ri of recipeItems) {
-        const used = ri.qty_used * Number(batchCount)
+        const used     = ri.qty_used * Number(batchCount)
         const existing = await db.stock
           .filter(s => s.store_id === storeId && (s.ingredient_id === ri.material_id || (s as any).material_id === ri.material_id))
           .first()
@@ -878,7 +846,6 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
           await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
           supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', existing.id).then(() => {})
         }
-        // Log material used
         const lm: any = { id: generateId(), log_id: logId, material_id: ri.material_id, qty_used: used }
         await db.production_log_materials.add(lm)
         supabase.from('production_log_materials').insert(lm).then(() => {})
@@ -887,7 +854,6 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
       // Tambah hasil ke stok toko sebagai bahan setengah jadi
       const productName = (selectedRecipe as any)?.product_name || ''
       if (productName) {
-        // Cari material yang namanya sama atau buat baru
         const mat = await db.materials.filter(m => m.name.toLowerCase() === productName.toLowerCase()).first()
         if (mat) {
           const existing = await db.stock
@@ -915,12 +881,18 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
     <Modal title="Catat Produksi Toko" onClose={onClose}>
       <div>
         <Label required>Pilih Resep</Label>
-        <select className="input" value={recipeId} onChange={e => setRecipeId(e.target.value)}>
-          <option value="">-- Pilih resep --</option>
-          {recipes.map(r => (
-            <option key={r.id} value={r.id}>{(r as any).product_name}</option>
-          ))}
-        </select>
+        {recipes.length === 0 ? (
+          <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-center">
+            <p className="text-xs text-amber-700">Belum ada resep. Buat di menu Resep → Resep Produksi Toko</p>
+          </div>
+        ) : (
+          <select className="input" value={recipeId} onChange={e => setRecipeId(e.target.value)}>
+            <option value="">-- Pilih resep --</option>
+            {recipes.map(r => (
+              <option key={r.id} value={r.id}>{(r as any).product_name}</option>
+            ))}
+          </select>
+        )}
       </div>
       {selectedRecipe && (
         <div className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
@@ -938,7 +910,8 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
       </div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+        <button onClick={handleSave} disabled={saving || recipes.length === 0}
+          className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
           {saving ? 'Menyimpan...' : 'Simpan'}
         </button>
       </div>

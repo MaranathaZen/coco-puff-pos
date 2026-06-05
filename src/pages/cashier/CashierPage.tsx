@@ -214,11 +214,23 @@ export default function CashierPage() {
       })
   }, [selectedCat, STORE_ID, orderType])
 
-  const [pakets, setPakets] = useState<PaketItem[]>([])
+  const [pakets, setPakets]           = useState<PaketItem[]>([])
+  const [paketProducts, setPaketProds] = useState<Record<string, string[]>>({}) // paketId → product_ids
+
   useLiveQuery(async () => {
-    const { data } = await supabase.from('packages').select('*').eq('is_active', true)
+    const { data: pkgs }   = await supabase.from('packages').select('*').eq('is_active', true)
       .or(`store_id.is.null,store_id.eq.${STORE_ID}`)
-    if (data) setPakets(data)
+    const { data: pkgItems } = await supabase.from('package_items').select('*')
+    if (pkgs) setPakets(pkgs)
+    if (pkgItems) {
+      // Map paketId → [product_id]
+      const map: Record<string, string[]> = {}
+      for (const item of pkgItems) {
+        if (!map[item.package_id]) map[item.package_id] = []
+        map[item.package_id].push(item.product_id)
+      }
+      setPaketProds(map)
+    }
   }, [STORE_ID])
 
   // FIX: filter hari ini di query
@@ -924,7 +936,11 @@ export default function CashierPage() {
             </div>
             <p className="text-center text-sm text-gray-600">{totalQtyPilih} / {selectedPaket.qty_total} dipilih</p>
             <div className="space-y-2 max-h-52 overflow-auto">
-              {products?.map(prod => {
+              {/* FIX #6: hanya tampil produk yang terdaftar di paket ini */}
+              {(selectedPaket && paketProducts[selectedPaket.id]
+                ? products?.filter(prod => paketProducts[selectedPaket.id].includes(prod.id))
+                : products
+              )?.map(prod => {
                 const pilihan = paketPilihan.find(p => p.product.id === prod.id)
                 return (
                   <div key={prod.id} className="flex items-center justify-between bg-gray-50 rounded-xl p-3">

@@ -795,7 +795,6 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
         </div>
       )}
 
-
       {!isSyncing && recipes?.length === 0 && (
         <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-center">
           <p className="text-sm font-medium text-amber-800">Belum ada resep produksi toko</p>
@@ -817,7 +816,11 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
               <div className="flex items-start justify-between">
                 <div className="flex-1 min-w-0">
                   {(l as any).log_number && (
-                    <p className="text-xs font-mono text-blue-600 mb-0.5">{(l as any).log_number}</p>
+                    <p className="text-xs font-mono text-blue-600 mb-0.5">
+                      {(l as any).log_number}
+                      {/* FIX #2: tambah CopyBtn di log produksi toko */}
+                      <CopyBtn text={(l as any).log_number} />
+                    </p>
                   )}
                   <p className="text-sm font-medium text-gray-900">{(l.recipe as any)?.product_name || 'Produksi'}</p>
                   <p className="text-xs text-gray-400">

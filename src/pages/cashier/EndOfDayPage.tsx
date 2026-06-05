@@ -1,8 +1,8 @@
 // src/pages/cashier/EndOfDayPage.tsx
-// CHANGELOG v2:
-// - Tambah Total Non Tunai di Penjualan Hari Ini
-// - Tambah info void hari ini (jumlah + total)
-// - Fix timezone filter untuk WIB
+// CHANGELOG v3:
+// - FIX: otomatis buat cash_deposits saat simpan close order
+// - Tambah Total Non Tunai
+// - Fix timezone WIB
 
 import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -59,13 +59,13 @@ export default function EndOfDayPage() {
   const { user, store } = useAuthStore()
   const storeId   = user?.store_id || ''
   const storeName = store?.name || 'Toko'
-  const today     = new Date().toLocaleDateString('sv-SE')  // YYYY-MM-DD local WIB
+  const today     = new Date().toLocaleDateString('sv-SE')
 
   const [syncing,  setSyncing]  = useState(false)
   const [saving,   setSaving]   = useState(false)
   const [saved,    setSaved]    = useState(false)
-  const [savedReport, setSavedReport] = useState<any>(null)
-  const [existingReport, setExistingReport] = useState<any>(null)
+  const [savedReport,      setSavedReport]      = useState<any>(null)
+  const [existingReport,   setExistingReport]   = useState<any>(null)
   const [checkingExisting, setCheckingExisting] = useState(true)
 
   const [saldoAwal,     setSaldoAwal]     = useState('')
@@ -79,15 +79,10 @@ export default function EndOfDayPage() {
       setCheckingExisting(true)
       try {
         const { data } = await supabase
-          .from('close_order_reports')
-          .select('*')
-          .eq('store_id', storeId)
-          .eq('report_date', today)
-          .maybeSingle()
+          .from('close_order_reports').select('*')
+          .eq('store_id', storeId).eq('report_date', today).maybeSingle()
         if (data) {
-          setExistingReport(data)
-          setSaved(true)
-          setSavedReport(data)
+          setExistingReport(data); setSaved(true); setSavedReport(data)
           setSaldoAwal(String(data.saldo_awal || 0))
           setSaldoTambahan(String(data.saldo_tambahan || 0))
           setTotalSetor(String(data.total_setor || 0))
@@ -95,18 +90,15 @@ export default function EndOfDayPage() {
           setNotes(data.notes || '')
         } else {
           const { data: prev } = await supabase
-            .from('close_order_reports')
-            .select('saldo_akhir, report_date')
-            .eq('store_id', storeId)
-            .order('report_date', { ascending: false })
-            .limit(1)
-            .maybeSingle()
+            .from('close_order_reports').select('saldo_akhir, report_date')
+            .eq('store_id', storeId).order('report_date', { ascending: false })
+            .limit(1).maybeSingle()
           if (prev?.saldo_akhir != null && prev.saldo_akhir > 0) {
             setSaldoAwal(String(Math.max(0, prev.saldo_akhir)))
             toast.success(`Saldo awal Rp ${prev.saldo_akhir.toLocaleString('id-ID')} dari ${prev.report_date}`, { duration: 3000 })
           }
         }
-      } catch { /* offline */ }
+      } catch {}
       setCheckingExisting(false)
     }
     checkExisting()
@@ -140,14 +132,12 @@ export default function EndOfDayPage() {
     const allTxs = await db.transactions
       .filter(t => t.store_id === storeId && new Date(t.created_at).toLocaleDateString('sv-SE') === today)
       .toArray()
-
     const completedTxs = allTxs.filter(t => t.status === 'completed')
     const voidedTxs    = allTxs.filter(t => t.status === 'voided')
     const reqVoidTxs   = allTxs.filter(t => (t as any).status === 'void_requested')
-
-    const allItems = await db.transaction_items.toArray()
-    const prods    = await db.products.toArray()
-    const pMap     = Object.fromEntries(prods.map(p => [p.id, p]))
+    const allItems     = await db.transaction_items.toArray()
+    const prods        = await db.products.toArray()
+    const pMap         = Object.fromEntries(prods.map(p => [p.id, p]))
 
     const byMethod: Record<string, number> = {}
     PAY_METHODS.forEach(m => { byMethod[m.key] = 0 })
@@ -243,7 +233,7 @@ export default function EndOfDayPage() {
       `(${todayData?.txCount || 0} transaksi)`,
       todayData?.voidCount ? `*Void: ${todayData.voidCount} transaksi (${formatRupiah(todayData.totalVoid)})*` : '',
       '',
-      '*Laporan Kas*',
+      `*Laporan Kas*`,
       `Saldo Awal      : ${formatRupiah(report.saldo_awal)}`,
       `Saldo Tambahan  : ${formatRupiah(report.saldo_tambahan)}`,
       `Penjualan Tunai : ${formatRupiah(report.total_cash)}`,
@@ -253,7 +243,28 @@ export default function EndOfDayPage() {
       `Uang Fisik      : ${formatRupiah(report.uang_fisik)}`,
       `*Selisih        : ${report.selisih >= 0 ? '+' : ''}${formatRupiah(report.selisih)}*`,
     ].filter(Boolean)
+    if (stokSisa?.length) {
+      lines.push('', '*Sisa Stok*')
+      stokSisa.forEach(s => lines.push(`${s.name}: ${s.qty} ${s.unit}`))
+    }
+    if (report.notes) lines.push('', `Catatan: ${report.notes}`)
+    lines.push('', '_Dikirim via Coco Puff POS_')
+    return lines.join('\n')
+  }
 
+  function shareWhatsApp(report: any) {
+    window.open(`https://wa.me/?text=${encodeURIComponent(generateWAText(report))}`, '_blank')
+  }
+*',
+      `Saldo Awal      : ${formatRupiah(report.saldo_awal)}`,
+      `Saldo Tambahan  : ${formatRupiah(report.saldo_tambahan)}`,
+      `Penjualan Tunai : ${formatRupiah(report.total_cash)}`,
+      `Total Setor     : -${formatRupiah(report.total_setor)}`,
+      report.total_biaya > 0 ? `Total Biaya     : -${formatRupiah(report.total_biaya)}` : '',
+      `*Saldo Akhir    : ${formatRupiah(report.saldo_akhir)}*`,
+      `Uang Fisik      : ${formatRupiah(report.uang_fisik)}`,
+      `*Selisih        : ${report.selisih >= 0 ? '+' : ''}${formatRupiah(report.selisih)}*`,
+    ].filter(Boolean)
     if (stokSisa?.length) {
       lines.push('', '*Sisa Stok*')
       stokSisa.forEach(s => lines.push(`${s.name}: ${s.qty} ${s.unit}`))
@@ -270,18 +281,13 @@ export default function EndOfDayPage() {
   async function handleSave() {
     try {
       const { data: existing } = await supabase
-        .from('close_order_reports')
-        .select('id')
-        .eq('store_id', storeId)
-        .eq('report_date', today)
-        .maybeSingle()
+        .from('close_order_reports').select('id')
+        .eq('store_id', storeId).eq('report_date', today).maybeSingle()
       if (existing) {
         toast.error('Close Order hari ini sudah pernah disimpan!')
-        setExistingReport(existing)
-        setSaved(true)
-        return
+        setExistingReport(existing); setSaved(true); return
       }
-    } catch { /* offline — lanjut */ }
+    } catch { /* offline */ }
 
     setSaving(true)
     try {
@@ -314,15 +320,32 @@ export default function EndOfDayPage() {
       const { error } = await supabase.from('close_order_reports').insert(reportData)
       if (error) {
         if (error.code === '23505' || error.message?.includes('duplicate')) {
-          toast.error('Close Order hari ini sudah ada!')
-          setSaved(true)
-          return
+          toast.error('Close Order hari ini sudah ada!'); setSaved(true); return
         }
         throw error
       }
-      setSavedReport(reportData)
-      setSaved(true)
-      toast.success('Close Order disimpan!')
+
+      // FIX: otomatis buat setoran kas saat close order disimpan
+      if (totalSetorNum > 0) {
+        try {
+          await supabase.from('cash_deposits').insert({
+            id:           generateId(),
+            store_id:     storeId,
+            amount:       totalSetorNum,
+            deposit_date: today,
+            notes:        `Auto dari Close Order ${today} — ${storeName}`,
+            status:       'pending',
+            created_by:   user?.id,
+            created_at:   now(),
+          })
+        } catch (e) {
+          console.warn('[CLOSE ORDER] Gagal buat setoran otomatis:', e)
+          // Tidak blocking — close order tetap tersimpan
+        }
+      }
+
+      setSavedReport(reportData); setSaved(true)
+      toast.success('Close Order disimpan!' + (totalSetorNum > 0 ? ' Setoran otomatis dibuat.' : ''))
     } catch (e) {
       console.error(e)
       toast.error('Gagal simpan. Coba lagi.')
@@ -355,7 +378,6 @@ export default function EndOfDayPage() {
       </div>
 
       <div className="flex-1 overflow-auto p-4 space-y-4">
-
         {existingReport && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-2">
             <Lock size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
@@ -370,13 +392,13 @@ export default function EndOfDayPage() {
           </div>
         )}
 
-        {/* Input Manual */}
         <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Input Manual</p>
           <div className="grid grid-cols-2 gap-3">
             <NumInput label="Saldo Awal"          value={saldoAwal}     onChange={setSaldoAwal}     disabled={!!existingReport} hint={saldoAwal ? undefined : 'Auto dari kemarin'} />
             <NumInput label="Saldo Tambahan"       value={saldoTambahan} onChange={setSaldoTambahan} disabled={!!existingReport} />
-            <NumInput label="Total Setor ke Pusat" value={totalSetor}    onChange={setTotalSetor}    disabled={!!existingReport} />
+            <NumInput label="Total Setor ke Pusat" value={totalSetor}    onChange={setTotalSetor}    disabled={!!existingReport}
+              hint={!existingReport ? 'Otomatis masuk ke Setoran Kas' : undefined} />
             <NumInput label="Uang Fisik di Laci"   value={uangFisik}     onChange={setUangFisik}     disabled={!!existingReport} />
           </div>
           <div>
@@ -387,7 +409,6 @@ export default function EndOfDayPage() {
           </div>
         </div>
 
-        {/* Penjualan per Metode */}
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Penjualan Hari Ini</p>
           <div className="grid grid-cols-2 gap-2 mb-3">
@@ -396,13 +417,12 @@ export default function EndOfDayPage() {
                 <p className="text-xs text-gray-400">{m.label}</p>
                 <p className="text-sm font-semibold text-gray-900">
                   {formatRupiah(existingReport
-                    ? (existingReport[`total_${m.key}`] || existingReport[m.key === 'cash' ? 'total_cash' : `total_${m.key}`] || 0)
+                    ? (existingReport[`total_${m.key}`] || 0)
                     : (todayData?.byMethod[m.key] || 0))}
                 </p>
               </div>
             ))}
           </div>
-          {/* Non Tunai summary */}
           <div className="bg-blue-50 rounded-lg p-2.5 mb-2">
             <p className="text-xs text-blue-600">Total Non Tunai (QRIS + Transfer + dll)</p>
             <p className="text-sm font-semibold text-blue-700">
@@ -415,7 +435,6 @@ export default function EndOfDayPage() {
           <p className="text-xs text-gray-400 mt-1">{todayData?.txCount || 0} transaksi · Auto dari sistem</p>
         </div>
 
-        {/* Info Void */}
         {((todayData?.voidCount || 0) > 0 || (todayData?.reqVoidCount || 0) > 0) && (
           <div className="bg-red-50 border border-red-100 rounded-xl p-4">
             <p className="text-xs font-semibold text-red-500 uppercase tracking-wide mb-2">Void Hari Ini</p>
@@ -434,29 +453,31 @@ export default function EndOfDayPage() {
           </div>
         )}
 
-        {/* Laporan Kas */}
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Laporan Kas</p>
           <Row label="Saldo Awal"         value={saldoAwalNum} />
           <Row label="Saldo Tambahan"     value={saldoTambahanNum} />
           <Row label="Penjualan Tunai"    value={cashPenjualan} sub="Auto dari sistem" />
-          <Row label="Total Setor"        value={totalSetorNum}    negative />
-          {totalBiaya > 0    && <Row label="Total Biaya"    value={totalBiaya}    negative sub="Auto dari sistem" />}
+          <Row label="Total Setor"        value={totalSetorNum}  negative />
+          {totalBiaya > 0     && <Row label="Total Biaya"     value={totalBiaya}     negative sub="Auto dari sistem" />}
           {totalPembelian > 0 && <Row label="Total Pembelian" value={totalPembelian} negative sub="Auto dari sistem" />}
           <Row label="Saldo Akhir"        value={existingReport?.saldo_akhir ?? saldoAkhir} highlight />
           <Row label="Uang Fisik di Laci" value={uangFisikNum} />
           <div className="flex items-center justify-between py-3 border-t border-gray-200 mt-1">
             <span className="text-sm font-semibold text-gray-900">Selisih</span>
             <div className="flex items-center gap-1.5">
-              {(existingReport?.selisih ?? selisih) === 0 ? <CheckCircle size={14} className="text-green-500" /> : <AlertCircle size={14} className="text-red-500" />}
-              <span className={`text-base font-bold ${(existingReport?.selisih ?? selisih) === 0 ? 'text-green-600' : (existingReport?.selisih ?? selisih) > 0 ? 'text-blue-600' : 'text-red-600'}`}>
+              {(existingReport?.selisih ?? selisih) === 0
+                ? <CheckCircle size={14} className="text-green-500" />
+                : <AlertCircle size={14} className="text-red-500" />}
+              <span className={`text-base font-bold ${
+                (existingReport?.selisih ?? selisih) === 0 ? 'text-green-600' :
+                (existingReport?.selisih ?? selisih) > 0 ? 'text-blue-600' : 'text-red-600'}`}>
                 {(existingReport?.selisih ?? selisih) > 0 ? '+' : ''}{formatRupiah(existingReport?.selisih ?? selisih)}
               </span>
             </div>
           </div>
         </div>
 
-        {/* Produk Terjual */}
         {todayData?.soldMap && Object.keys(todayData.soldMap).length > 0 && (
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 border-b border-gray-50">Produk Terjual</p>
@@ -472,7 +493,6 @@ export default function EndOfDayPage() {
           </div>
         )}
 
-        {/* Sisa Stok */}
         {stokSisa && stokSisa.length > 0 && (
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 border-b border-gray-50">Sisa Stok</p>
@@ -505,12 +525,10 @@ export default function EndOfDayPage() {
             </div>
             <button onClick={() => shareWhatsApp(savedReport || existingReport)}
               className="w-full py-3.5 rounded-xl bg-green-600 text-white text-sm font-semibold flex items-center justify-center gap-2">
-              <Share2 size={16} />
-              Share ke WhatsApp
+              <Share2 size={16} />Share ke WhatsApp
             </button>
           </div>
         )}
-
         <div className="h-4" />
       </div>
     </div>

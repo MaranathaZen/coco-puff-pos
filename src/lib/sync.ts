@@ -1,8 +1,6 @@
 /**
- * Sync offline-first — v4 clean (tanpa region)
- * - Pull data dari Supabase ke IndexedDB
- * - Push sync_queue ke Supabase di background
- * - Realtime untuk update instan antar device
+ * Sync offline-first — v5
+ * FIX: tambah pull transactions, transaction_items, shifts semua toko
  */
 
 import { supabase } from '@/lib/supabase'
@@ -49,6 +47,9 @@ const TABLE_MAP: Record<string, keyof typeof db> = {
   store_recipe_items:        'store_recipe_items',
   production_logs:           'production_logs',
   production_log_materials:  'production_log_materials',
+  transactions:              'transactions',
+  transaction_items:         'transaction_items',
+  shifts:                    'shifts',
 }
 
 function startRealtime(storeId: string) {
@@ -85,6 +86,9 @@ function startRealtime(storeId: string) {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'store_recipe_items' },       payload => handleRealtimeChange('store_recipe_items', payload))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'production_logs' },          payload => handleRealtimeChange('production_logs', payload))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'production_log_materials' }, payload => handleRealtimeChange('production_log_materials', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' },             payload => handleRealtimeChange('transactions', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'transaction_items' },        payload => handleRealtimeChange('transaction_items', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' },                   payload => handleRealtimeChange('shifts', payload))
     .subscribe((status) => {
       console.log(`[REALTIME] Status: ${status}`)
       if (status === 'SUBSCRIBED') {
@@ -117,7 +121,7 @@ export async function pullFromSupabase(storeId?: string) {
   isPulling = true
 
   try {
-    // Data master — global
+    // ── Data master — global ──────────────────────────────────
     const [cats, prods, mats, sups, parts, stores, recipes, pkgs, menuCfg, users] = await Promise.all([
       supabase.from('categories').select('*'),
       supabase.from('products').select('*'),
@@ -142,7 +146,7 @@ export async function pullFromSupabase(storeId?: string) {
     await replaceTable(db.menu_role_config,   menuCfg.data)
     await replaceTable(db.users,              users.data)
 
-    // Data operasional
+    // ── Data operasional per toko ─────────────────────────────
     const [
       prices, promos, stock, wstock, pstock, fgstock,
       wmuts, wmutItems, pmuts, pmutItems, recipeItems,
@@ -176,24 +180,43 @@ export async function pullFromSupabase(storeId?: string) {
     await replaceTable(db.warehouse_stock,         wstock.data)
     await replaceTable(db.production_stock,        pstock.data)
     await replaceTable(db.finished_goods_stock,    fgstock.data)
-    if (storeRecipes.data?.length) await db.store_recipes.bulkPut(storeRecipes.data)
+    if (storeRecipes.data?.length)     await db.store_recipes.bulkPut(storeRecipes.data)
     if (storeRecipeItems.data?.length) await db.store_recipe_items.bulkPut(storeRecipeItems.data)
     await replaceTable(db.production_recipe_items, recipeItems.data)
 
-    const wMutIds  = new Set((wmuts.data  || []).map((m: any) => m.id))
-    const pMutIds  = new Set((pmuts.data  || []).map((m: any) => m.id))
-    const logIds   = new Set((prodLogs.data || []).map((l: any) => l.id))
+    const wMutIds  = new Set((wmuts.data     || []).map((m: any) => m.id))
+    const pMutIds  = new Set((pmuts.data     || []).map((m: any) => m.id))
+    const logIds   = new Set((prodLogs.data  || []).map((l: any) => l.id))
     const purchIds = new Set((purchases.data || []).map((p: any) => p.id))
 
-    if (wmuts.data?.length)     await db.warehouse_mutations.bulkPut(wmuts.data)
-    if (wmutItems.data?.length) await db.warehouse_mutation_items.bulkPut((wmutItems.data || []).filter((i: any) => wMutIds.has(i.mutation_id)))
-    if (pmuts.data?.length)     await db.production_mutations.bulkPut(pmuts.data)
-    if (pmutItems.data?.length) await db.production_mutation_items.bulkPut((pmutItems.data || []).filter((i: any) => pMutIds.has(i.mutation_id)))
-    if (wexpenses.data?.length) await db.warehouse_expenses.bulkPut(wexpenses.data)
-    if (purchases.data?.length) await db.purchases.bulkPut(purchases.data)
+    if (wmuts.data?.length)      await db.warehouse_mutations.bulkPut(wmuts.data)
+    if (wmutItems.data?.length)  await db.warehouse_mutation_items.bulkPut((wmutItems.data  || []).filter((i: any) => wMutIds.has(i.mutation_id)))
+    if (pmuts.data?.length)      await db.production_mutations.bulkPut(pmuts.data)
+    if (pmutItems.data?.length)  await db.production_mutation_items.bulkPut((pmutItems.data || []).filter((i: any) => pMutIds.has(i.mutation_id)))
+    if (wexpenses.data?.length)  await db.warehouse_expenses.bulkPut(wexpenses.data)
+    if (purchases.data?.length)  await db.purchases.bulkPut(purchases.data)
     if (purchItems.data?.length) await db.purchase_items.bulkPut((purchItems.data || []).filter((i: any) => purchIds.has(i.purchase_id)))
-    if (prodLogs.data?.length)  await db.production_logs.bulkPut(prodLogs.data)
+    if (prodLogs.data?.length)   await db.production_logs.bulkPut(prodLogs.data)
     if (prodLogMats.data?.length) await db.production_log_materials.bulkPut((prodLogMats.data || []).filter((i: any) => logIds.has(i.log_id)))
+
+    // ── FIX: Pull transaksi semua toko ─────────────────────────
+    // Tanpa filter store_id supaya login gudang/owner bisa lihat semua toko
+    const today = new Date().toLocaleDateString('sv-SE')
+    const [txs, txItems, shifts] = await Promise.all([
+      supabase.from('transactions').select('*')
+        .gte('created_at', today + 'T00:00:00+07:00')
+        .order('created_at', { ascending: false }).limit(500),
+      supabase.from('transaction_items').select('*')
+        .order('created_at', { ascending: false }).limit(2000),
+      supabase.from('shifts').select('*')
+        .order('opened_at', { ascending: false }).limit(300),
+    ])
+    const txIds = new Set((txs.data || []).map((t: any) => t.id))
+    if (txs.data?.length)     await db.transactions.bulkPut(txs.data)
+    if (txItems.data?.length) await db.transaction_items.bulkPut(
+      (txItems.data || []).filter((i: any) => txIds.has(i.transaction_id))
+    )
+    if (shifts.data?.length)  await db.shifts.bulkPut(shifts.data)
 
     console.log(`[SYNC] Pull selesai — toko: ${sid}`)
   } catch (e) {

@@ -1,8 +1,8 @@
 // src/pages/accounting/AccountingPage.tsx
-// CHANGELOG v2:
-// - Tab Setoran: kasir catat setoran, gudang approve
-// - Tab Laporan Keuangan: per toko per bulan (HPP, laba kotor, laba bersih)
-// - Tab Tutup Bulan: snapshot persediaan, close periode
+// CHANGELOG v3:
+// - FIX: gudang tidak tampil tab Laporan Keuangan (hanya owner/manager)
+// - FIX: setoran default pending untuk approver, all untuk kasir
+// - Setoran semua toko tampil untuk gudang/owner
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -41,8 +41,7 @@ export default function AccountingPage() {
   const isGudang = role === 'gudang'
   const isKasir  = role === 'kasir'
 
-  // Tab default per role
-  const defaultTab: Tab = isKasir ? 'setoran' : isGudang ? 'setoran' : 'laporan'
+  const defaultTab: Tab = 'setoran'
   const [tab, setTab] = useState<Tab>(defaultTab)
   const [syncing, setSyncing] = useState(false)
 
@@ -62,10 +61,12 @@ export default function AccountingPage() {
     finally { setSyncing(false) }
   }
 
+  // FIX: gudang hanya lihat setoran, TIDAK lihat laporan keuangan
   const tabs = [
-    { id: 'setoran'     as Tab, label: 'Setoran Kas' },
-    ...(isOwnerManager || isGudang ? [{ id: 'laporan' as Tab, label: 'Laporan Keuangan' }] : []),
-    ...(isOwnerManager ? [{ id: 'tutup_bulan' as Tab, label: 'Tutup Bulan' }] : []),
+    { id: 'setoran'    as Tab, label: 'Setoran Kas' },
+    // Laporan Keuangan: hanya owner/manager
+    ...(isOwnerManager ? [{ id: 'laporan'     as Tab, label: 'Laporan Keuangan' }] : []),
+    ...(isOwnerManager ? [{ id: 'tutup_bulan' as Tab, label: 'Tutup Bulan'      }] : []),
   ]
 
   return (
@@ -85,8 +86,8 @@ export default function AccountingPage() {
         ))}
       </div>
       <div className="flex-1 overflow-auto bg-gray-50">
-        {tab === 'setoran'    && <SetoranTab role={role} userId={user!.id} storeId={user?.store_id||''} />}
-        {tab === 'laporan'    && <LaporanKeuanganTab />}
+        {tab === 'setoran'     && <SetoranTab role={role} userId={user!.id} storeId={user?.store_id||''} />}
+        {tab === 'laporan'     && <LaporanKeuanganTab />}
         {tab === 'tutup_bulan' && <TutupBulanTab userId={user!.id} />}
       </div>
     </div>
@@ -95,22 +96,26 @@ export default function AccountingPage() {
 
 // ── TAB SETORAN ───────────────────────────────────────────────
 function SetoranTab({ role, userId, storeId }: { role: string; userId: string; storeId: string }) {
-  const isGudang     = role === 'gudang'
-  const isOwnerMgr   = ['owner','manager'].includes(role)
-  const canApprove   = isGudang || isOwnerMgr
-  const [showForm,   setShowForm]   = useState(false)
-  const [filterStatus, setFilterStatus] = useState<'all'|'pending'|'approved'>('pending')
+  const isGudang   = role === 'gudang'
+  const isOwnerMgr = ['owner','manager'].includes(role)
+  const canApprove = isGudang || isOwnerMgr
+  const [showForm, setShowForm] = useState(false)
 
-  const stores = useLiveQuery(() => db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray(), [])
+  // FIX: default pending untuk approver (gudang/owner), all untuk kasir
+  const [filterStatus, setFilterStatus] = useState<'all'|'pending'|'approved'>(canApprove ? 'pending' : 'all')
 
-  // Load setoran dari Supabase
+  const stores = useLiveQuery(() =>
+    db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray()
+  , [])
+
   const [deposits, setDeposits] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading,  setLoading]  = useState(true)
 
   async function loadDeposits() {
     setLoading(true)
     try {
-      let q = supabase.from('cash_deposits').select('*').order('created_at', { ascending: false }).limit(100)
+      // FIX: gudang/owner lihat semua toko, kasir hanya toko sendiri
+      let q = supabase.from('cash_deposits').select('*').order('created_at', { ascending: false }).limit(200)
       if (!canApprove) q = q.eq('store_id', storeId)
       const { data } = await q
       setDeposits(data || [])
@@ -125,15 +130,14 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
     return deposits.filter(d => d.status === filterStatus)
   }, [deposits, filterStatus])
 
-  const storeMap = Object.fromEntries((stores||[]).map(s => [s.id, s.name]))
+  const storeMap      = Object.fromEntries((stores||[]).map(s => [s.id, s.name]))
   const totalPending  = deposits.filter(d => d.status === 'pending').reduce((s, d) => s + d.amount, 0)
   const totalApproved = deposits.filter(d => d.status === 'approved').reduce((s, d) => s + d.amount, 0)
 
   async function handleApprove(dep: any) {
     if (!canApprove) return
     const { error } = await supabase.from('cash_deposits')
-      .update({ status: 'approved', approved_by: userId, approved_at: now() })
-      .eq('id', dep.id)
+      .update({ status: 'approved', approved_by: userId, approved_at: now() }).eq('id', dep.id)
     if (error) return toast.error('Gagal approve')
     toast.success('Setoran disetujui')
     loadDeposits()
@@ -143,8 +147,7 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
     if (!canApprove) return
     if (!confirm('Tolak setoran ini?')) return
     const { error } = await supabase.from('cash_deposits')
-      .update({ status: 'rejected', approved_by: userId, approved_at: now() })
-      .eq('id', dep.id)
+      .update({ status: 'rejected', approved_by: userId, approved_at: now() }).eq('id', dep.id)
     if (error) return toast.error('Gagal')
     toast.success('Setoran ditolak')
     loadDeposits()
@@ -152,7 +155,6 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
 
   return (
     <div className="p-4 space-y-3">
-      {/* Summary */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
           <div className="flex items-center gap-1.5 mb-1"><Clock size={13} className="text-amber-500" /><p className="text-xs text-amber-600">Menunggu Approve</p></div>
@@ -166,7 +168,6 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
         </div>
       </div>
 
-      {/* Tombol catat setoran */}
       {!canApprove && (
         <button onClick={() => setShowForm(true)}
           className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white py-3 rounded-xl text-sm font-semibold">
@@ -174,7 +175,13 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
         </button>
       )}
 
-      {/* Filter status */}
+      {canApprove && (
+        <div className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
+          <p className="text-xs text-blue-700 font-medium">Setoran dari semua toko</p>
+          <p className="text-xs text-blue-500">Klik ✓ untuk approve, ✗ untuk tolak.</p>
+        </div>
+      )}
+
       <div className="flex gap-1.5">
         {(['all','pending','approved'] as const).map(s => (
           <button key={s} onClick={() => setFilterStatus(s)}
@@ -184,7 +191,6 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
         ))}
       </div>
 
-      {/* List setoran */}
       {loading ? (
         <div className="bg-white rounded-xl border border-gray-100 py-8 text-center text-sm text-gray-400">Memuat...</div>
       ) : (
@@ -220,7 +226,9 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
             </div>
           ))}
           {filtered.length === 0 && (
-            <div className="py-10 text-center text-sm text-gray-400">Belum ada setoran</div>
+            <div className="py-10 text-center text-sm text-gray-400">
+              {filterStatus === 'pending' ? 'Tidak ada setoran pending' : 'Belum ada setoran'}
+            </div>
           )}
         </div>
       )}
@@ -232,11 +240,13 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
   )
 }
 
-function SetoranForm({ storeId, userId, onClose, onSaved }: { storeId: string; userId: string; onClose: () => void; onSaved: () => void }) {
-  const [amount,  setAmount]  = useState('')
-  const [date,    setDate]    = useState(new Date().toISOString().slice(0,10))
-  const [notes,   setNotes]   = useState('')
-  const [saving,  setSaving]  = useState(false)
+function SetoranForm({ storeId, userId, onClose, onSaved }: {
+  storeId: string; userId: string; onClose: () => void; onSaved: () => void
+}) {
+  const [amount, setAmount] = useState('')
+  const [date,   setDate]   = useState(new Date().toISOString().slice(0,10))
+  const [notes,  setNotes]  = useState('')
+  const [saving, setSaving] = useState(false)
 
   async function handleSave() {
     if (!amount || Number(amount) <= 0) return toast.error('Jumlah wajib diisi')
@@ -255,9 +265,8 @@ function SetoranForm({ storeId, userId, onClose, onSaved }: { storeId: string; u
       const { error } = await supabase.from('cash_deposits').insert(data)
       if (error) throw error
       toast.success('Setoran dicatat')
-      onSaved()
-      onClose()
-    } catch (e) { toast.error('Gagal menyimpan') }
+      onSaved(); onClose()
+    } catch { toast.error('Gagal menyimpan') }
     finally { setSaving(false) }
   }
 
@@ -284,7 +293,7 @@ function SetoranForm({ storeId, userId, onClose, onSaved }: { storeId: string; u
   )
 }
 
-// ── TAB LAPORAN KEUANGAN ──────────────────────────────────────
+// ── TAB LAPORAN KEUANGAN (owner/manager only) ─────────────────
 function LaporanKeuanganTab() {
   const now2 = new Date()
   const [year,  setYear]  = useState(now2.getFullYear())
@@ -304,7 +313,6 @@ function LaporanKeuanganTab() {
 
   return (
     <div className="p-4 space-y-4">
-      {/* Period selector */}
       <div className="flex gap-2 items-center">
         <select value={year} onChange={e => setYear(Number(e.target.value))}
           className="flex-1 bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm">
@@ -315,13 +323,10 @@ function LaporanKeuanganTab() {
           {months.map((m,i) => <option key={i+1} value={i+1}>{m}</option>)}
         </select>
       </div>
-
-      {/* Per toko */}
       {(stores||[]).map(store => (
         <StoreLaporanCard key={store.id} store={store} year={year} month={month}
           period={periods.find(p => p.store_id === store.id)} />
       ))}
-
       {(stores||[]).length === 0 && (
         <div className="bg-white rounded-xl border border-gray-100 py-10 text-center text-sm text-gray-400">Memuat data toko...</div>
       )}
@@ -336,34 +341,25 @@ function StoreLaporanCard({ store, year, month, period }: { store: any; year: nu
   const endISO    = `${endDate}T23:59:59.999Z`
 
   const data = useLiveQuery(async () => {
-    // Omzet dari transaksi kasir
     const txs = await db.transactions
       .filter(t => t.store_id === store.id && t.status === 'completed' &&
-        t.created_at >= startISO && t.created_at <= endISO)
-      .toArray()
-    const omzet = txs.reduce((s, t) => s + t.total, 0)
+        t.created_at >= startISO && t.created_at <= endISO).toArray()
+    const omzet     = txs.reduce((s, t) => s + t.total, 0)
     const totalCash = txs.filter(t => t.payment_method === 'cash').reduce((s, t) => s + t.total, 0)
 
-    // Biaya operasional
     const expenses = await db.warehouse_expenses
-      .filter(e => (e as any).store_id === store.id &&
-        e.created_at >= startISO && e.created_at <= endISO)
-      .toArray()
+      .filter(e => (e as any).store_id === store.id && e.created_at >= startISO && e.created_at <= endISO).toArray()
     const totalBiaya = expenses.reduce((s, e) => s + e.amount, 0)
 
-    // Nilai mutasi masuk ke toko (bahan dari gudang)
     const mutations = await db.warehouse_mutations
-      .filter(m => m.destination_id === store.id &&
-        m.mutation_type === 'to_store' &&
-        m.created_at >= startISO && m.created_at <= endISO)
-      .toArray()
+      .filter(m => m.destination_id === store.id && m.mutation_type === 'to_store' &&
+        m.created_at >= startISO && m.created_at <= endISO).toArray()
     const mutItems = await db.warehouse_mutation_items.toArray()
     const totalMutasi = mutations.reduce((s, m) => {
       const items = mutItems.filter(i => i.mutation_id === m.id)
       return s + items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0)
     }, 0)
 
-    // Stok nilai saat ini
     const stocks = await db.stock.where('store_id').equals(store.id).toArray()
     const mats   = await db.materials.toArray()
     const mMap   = Object.fromEntries(mats.map(m => [m.id, m]))
@@ -373,29 +369,23 @@ function StoreLaporanCard({ store, year, month, period }: { store: any; year: nu
       return s + st.qty_on_hand * avg
     }, 0)
 
-    // Setoran diapprove
-    const { data: deps } = await supabase.from('cash_deposits')
-      .select('amount')
-      .eq('store_id', store.id)
-      .eq('status', 'approved')
-      .gte('deposit_date', startDate)
-      .lte('deposit_date', endDate)
+    const { data: deps } = await supabase.from('cash_deposits').select('amount')
+      .eq('store_id', store.id).eq('status', 'approved')
+      .gte('deposit_date', startDate).lte('deposit_date', endDate)
     const totalSetor = (deps||[]).reduce((s: number, d: any) => s + d.amount, 0)
 
-    // Dari period snapshot
-    const persediaanAwal   = period?.opening_stock_value || 0
-    const persediaanAkhir  = period?.status === 'closed' ? (period?.closing_stock_value || 0) : nilaiStokNow
-    const hpp              = persediaanAwal + totalMutasi - persediaanAkhir
-    const labaKotor        = omzet - Math.max(0, hpp)
-    const labaBersih       = labaKotor - totalBiaya
-    const piutangSetor     = totalCash - totalSetor
+    const persediaanAwal  = period?.opening_stock_value || 0
+    const persediaanAkhir = period?.status === 'closed' ? (period?.closing_stock_value || 0) : nilaiStokNow
+    const hpp             = persediaanAwal + totalMutasi - persediaanAkhir
+    const labaKotor       = omzet - Math.max(0, hpp)
+    const labaBersih      = labaKotor - totalBiaya
+    const piutangSetor    = totalCash - totalSetor
 
     return {
       omzet, totalCash, totalBiaya, totalMutasi,
       persediaanAwal, persediaanAkhir, hpp: Math.max(0, hpp),
       labaKotor, labaBersih, totalSetor, piutangSetor,
-      txCount: txs.length,
-      isClosed: period?.status === 'closed',
+      txCount: txs.length, isClosed: period?.status === 'closed',
     }
   }, [store.id, startISO, endISO, period])
 
@@ -411,35 +401,34 @@ function StoreLaporanCard({ store, year, month, period }: { store: any; year: nu
           {data.isClosed ? 'Closed' : 'Open'}
         </span>
       </div>
-
       <div className="px-4 py-3 space-y-1.5">
-        <Row label="Persediaan Awal"   value={data.persediaanAwal}  note={data.persediaanAwal===0?'Belum ada snapshot':''} />
-        <Row label="+ Bahan Masuk (Mutasi)" value={data.totalMutasi} />
-        <Row label="- Persediaan Akhir" value={data.persediaanAkhir} note={!data.isClosed?'(estimasi saat ini)':''} />
+        <LRow label="Persediaan Awal"        value={data.persediaanAwal}  note={data.persediaanAwal===0?'Belum ada snapshot':''} />
+        <LRow label="+ Bahan Masuk (Mutasi)" value={data.totalMutasi} />
+        <LRow label="- Persediaan Akhir"     value={data.persediaanAkhir} note={!data.isClosed?'(estimasi saat ini)':''} />
         <div className="flex justify-between py-1 border-t border-dashed border-gray-200 mt-1">
           <span className="text-sm font-semibold text-gray-700">= HPP</span>
           <span className="text-sm font-semibold text-orange-600">{formatRupiah(data.hpp)}</span>
         </div>
-
         <div className="border-t border-gray-100 pt-1.5 mt-1.5 space-y-1">
-          <Row label="Omzet Penjualan"     value={data.omzet}      note={`${data.txCount} transaksi`} />
+          <LRow label="Omzet Penjualan" value={data.omzet} note={`${data.txCount} transaksi`} />
           <div className="flex justify-between">
             <span className="text-sm font-semibold text-gray-700">Laba Kotor</span>
             <span className={`text-sm font-semibold ${data.labaKotor>=0?'text-green-600':'text-red-600'}`}>{formatRupiah(data.labaKotor)}</span>
           </div>
-          <Row label="- Biaya Operasional"  value={data.totalBiaya} />
+          <LRow label="- Biaya Operasional" value={data.totalBiaya} />
           <div className="flex justify-between py-1 border-t border-dashed border-gray-200">
             <span className="text-sm font-bold text-gray-900">= Laba Bersih</span>
             <span className={`text-sm font-bold ${data.labaBersih>=0?'text-green-700':'text-red-600'}`}>{formatRupiah(data.labaBersih)}</span>
           </div>
         </div>
-
         <div className="border-t border-gray-100 pt-1.5 mt-1.5 space-y-1">
-          <Row label="Total Cash Masuk"    value={data.totalCash} />
-          <Row label="Total Setor (Approved)" value={data.totalSetor} />
+          <LRow label="Total Cash Masuk"        value={data.totalCash} />
+          <LRow label="Total Setor (Approved)"  value={data.totalSetor} />
           <div className="flex justify-between">
             <span className="text-sm font-medium text-gray-700">Piutang Setor</span>
-            <span className={`text-sm font-semibold ${data.piutangSetor>0?'text-amber-600':'text-gray-500'}`}>{formatRupiah(Math.max(0,data.piutangSetor))}</span>
+            <span className={`text-sm font-semibold ${data.piutangSetor>0?'text-amber-600':'text-gray-500'}`}>
+              {formatRupiah(Math.max(0, data.piutangSetor))}
+            </span>
           </div>
         </div>
       </div>
@@ -447,7 +436,7 @@ function StoreLaporanCard({ store, year, month, period }: { store: any; year: nu
   )
 }
 
-function Row({ label, value, note }: { label: string; value: number; note?: string }) {
+function LRow({ label, value, note }: { label: string; value: number; note?: string }) {
   return (
     <div className="flex justify-between items-baseline">
       <div>
@@ -462,8 +451,8 @@ function Row({ label, value, note }: { label: string; value: number; note?: stri
 // ── TAB TUTUP BULAN ───────────────────────────────────────────
 function TutupBulanTab({ userId }: { userId: string }) {
   const now2  = new Date()
-  const [year,  setYear]  = useState(now2.getFullYear())
-  const [month, setMonth] = useState(now2.getMonth() + 1)
+  const [year,    setYear]    = useState(now2.getFullYear())
+  const [month,   setMonth]   = useState(now2.getMonth() + 1)
   const [closing, setClosing] = useState(false)
 
   const stores = useLiveQuery(() =>
@@ -478,10 +467,9 @@ function TutupBulanTab({ userId }: { userId: string }) {
   useEffect(() => { loadPeriods() }, [year, month])
 
   async function handleClose(store: any) {
-    if (!confirm(`Tutup bulan ${month}/${year} untuk ${store.name}?\n\nIni akan snapshot nilai persediaan akhir dan mengunci periode.`)) return
+    if (!confirm(`Tutup bulan ${month}/${year} untuk ${store.name}?`)) return
     setClosing(true)
     try {
-      // Hitung nilai stok toko saat ini
       const stocks = await db.stock.where('store_id').equals(store.id).toArray()
       const mats   = await db.materials.toArray()
       const mMap   = Object.fromEntries(mats.map(m => [m.id, m]))
@@ -490,35 +478,25 @@ function TutupBulanTab({ userId }: { userId: string }) {
         const avg = (st as any).avg_cost || mMap[mid]?.unit_cost || 0
         return s + st.qty_on_hand * avg
       }, 0)
-
       const existingPeriod = periods.find(p => p.store_id === store.id)
-
-      // Cari opening stock dari periode sebelumnya
       const prevMonth = month === 1 ? 12 : month - 1
       const prevYear  = month === 1 ? year - 1 : year
-      const { data: prevPeriod } = await supabase.from('accounting_periods')
-        .select('closing_stock_value')
-        .eq('store_id', store.id).eq('year', prevYear).eq('month', prevMonth)
-        .single()
-
+      const { data: prevPeriod } = await supabase.from('accounting_periods').select('closing_stock_value')
+        .eq('store_id', store.id).eq('year', prevYear).eq('month', prevMonth).single()
       const periodData: any = {
-        id:                   existingPeriod?.id || generateId(),
-        store_id:             store.id,
-        year,
-        month,
-        status:               'closed',
-        opening_stock_value:  prevPeriod?.closing_stock_value || existingPeriod?.opening_stock_value || 0,
-        closing_stock_value:  nilaiStok,
-        closed_at:            now(),
-        closed_by:            userId,
+        id:                  existingPeriod?.id || generateId(),
+        store_id:            store.id, year, month,
+        status:              'closed',
+        opening_stock_value: prevPeriod?.closing_stock_value || existingPeriod?.opening_stock_value || 0,
+        closing_stock_value: nilaiStok,
+        closed_at:           now(),
+        closed_by:           userId,
       }
-
       if (existingPeriod) {
         await supabase.from('accounting_periods').update(periodData).eq('id', existingPeriod.id)
       } else {
         await supabase.from('accounting_periods').insert(periodData)
       }
-
       toast.success(`${store.name} — periode ${month}/${year} ditutup`)
       loadPeriods()
     } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }
@@ -540,10 +518,8 @@ function TutupBulanTab({ userId }: { userId: string }) {
     <div className="p-4 space-y-4">
       <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
         <p className="text-xs font-semibold text-amber-800">Tutup Bulan = Snapshot Persediaan</p>
-        <p className="text-xs text-amber-700 mt-0.5">Saat tutup bulan, sistem menyimpan nilai persediaan akhir sebagai data permanen untuk laporan keuangan bulan tersebut.</p>
+        <p className="text-xs text-amber-700 mt-0.5">Sistem menyimpan nilai persediaan akhir sebagai data permanen untuk laporan keuangan.</p>
       </div>
-
-      {/* Period selector */}
       <div className="flex gap-2">
         <select value={year} onChange={e => setYear(Number(e.target.value))}
           className="flex-1 bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm">
@@ -554,23 +530,22 @@ function TutupBulanTab({ userId }: { userId: string }) {
           {months.map((m,i) => <option key={i+1} value={i+1}>{m}</option>)}
         </select>
       </div>
-
-      {/* Per toko */}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {(stores||[]).map((store, idx) => {
-          const period = periods.find(p => p.store_id === store.id)
+          const period   = periods.find(p => p.store_id === store.id)
           const isClosed = period?.status === 'closed'
           return (
             <div key={store.id} className={`flex items-center px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
               <div className="flex-1">
                 <p className="text-sm font-medium text-gray-900">{store.name}</p>
-                {isClosed && (
+                {isClosed ? (
                   <p className="text-xs text-gray-400">
                     Ditutup {new Date(period.closed_at).toLocaleDateString('id-ID',{day:'numeric',month:'short'})}
                     {' · '}Persediaan Akhir: {formatRupiah(period.closing_stock_value)}
                   </p>
+                ) : (
+                  <p className="text-xs text-gray-400">Status: Open</p>
                 )}
-                {!isClosed && <p className="text-xs text-gray-400">Status: Open</p>}
               </div>
               {isClosed ? (
                 <button onClick={() => handleOpen(store)} disabled={closing}

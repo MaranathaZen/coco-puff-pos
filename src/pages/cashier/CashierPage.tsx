@@ -69,16 +69,16 @@ export default function CashierPage() {
 
   // PPN dari settings
   const ppnSetting = useLiveQuery(async () => {
-    try {
-      const keys = ['ppn_percent', 'ppn', 'tax_percent']
-      for (const key of keys) {
-        const s = await (db as any).settings?.get?.(key)
-        if (s?.value !== undefined) return Number(s.value) || 0
-      }
-      return 0
-    } catch { return 0 }
-  }, [])
-  const ppnPct = ppnSetting ?? 0
+  try {
+    const store = await db.stores.get(STORE_ID)
+    if (!store) return 0
+    const enabled = (store as any).ppn_enabled
+    const rate    = (store as any).ppn_rate
+    if (!enabled) return 0
+    return Number(rate) || 0
+  } catch { return 0 }
+}, [STORE_ID])
+const ppnPct = ppnSetting ?? 0
 
   const [mainTab,       setMainTab]       = useState<MainTab>('pos')
   const [orderType,     setOrderType]     = useState<OrderType>('take_away')

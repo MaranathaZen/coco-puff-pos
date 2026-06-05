@@ -247,7 +247,7 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalCardAmount)}</p>
         <p className="text-xs text-gray-400 mt-0.5">
           {isKasir
-            ? `${totalCardCount} transaksi hari ini`
+            ? `${totalCardCount} transaksi h`
             : `${totalCardCount} transaksi`}
         </p>
       </div>

@@ -244,7 +244,7 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: { userId: strin
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalCardAmount)}</p>
         <p className="text-xs text-gray-400 mt-0.5">
           {isKasir
-            ? `${totalCardCount} transaksi hari ini`
+            ? `${totalCardCount} transaksi`
             : `${totalCardCount} transaksi`}
         </p>
       </div>

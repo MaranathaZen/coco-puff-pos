@@ -306,7 +306,7 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
         </p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalNilaiMutasi)}</p>
         <p className="text-xs text-gray-400 mt-0.5">
-          {isKasir ? `${totalCountCard} transaksi hari ini` : `${totalCountCard} transaksi`}
+          {isKasir ? `${totalCountCard} transaksi` : `${totalCountCard} transaksi`}
         </p>
       </div>
 

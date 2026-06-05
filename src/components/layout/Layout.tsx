@@ -1,7 +1,7 @@
 // src/components/layout/Layout.tsx
-// CHANGELOG v2:
+// CHANGELOG v3:
+// - FIX: debug menu tampil — kalau menu tidak ada di menu_role_config, default visible
 // - Kasir: urutan Kasir, Stok, Produksi, Mutasi, Close Order, Lainnya(Pembelian+Biaya)
-// - Produksi: hapus menu Biaya
 // - Desktop sidebar + mobile bottom nav
 
 import { useState, useEffect } from 'react'
@@ -14,7 +14,7 @@ import {
   ShoppingCart, FlaskConical,
   BarChart3, LayoutDashboard, Settings,
   MoreHorizontal, X, Receipt, ArrowRightLeft,
-  Package, Calculator, BookOpen,
+  Package, Calculator, BookOpen, Bug,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -33,6 +33,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   '/produk':         Package,
   '/produksi':       FlaskConical,
   '/accounting':     Calculator,
+  '/debug':          Bug,
 }
 
 const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
@@ -50,6 +51,7 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
     { path: '/resep',      label: 'Resep'       },
     { path: '/produk',     label: 'Produk'      },
     { path: '/pengaturan', label: 'Setting'     },
+    { path: '/debug',      label: 'Debug'       },
   ],
   manager: [
     { path: '/owner',      label: 'Dashboard'   },
@@ -65,19 +67,20 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
     { path: '/produk',     label: 'Produk'      },
     { path: '/accounting', label: 'Accounting'  },
     { path: '/pengaturan', label: 'Setting'     },
+    { path: '/debug',      label: 'Debug'       },
   ],
   gudang: [
-    { path: '/stok',           label: 'Stok'        },
-    { path: '/pembelian',      label: 'Pembelian'   },
-    { path: '/mutasi',         label: 'Mutasi'      },
-    { path: '/biaya',          label: 'Biaya'       },
-    { path: '/tutup-toko',     label: 'Close Order' },
-    { path: '/accounting',     label: 'Accounting'  },
+    { path: '/stok',       label: 'Stok'        },
+    { path: '/pembelian',  label: 'Pembelian'   },
+    { path: '/mutasi',     label: 'Mutasi'      },
+    { path: '/biaya',      label: 'Biaya'       },
+    { path: '/tutup-toko', label: 'Close Order' },
+    { path: '/accounting', label: 'Accounting'  },
   ],
   produksi: [
-    { path: '/stok',           label: 'Stok'        },
-    { path: '/produksi',       label: 'Produksi'    },
-    { path: '/mutasi',         label: 'Mutasi'      },
+    { path: '/stok',     label: 'Stok'     },
+    { path: '/produksi', label: 'Produksi' },
+    { path: '/mutasi',   label: 'Mutasi'   },
   ],
   kasir: [
     { path: '/kasir',      label: 'Kasir'       },
@@ -117,9 +120,11 @@ export default function Layout() {
     if (!dbMenus || dbMenus.length === 0) {
       return defaults.map(d => ({ menu_path: d.path, menu_label: d.label }))
     }
+    // FIX: kalau menu tidak ada di dbMap → default visible (true)
+    // Hanya sembunyikan kalau explicitly is_visible = false
     const dbMap = Object.fromEntries(dbMenus.map(m => [m.menu_path, m.is_visible]))
     return defaults
-      .filter(d => dbMap[d.path] !== false)
+      .filter(d => dbMap[d.path] !== false)  // undefined → lolos, false → disembunyikan
       .map(d => ({ menu_path: d.path, menu_label: d.label }))
   })()
 
@@ -205,7 +210,6 @@ export default function Layout() {
                 </NavLink>
               )
             })}
-            {/* Selalu tampilkan tombol Lainnya — untuk logout + menu overflow */}
             <button onClick={() => setShowMore(true)}
               className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${isMoreActive ? 'text-gray-900' : 'text-gray-400'}`}>
               <MoreHorizontal size={20} strokeWidth={isMoreActive ? 2 : 1.5} />

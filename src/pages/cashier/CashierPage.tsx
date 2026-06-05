@@ -497,32 +497,41 @@ export default function CashierPage() {
       const printModeNow = getPrintModeNow()
       if (autoPrintNow) {
         setTimeout(() => {
+          // Build struk pakai format sama (38 karakter, 76mm)
+          const AW   = 38
+          const ASEP = '='.repeat(AW)
+          const asep = '-'.repeat(AW)
+          const actr = (s: string) => s.padStart(Math.floor((AW + Math.min(s.length,AW)) / 2)).padEnd(AW)
+          const arow = (l: string, r: string) => { const sp = AW-l.length-r.length; return l+(sp>0?' '.repeat(sp):' ')+r }
+          const now2 = new Date()
+          const aLines: string[] = [
+            ASEP,
+            actr('Coco Puff'),
+            actr(storeName),
+            ASEP,
+            arow('No    :', receiptNo.substring(0, 28)),
+            arow('Tgl   :', now2.toLocaleDateString('id-ID',{day:'numeric',month:'long',year:'numeric'}).substring(0,28)),
+            arow('Jam   :', now2.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})),
+            asep,
+          ]
+          for (const item of txItems) {
+            const totalFmt = formatRupiah(item.unit_price * ((item.qty_eceran||0)+(item.qty_dus||0)))
+            const leftPart = `${(item.qty_eceran||0)+(item.qty_dus||0)}x ${item.product_name}`.substring(0, AW - totalFmt.length - 1)
+            aLines.push(leftPart.padEnd(AW - totalFmt.length) + totalFmt)
+          }
+          aLines.push(asep)
+          if (ppnAmount > 0) aLines.push(arow(`PPN ${ppnPct}%`, '+' + formatRupiah(ppnAmount)))
+          aLines.push(ASEP)
+          aLines.push(arow('TOTAL', formatRupiah(grandTotal)))
+          aLines.push(ASEP)
+          aLines.push(arow(finalPay === 'cash' ? 'Bayar (Cash)' : `Bayar (${finalPay})`, formatRupiah(paidAmt)))
+          if (paidAmt > grandTotal) aLines.push(arow('Kembali', formatRupiah(paidAmt - grandTotal)))
+          aLines.push('', actr('Terima kasih atas kunjungan Anda'), '', '', '', '')
+
           if (printModeNow === 'rawbt') {
-            const W = 32; const line2 = '-'.repeat(W); let txt = ''
-            txt += storeName.substring(0,W).padStart(Math.floor((W+Math.min(storeName.length,W))/2)) + '\n'
-            txt += line2 + '\n' + `No: ${receiptNo}\n`
-            txt += `${new Date().toLocaleDateString('id-ID')} ${new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}\n`
-            txt += line2 + '\n'
-            for (const item of txItems) txt += item.product_name.substring(0,W) + '\n'
-            txt += line2 + '\n' + 'TOTAL'.padEnd(22) + formatRupiah(grandTotal).padStart(10) + '\n\n\n\n'
-            window.location.href = `rawbt:${encodeURIComponent(txt)}`
+            window.location.href = `rawbt:${encodeURIComponent(aLines.join('\n'))}`
           } else {
-            const W2 = 28; const lineStr = '-'.repeat(W2)
-            const rowFn = (l: string, r: string) => { const sp = W2-l.length-r.length; return l+(sp>0?' '.repeat(sp):' ')+r }
-            const lines2: string[] = []
-            lines2.push(storeName.padStart(Math.floor((W2+storeName.length)/2)))
-            lines2.push('Coco Puff'.padStart(Math.floor((W2+9)/2)))
-            lines2.push(lineStr)
-            lines2.push(rowFn(new Date().toLocaleDateString('id-ID'), new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})))
-            lines2.push(rowFn('No.', receiptNo))
-            lines2.push(lineStr)
-            for (const item of txItems) { lines2.push(item.product_name.substring(0,W2)); lines2.push('  '+item.qty_eceran+' x '+formatRupiah(item.unit_price)) }
-            lines2.push(lineStr)
-            lines2.push(rowFn('TOTAL', formatRupiah(grandTotal)))
-            lines2.push(rowFn('Bayar ('+finalPay+')', formatRupiah(paidAmt)))
-            if (paidAmt > grandTotal) lines2.push(rowFn('Kembali', formatRupiah(paidAmt-grandTotal)))
-            lines2.push(lineStr); lines2.push('Terima kasih!'.padStart(Math.floor((W2+13)/2))); lines2.push('')
-            const html2 = `<html><head><style>*{margin:0;padding:0;}pre{font-family:'Courier New',monospace;font-size:11px;line-height:1.5;white-space:pre;}@page{margin:1mm;size:58mm auto;}</style></head><body><pre>${lines2.join('\n')}</pre></body></html>`
+            const html2 = `<html><head><style>*{margin:0;padding:0;}body{margin:0;padding:1mm 0;}pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;white-space:pre;letter-spacing:0;}@page{margin:0mm;size:76mm auto;}@media print{pre{width:74mm;}}</style></head><body><pre>${aLines.join('\n')}</pre></body></html>`
             const iframe2 = document.createElement('iframe')
             iframe2.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;'
             document.body.appendChild(iframe2)
@@ -1103,65 +1112,179 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
   const orderTypeLabel: Record<string,string> = { dine_in:'Dine In', take_away:'Take Away', online:'Online' }
   const payLabel: Record<string,string> = { cash:'Tunai', qris:'QRIS', transfer:'Transfer', gopay:'GoPay', grab:'GrabPay', shopeefood:'ShopeePay' }
 
-  function handlePrint() {
-    const W = 28; const line = '-'.repeat(W)
-    const center = (s: string) => s.padStart(Math.floor((W+s.length)/2)).padEnd(W)
-    const row = (l: string, r: string) => { const sp = W-l.length-r.length; return l+(sp>0?' '.repeat(sp):' ')+r }
+  // ── FORMAT STRUK — mengacu sistem lama (38 karakter, kertas 76mm) ──
+  const W   = 38  // Kertas 76mm dot matrix = 38 karakter
+  const SEP = '='.repeat(W)
+  const sep = '-'.repeat(W)
+
+  function center38(s: string): string {
+    const str = s.substring(0, W)
+    return str.padStart(Math.floor((W + str.length) / 2)).padEnd(W)
+  }
+  function row38(l: string, r: string): string {
+    const sp = W - l.length - r.length
+    return l + (sp > 0 ? ' '.repeat(sp) : ' ') + r
+  }
+
+  function buildReceiptLines(): string[] {
+    const lines: string[] = []
     const now2 = new Date()
-    let lines: string[] = []
-    lines.push(center(data.storeName)); lines.push(center('Coco Puff')); lines.push(line)
-    lines.push(row(now2.toLocaleDateString('id-ID',{day:'numeric',month:'long',year:'numeric'}), now2.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})))
-    lines.push(row('No.', data.receiptNo.length>20?data.receiptNo.substring(0,20)+'...':data.receiptNo))
-    lines.push(row('Tipe', orderTypeLabel[data.orderType]||data.orderType))
-    if (data.onlineOrderNo) lines.push(row('Order', '#'+data.onlineOrderNo))
-    lines.push(line)
-    for (const item of data.items) {
-      lines.push(item.name.substring(0,W))
-      lines.push(row(`  ${item.qty} x ${formatRupiah(item.price)}`, formatRupiah(item.subtotal)))
-      if (item.promoDiscount>0) lines.push(row('  Promo', '-'+formatRupiah(item.promoDiscount)))
+    const tgl  = now2.toLocaleDateString('id-ID', { day:'numeric', month:'long', year:'numeric' })
+    const jam  = now2.toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })
+    const payLabel2: Record<string, string> = {
+      cash:'Cash', qris:'QRIS', transfer:'Transfer',
+      gopay:'GoPay', grab:'GrabFood', shopeefood:'ShopeeFood',
     }
-    for (const p of data.pakets) { lines.push(p.name.substring(0,W)); lines.push(row('',formatRupiah(p.subtotal))) }
-    lines.push(line)
-    lines.push(row('Subtotal', formatRupiah(data.rawSubtotal)))
-    if (data.rawDiscount>0) lines.push(row('Diskon', '-'+formatRupiah(data.rawDiscount)))
-    if (data.ppnAmount>0)   lines.push(row('PPN '+data.ppnPct+'%', '+'+formatRupiah(data.ppnAmount)))
-    lines.push(line)
-    lines.push(row('TOTAL', formatRupiah(data.grandTotal)))
-    lines.push(row('Bayar ('+(payLabel[data.payMethod]||data.payMethod)+')', formatRupiah(data.cashPaid)))
-    if (data.payMethod==='cash'&&data.change>0) lines.push(row('Kembali', formatRupiah(data.change)))
-    lines.push(line); lines.push(center('Terima kasih!')); lines.push(center('Coco Puff - '+data.storeName)); lines.push(''); lines.push(''); lines.push('')
-    const html = `<html><head><title>Struk</title><style>*{margin:0;padding:0;}body{margin:0;padding:2px;}pre{font-family:'Courier New',Courier,monospace;font-size:8px;line-height:1.3;white-space:pre;}@page{margin:0mm;size:58mm auto;}@media print{pre{width:56mm;}}</style></head><body><pre>${lines.join('\n')}</pre></body></html>`
+    const tipeLabel: Record<string, string> = {
+      dine_in:'Dine In', take_away:'Take Away', online:'Online'
+    }
+
+    // HEADER
+    lines.push(SEP)
+    lines.push(center38('Coco Puff'))
+    lines.push(center38(data.storeName))
+    lines.push(SEP)
+    lines.push(row38('No    :', data.receiptNo.substring(0, 28)))
+    lines.push(row38('Tgl   :', tgl.substring(0, 28)))
+    lines.push(row38('Jam   :', jam))
+    lines.push(row38('Tipe  :', tipeLabel[data.orderType] || data.orderType))
+    if (data.onlineOrderNo) lines.push(row38('Order :', '#' + data.onlineOrderNo))
+    lines.push(sep)
+
+    // ITEMS — format paket seperti sistem lama
+    const QTY_PER_PAKET = 5
+    const allItems = data.items || []
+
+    // Hitung total qty puff (kategori Puff)
+    // Kasir sekarang tidak punya kategori, tapi nama produk mengandung "Puff"
+    const totalQtyPuff = allItems
+      .filter((i: any) => i.name?.toLowerCase().includes('puff'))
+      .reduce((s: number, i: any) => s + i.qty, 0)
+    const jumlahPaketPenuh = Math.floor(totalQtyPuff / QTY_PER_PAKET)
+    const adaPaket = jumlahPaketPenuh > 0
+
+    let runningQtyPuff = 0
+    let paketNo        = 0
+    let prevKategori   = ''
+
+    for (const item of allItems) {
+      const isPuff   = item.name?.toLowerCase().includes('puff')
+      const kategori = isPuff ? 'Puff' : item.name?.split(' ')[0] || ''
+
+      // Beri spasi kalau ganti kategori
+      if (prevKategori && kategori !== prevKategori) lines.push('')
+      prevKategori = kategori
+
+      // Label paket untuk produk puff
+      if (isPuff && adaPaket && runningQtyPuff < jumlahPaketPenuh * QTY_PER_PAKET) {
+        const newPaketNo = Math.floor(runningQtyPuff / QTY_PER_PAKET) + 1
+        if (newPaketNo > paketNo) {
+          paketNo = newPaketNo
+          lines.push(`[ Paket ${paketNo} ]`)
+        }
+        runningQtyPuff += item.qty
+      }
+
+      // Item line
+      const totalFmt = formatRupiah(item.subtotal)
+      const leftPart = `${item.qty}x ${item.name}`.substring(0, W - totalFmt.length - 1)
+      lines.push(leftPart.padEnd(W - totalFmt.length) + totalFmt)
+
+      // Diskon item
+      if (item.promoDiscount > 0) {
+        const discFmt   = '-' + formatRupiah(item.promoDiscount)
+        const discLabel = '  Diskon'
+        lines.push(discLabel.padEnd(W - discFmt.length) + discFmt)
+      }
+    }
+
+    // Paket di cart
+    for (const p of (data.pakets || [])) {
+      const totalFmt = formatRupiah(p.subtotal)
+      const leftPart = `1x ${p.name}`.substring(0, W - totalFmt.length - 1)
+      lines.push(leftPart.padEnd(W - totalFmt.length) + totalFmt)
+    }
+
+    lines.push(sep)
+
+    // SUBTOTAL & DISKON & PPN
+    lines.push(row38('Subtotal', formatRupiah(data.rawSubtotal)))
+    if (data.rawDiscount > 0) lines.push(row38('Diskon', '-' + formatRupiah(data.rawDiscount)))
+    if (data.ppnAmount   > 0) lines.push(row38(`PPN ${data.ppnPct}%`, '+' + formatRupiah(data.ppnAmount)))
+
+    lines.push(SEP)
+    lines.push(row38('TOTAL', formatRupiah(data.grandTotal)))
+    lines.push(SEP)
+
+    // PEMBAYARAN
+    const metode    = payLabel2[data.payMethod] || data.payMethod
+    const bayarFmt  = formatRupiah(data.cashPaid)
+    const kembFmt   = formatRupiah(data.change)
+    if (data.payMethod === 'cash') {
+      lines.push(row38(`Bayar (Cash)`, bayarFmt))
+      if (data.change > 0) lines.push(row38('Kembali', kembFmt))
+    } else {
+      lines.push(row38(`Bayar (${metode})`, bayarFmt))
+    }
+
+    lines.push('')
+    lines.push(center38('Terima kasih atas kunjungan Anda'))
+    lines.push('')
+    lines.push('')
+    lines.push('')
+    lines.push('')
+
+    return lines
+  }
+
+  function handlePrint() {
+    const lines = buildReceiptLines()
+    // CSS: font dot matrix, ukuran kertas 76mm, font-size 9px untuk 38 char
+    const html = `<html>
+<head><title>Struk</title>
+<style>
+* { margin:0; padding:0; }
+body { margin:0; padding:1mm 0; }
+pre {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 9px;
+  line-height: 1.4;
+  white-space: pre;
+  letter-spacing: 0;
+}
+@page {
+  margin: 0mm;
+  size: 76mm auto;
+}
+@media print {
+  pre { width: 74mm; }
+}
+</style>
+</head>
+<body><pre>${lines.join('\n')}</pre></body>
+</html>`
     const iframe = document.createElement('iframe')
     iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;'
     document.body.appendChild(iframe)
     const iframeDoc = iframe.contentWindow?.document
     if (!iframeDoc) { document.body.removeChild(iframe); return }
     iframeDoc.open(); iframeDoc.write(html); iframeDoc.close()
-    setTimeout(() => { iframe.contentWindow?.focus(); iframe.contentWindow?.print(); setTimeout(()=>{try{document.body.removeChild(iframe)}catch{}},2000) }, 300)
+    setTimeout(() => {
+      iframe.contentWindow?.focus()
+      iframe.contentWindow?.print()
+      setTimeout(() => { try { document.body.removeChild(iframe) } catch {} }, 2000)
+    }, 300)
   }
 
   function handleRawBT() {
-    const line = '-'.repeat(32); const nl = '\n'; let txt = ''
-    txt += data.storeName.toUpperCase().padStart((32+data.storeName.length)/2|0)+nl+'COCO PUFF'.padStart(20)+nl+line+nl
-    txt += `No: ${data.receiptNo}`+nl+`Tgl: ${new Date().toLocaleDateString('id-ID')} ${new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}`+nl
-    txt += `Tipe: ${data.orderType==='dine_in'?'Dine In':data.orderType==='take_away'?'Take Away':'Online'}`+nl
-    if (data.onlineOrderNo) txt += `Order: #${data.onlineOrderNo}`+nl
-    txt += line+nl
-    for (const item of data.items) {
-      txt += item.name.substring(0,22)+nl
-      txt += `  ${item.qty} x ${formatRupiah(item.price)}`.padEnd(22)+formatRupiah(item.subtotal).padStart(10)+nl
-      if (item.promoDiscount>0) txt += `  Promo: -${formatRupiah(item.promoDiscount)}`+nl
-    }
-    txt += line+nl
-    txt += 'Subtotal'.padEnd(22)+formatRupiah(data.rawSubtotal).padStart(10)+nl
-    if (data.rawDiscount>0) txt += 'Diskon'.padEnd(22)+('-'+formatRupiah(data.rawDiscount)).padStart(10)+nl
-    if (data.ppnAmount>0)   txt += `PPN ${data.ppnPct}%`.padEnd(22)+('+'+formatRupiah(data.ppnAmount)).padStart(10)+nl
-    txt += 'TOTAL'.padEnd(22)+formatRupiah(data.grandTotal).padStart(10)+nl
-    txt += 'Bayar'.padEnd(22)+formatRupiah(data.cashPaid).padStart(10)+nl
-    if (data.payMethod==='cash'&&data.change>0) txt += 'Kembali'.padEnd(22)+formatRupiah(data.change).padStart(10)+nl
-    txt += line+nl+'Terima kasih!'.padStart(22)+nl+nl+nl+nl
+    const lines = buildReceiptLines()
+    const txt   = lines.join('\n')
     window.location.href = `rawbt:${encodeURIComponent(txt)}`
-    setTimeout(() => { navigator.clipboard.writeText(txt).then(()=>toast.success('Teks struk disalin')).catch(()=>{}) }, 1000)
+    setTimeout(() => {
+      navigator.clipboard.writeText(txt)
+        .then(() => toast.success('Teks struk disalin'))
+        .catch(() => {})
+    }, 1000)
   }
 
   useEffect(() => { if (autoPrint) setTimeout(()=>{ if (printMode==='rawbt') handleRawBT(); else handlePrint() },300) }, [])

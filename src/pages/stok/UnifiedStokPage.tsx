@@ -1,9 +1,7 @@
 // src/pages/stok/UnifiedStokPage.tsx
-// CHANGELOG v3:
-// - Tab Produksi: tambah button Stok Awal + Tambah + Edit (owner/manager)
-// - Tab Toko: tambah button Stok Awal + Edit qty (owner/manager)
-// - StokTokoView: fix reactive saat ganti toko (key prop)
-// - Label Gudang Malang → Gudang di filter pembelian/biaya
+// CHANGELOG v4:
+// - FIX: Tab Produksi stok bahan bisa diklik untuk edit
+// - FIX: Tab Toko item stok bisa diklik untuk edit
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -67,9 +65,7 @@ export default function UnifiedStokPage() {
   const { user } = useAuthStore()
   const role  = user?.role || 'kasir'
   const tabs  = TAB_ACCESS[role] || ['toko']
-  const [tab,     setTab]     = useState<StokTab>(tabs[0])
-  // Reset header actions saat ganti tab
-  const handleTabChange = (newTab: StokTab) => { setTab(newTab); setHeaderActions(null) }
+  const [tab, setTab] = useState<StokTab>(tabs[0])
   const [syncing, setSyncing] = useState(false)
   const isOwnerManager = ['owner','manager'].includes(role)
   const [headerActions, setHeaderActions] = useState<React.ReactNode>(null)
@@ -78,7 +74,6 @@ export default function UnifiedStokPage() {
     setSyncing(true)
     try {
       const [mats, ws, ps, fgs, prods, stocks, cats, stores] = await Promise.all([
-        // stores dipull pertama agar filter toko langsung tersedia
         supabase.from('materials').select('*'),
         supabase.from('warehouse_stock').select('*'),
         supabase.from('production_stock').select('*'),
@@ -88,14 +83,14 @@ export default function UnifiedStokPage() {
         supabase.from('categories').select('*'),
         supabase.from('stores').select('*'),
       ])
-      if (mats.data?.length)  await db.materials.bulkPut(mats.data)
-      if (ws.data?.length)    await db.warehouse_stock.bulkPut(ws.data)
-      if (ps.data?.length)    await db.production_stock.bulkPut(ps.data)
-      if (fgs.data?.length)   await db.finished_goods_stock.bulkPut(fgs.data)
+      if (mats.data?.length)   await db.materials.bulkPut(mats.data)
+      if (ws.data?.length)     await db.warehouse_stock.bulkPut(ws.data)
+      if (ps.data?.length)     await db.production_stock.bulkPut(ps.data)
+      if (fgs.data?.length)    await db.finished_goods_stock.bulkPut(fgs.data)
       if (stores.data?.length) await db.stores.bulkPut(stores.data)
-      if (prods.data !== null)  { await db.products.clear();    if (prods.data.length)  await db.products.bulkPut(prods.data)    }
-      if (stocks.data !== null) { await db.stock.clear();       if (stocks.data.length) await db.stock.bulkPut(stocks.data)      }
-      if (cats.data !== null)   { await db.categories.clear();  if (cats.data.length)   await db.categories.bulkPut(cats.data)   }
+      if (prods.data !== null)  { await db.products.clear();   if (prods.data.length)  await db.products.bulkPut(prods.data)   }
+      if (stocks.data !== null) { await db.stock.clear();      if (stocks.data.length) await db.stock.bulkPut(stocks.data)     }
+      if (cats.data !== null)   { await db.categories.clear(); if (cats.data.length)   await db.categories.bulkPut(cats.data)  }
       toast.success('Stok diperbarui')
     } catch { toast.error('Gagal sync') }
     finally { setSyncing(false) }
@@ -121,7 +116,7 @@ export default function UnifiedStokPage() {
       {tabConfig.length > 1 && (
         <div className="bg-white border-b border-gray-100 flex flex-shrink-0">
           {tabConfig.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
+            <button key={t.id} onClick={() => { setTab(t.id); setHeaderActions(null) }}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 transition-colors ${tab === t.id ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
               <t.icon size={14} />{t.label}
             </button>
@@ -129,9 +124,9 @@ export default function UnifiedStokPage() {
         </div>
       )}
       <div className="flex-1 overflow-auto bg-gray-50">
-        {tab === 'gudang'   && <StokGudangView isOwnerManager={isOwnerManager} isOwner={role === 'owner'} setHeaderActions={setHeaderActions} />}
+        {tab === 'gudang'   && <StokGudangView   isOwnerManager={isOwnerManager} isOwner={role === 'owner'} setHeaderActions={setHeaderActions} />}
         {tab === 'produksi' && <StokProduksiView isOwnerManager={isOwnerManager} setHeaderActions={setHeaderActions} />}
-        {tab === 'toko'     && <StokTokoView storeId={user?.store_id || ''} role={role} isOwnerManager={isOwnerManager} setHeaderActions={setHeaderActions} />}
+        {tab === 'toko'     && <StokTokoView     storeId={user?.store_id || ''} role={role} isOwnerManager={isOwnerManager} setHeaderActions={setHeaderActions} />}
       </div>
     </div>
   )
@@ -147,7 +142,9 @@ const KAT_FILTERS = [
 ]
 
 // ── STOK GUDANG ───────────────────────────────────────────────
-function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: { isOwnerManager: boolean; isOwner: boolean; setHeaderActions: (n: React.ReactNode) => void }) {
+function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: {
+  isOwnerManager: boolean; isOwner: boolean; setHeaderActions: (n: React.ReactNode) => void
+}) {
   const [search,      setSearch]      = useState('')
   const [filterKat,   setFilterKat]   = useState('semua')
   const [showForm,    setShowForm]    = useState(false)
@@ -183,13 +180,14 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: { isOwner
 
   const filteredItems = (data?.items || []).filter(item => {
     const matchSearch = !search || item.name.toLowerCase().includes(search.toLowerCase())
-    const matchKat = filterKat === 'semua' ? true : filterKat === 'stok_rendah' ? item.qty <= item.min_stock && item.min_stock > 0 : item.category === filterKat
+    const matchKat = filterKat === 'semua' ? true
+      : filterKat === 'stok_rendah' ? item.qty <= item.min_stock && item.min_stock > 0
+      : item.category === filterKat
     return matchSearch && matchKat
   })
 
   return (
     <div className="p-4 space-y-3">
-
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400">Nilai Stok</p>
@@ -224,7 +222,8 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: { isOwner
       </div>
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {filteredItems.sort((a, b) => (b.qty * b.avg_cost) - (a.qty * a.avg_cost)).map((item, idx) => (
-          <button key={item.id} onClick={() => isOwnerManager && (setEditMat(item as any), setShowForm(true))}
+          <button key={item.id}
+            onClick={() => isOwnerManager && (setEditMat(item as any), setShowForm(true))}
             className={`w-full flex items-center px-4 py-3 text-left ${idx !== 0 ? 'border-t border-gray-50' : ''} ${item.qty <= item.min_stock && item.min_stock > 0 ? 'bg-red-50/30' : ''} ${isOwnerManager ? 'active:bg-gray-50' : ''}`}>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
@@ -238,7 +237,11 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: { isOwner
             </div>
           </button>
         ))}
-        {filteredItems.length === 0 && <div className="py-10 text-center text-sm text-gray-400">{search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada stok'}</div>}
+        {filteredItems.length === 0 && (
+          <div className="py-10 text-center text-sm text-gray-400">
+            {search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada stok'}
+          </div>
+        )}
       </div>
       {showForm    && isOwnerManager && <MaterialForm material={editMat} isOwner={isOwner} onClose={() => { setShowForm(false); setEditMat(null) }} />}
       {showOpening && isOwnerManager && <OpeningStockForm onClose={() => setShowOpening(false)} />}
@@ -247,13 +250,15 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: { isOwner
 }
 
 // ── STOK PRODUKSI ─────────────────────────────────────────────
-function StokProduksiView({ isOwnerManager, setHeaderActions }: { isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void }) {
-  const [search,    setSearch]    = useState('')
-  const [filterKat, setFilterKat] = useState('semua')
+function StokProduksiView({ isOwnerManager, setHeaderActions }: {
+  isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void
+}) {
+  const [search,       setSearch]       = useState('')
+  const [filterKat,    setFilterKat]    = useState('semua')
   const [showFgsForm,  setShowFgsForm]  = useState(false)
   const [showPsForm,   setShowPsForm]   = useState(false)
-  const [editFgs, setEditFgs] = useState<any>(null)
-  const [editPs,  setEditPs]  = useState<any>(null)
+  const [editFgs,      setEditFgs]      = useState<any>(null)
+  const [editPs,       setEditPs]       = useState<any>(null)
 
   useEffect(() => {
     if (!isOwnerManager) { setHeaderActions(null); return }
@@ -287,7 +292,9 @@ function StokProduksiView({ isOwnerManager, setHeaderActions }: { isOwnerManager
 
   const filteredBahan = (data?.bahan || []).filter(s => {
     const matchSearch = !search || s.material?.name?.toLowerCase().includes(search.toLowerCase())
-    const matchKat = filterKat === 'semua' ? true : filterKat === 'stok_rendah' ? s.qty_on_hand <= (s.material?.min_stock || 0) && (s.material?.min_stock || 0) > 0 : s.material?.category === filterKat
+    const matchKat = filterKat === 'semua' ? true
+      : filterKat === 'stok_rendah' ? s.qty_on_hand <= (s.material?.min_stock || 0) && (s.material?.min_stock || 0) > 0
+      : s.material?.category === filterKat
     return matchSearch && matchKat
   })
 
@@ -306,17 +313,14 @@ function StokProduksiView({ isOwnerManager, setHeaderActions }: { isOwnerManager
         </div>
       </div>
 
-      {/* Produk Jadi section */}
+      {/* Produk Jadi */}
       <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Produk Siap Kirim</p>
-
-        </div>
+        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Produk Siap Kirim</p>
         {data?.fgs && data.fgs.length > 0 ? (
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             {data.fgs.map((f, idx) => (
               <div key={f.id}
-                onClick={() => { if(isOwnerManager) { setEditFgs(f); setShowFgsForm(true) } }}
+                onClick={() => { if (isOwnerManager) { setEditFgs(f); setShowFgsForm(true) } }}
                 className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${isOwnerManager ? 'cursor-pointer active:bg-gray-50' : ''}`}>
                 <div className="flex-1">
                   <p className="text-sm font-medium text-gray-900">{f.product_name}</p>
@@ -334,40 +338,38 @@ function StokProduksiView({ isOwnerManager, setHeaderActions }: { isOwnerManager
         )}
       </div>
 
-      {/* Stok Bahan section */}
+      {/* Stok Bahan */}
       <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Stok Bahan</p>
-
-        </div>
+        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Stok Bahan</p>
         <input value={search} onChange={e => setSearch(e.target.value)}
           className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none mb-2"
           placeholder="Cari nama bahan..." />
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide mb-2">
           {KAT_FILTERS.map(({ k, l }) => (
             <button key={k} onClick={() => setFilterKat(k)}
-              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${filterKat === k ? k === 'stok_rendah' ? 'bg-red-600 text-white' : 'bg-gray-900 text-white' : k === 'stok_rendah' ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-white text-gray-600 border border-gray-200'}`}>{l}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${filterKat === k ? k === 'stok_rendah' ? 'bg-red-600 text-white' : 'bg-gray-900 text-white' : k === 'stok_rendah' ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-white text-gray-600 border border-gray-200'}`}>
+              {l}
             </button>
           ))}
         </div>
         <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
           {filteredBahan.map((s, idx) => (
             <div key={s.id}
-  onClick={() => { if (isOwnerManager) { setEditPs(s); setShowPsForm(true) } }}
-  className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${isOwnerManager ? 'cursor-pointer active:bg-gray-50' : ''}`}>
+              onClick={() => { if (isOwnerManager) { setEditPs(s); setShowPsForm(true) } }}
+              className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${isOwnerManager ? 'cursor-pointer active:bg-gray-50' : ''}`}>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900">{s.material?.name}</p>
                 <p className="text-xs text-gray-400">{formatKategori(s.material?.category)} · Avg {formatRupiah(s.displayAvgCost)}/{s.material?.unit}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="text-right">
-                  <p className="text-sm font-semibold text-gray-900">{s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.material?.unit}</span></p>
-                  <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand * s.displayAvgCost)}</p>
-                </div>
+              <div className="text-right">
+                <p className="text-sm font-semibold text-gray-900">{s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.material?.unit}</span></p>
+                <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand * s.displayAvgCost)}</p>
               </div>
             </div>
           ))}
-          {filteredBahan.length === 0 && <div className="py-8 text-center text-sm text-gray-400">{search ? `Tidak ada hasil` : 'Belum ada stok bahan'}</div>}
+          {filteredBahan.length === 0 && (
+            <div className="py-8 text-center text-sm text-gray-400">{search ? 'Tidak ada hasil' : 'Belum ada stok bahan'}</div>
+          )}
         </div>
       </div>
 
@@ -377,11 +379,11 @@ function StokProduksiView({ isOwnerManager, setHeaderActions }: { isOwnerManager
   )
 }
 
-// ── FORM: Edit Produk Jadi (FGS) ──────────────────────────────
+// ── FORM: Edit Produk Jadi ─────────────────────────────────────
 function FgsEditForm({ fgs, onClose }: { fgs: any; onClose: () => void }) {
-  const [name,  setName]  = useState(fgs?.product_name || '')
-  const [qty,   setQty]   = useState(String(fgs?.qty_on_hand || ''))
-  const [hpp,   setHpp]   = useState(String(fgs?.hpp_per_unit || ''))
+  const [name,   setName]   = useState(fgs?.product_name || '')
+  const [qty,    setQty]    = useState(String(fgs?.qty_on_hand || ''))
+  const [hpp,    setHpp]    = useState(String(fgs?.hpp_per_unit || ''))
   const [saving, setSaving] = useState(false)
 
   async function handleSave() {
@@ -418,7 +420,7 @@ function FgsEditForm({ fgs, onClose }: { fgs: any; onClose: () => void }) {
       </div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
       </div>
     </Modal>
   )
@@ -429,7 +431,7 @@ function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const [matId,  setMatId]  = useState(ps?.material_id || '')
   const [qty,    setQty]    = useState(String(ps?.qty_on_hand || ''))
-  const [avg,    setAvg]    = useState(String(ps?.avg_cost || ''))
+  const [avg,    setAvg]    = useState(String((ps as any)?.avg_cost || ''))
   const [saving, setSaving] = useState(false)
 
   async function handleSave() {
@@ -467,39 +469,29 @@ function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
       </div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
       </div>
     </Modal>
   )
 }
 
 // ── STOK TOKO ─────────────────────────────────────────────────
-function StokTokoView({ storeId, role, isOwnerManager, setHeaderActions }: { storeId: string; role: string; isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void }) {
+function StokTokoView({ storeId, role, isOwnerManager, setHeaderActions }: {
+  storeId: string; role: string; isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void
+}) {
   const canSeeAllStores = ['owner','manager','gudang','produksi'].includes(role)
-
   const stores = useLiveQuery(() =>
-    db.stores.filter(s => {
-      if (!s.is_active) return false
-      // Filter berdasarkan ID (lebih reliable dari is_virtual yang mungkin belum sync)
-      if (s.id.includes('gudang') || s.id.includes('produksi')) return false
-      return true
-    }).toArray()
+    db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray()
   , [])
-
-  // Inisialisasi selectedStore: ambil toko pertama dari stores atau storeId
-  const firstStoreId = stores && stores.length > 0 ? stores[0].id : ''
   const [selectedStore, setSelectedStore] = useState('')
 
-  // Set default selectedStore saat stores pertama kali load
   useEffect(() => {
     if (!canSeeAllStores) {
       setSelectedStore(storeId)
     } else if (stores && stores.length > 0) {
-      // Hanya set jika belum ada pilihan atau pilihan sekarang tidak valid
       setSelectedStore(prev => {
         if (!prev) return stores[0].id
-        const stillValid = stores.some(s => s.id === prev)
-        return stillValid ? prev : stores[0].id
+        return stores.some(s => s.id === prev) ? prev : stores[0].id
       })
     }
   }, [stores, canSeeAllStores, storeId])
@@ -512,36 +504,34 @@ function StokTokoView({ storeId, role, isOwnerManager, setHeaderActions }: { sto
         <div className="bg-white border-b border-gray-100 px-4 py-2 flex gap-1.5 overflow-x-auto scrollbar-hide flex-shrink-0">
           {stores.map(s => (
             <button key={s.id} onClick={() => setSelectedStore(s.id)}
-              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${selectedStore===s.id ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${selectedStore === s.id ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>
               {s.name}
             </button>
           ))}
         </div>
       )}
-      {/* Key berubah saat selectedStore berubah → force re-render + re-query */}
-      {activeStoreId && (
+      {activeStoreId ? (
         <StokTokoContent
           key={activeStoreId}
           storeId={activeStoreId}
           isOwnerManager={isOwnerManager}
           setHeaderActions={setHeaderActions}
         />
-      )}
-      {!activeStoreId && (
+      ) : (
         <div className="flex-1 flex items-center justify-center text-sm text-gray-400">Pilih toko</div>
       )}
     </div>
   )
 }
 
-function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: { storeId: string; isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void }) {
+function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: {
+  storeId: string; isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void
+}) {
   const [search,        setSearch]        = useState('')
   const [filterTokoKat, setFilterTokoKat] = useState('semua')
   const [showStokAwal,  setShowStokAwal]  = useState(false)
   const [editStock,     setEditStock]     = useState<any>(null)
 
-  // Auto-fetch stok dari Supabase saat toko berubah
-  // Ini memastikan data selalu fresh tanpa perlu klik sync manual
   useEffect(() => {
     if (!storeId) return
     supabase.from('stock').select('*').eq('store_id', storeId).then(({ data }) => {
@@ -570,7 +560,7 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: { storeI
     const cMap   = Object.fromEntries(cats.map(c => [c.id, c]))
     const mMap   = Object.fromEntries(mats.map(m => [m.id, m]))
     return stocks.map(s => {
-      const id   = (s as any).material_id || s.ingredient_id || ''
+      const id  = (s as any).material_id || s.ingredient_id || ''
       const prod = pMap[id]; const mat = mMap[id]
       if (!prod && !mat) return null
       return {
@@ -587,23 +577,23 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: { storeI
   }, [storeId])
 
   const TOKO_FILTERS = [
-    { k:'semua',               l:'Semua'         },
-    { k:'stok_rendah',         l:'⚠ Stok Rendah' },
-    { k:'stok_habis',          l:'Habis'          },
-    { k:'produk_jadi',         l:'Produk Jadi'    },
-    { k:'bahan_baku',          l:'Bahan Baku'     },
-    { k:'bahan_setengah_jadi', l:'Bahan Setengah' },
-    { k:'packaging',           l:'Packaging'      },
-    { k:'non_produksi',        l:'Non-Produksi'   },
+    { k: 'semua',               l: 'Semua'          },
+    { k: 'stok_rendah',         l: '⚠ Stok Rendah'  },
+    { k: 'stok_habis',          l: 'Habis'           },
+    { k: 'produk_jadi',         l: 'Produk Jadi'     },
+    { k: 'bahan_baku',          l: 'Bahan Baku'      },
+    { k: 'bahan_setengah_jadi', l: 'Bahan Setengah'  },
+    { k: 'packaging',           l: 'Packaging'       },
+    { k: 'non_produksi',        l: 'Non-Produksi'    },
   ]
 
-  const filtered = (data||[]).filter(s => {
+  const filtered = (data || []).filter(s => {
     const matchSearch = !search || s.displayName.toLowerCase().includes(search.toLowerCase())
     const matchKat =
-      filterTokoKat==='semua'       ? true :
-      filterTokoKat==='stok_rendah' ? s.qty_on_hand > 0 && s.qty_on_hand <= 5 :
-      filterTokoKat==='stok_habis'  ? s.qty_on_hand <= 0 :
-      filterTokoKat==='produk_jadi' ? s.isProduk :
+      filterTokoKat === 'semua'       ? true :
+      filterTokoKat === 'stok_rendah' ? s.qty_on_hand > 0 && s.qty_on_hand <= 5 :
+      filterTokoKat === 'stok_habis'  ? s.qty_on_hand <= 0 :
+      filterTokoKat === 'produk_jadi' ? s.isProduk :
       s.categoryRaw === filterTokoKat
     return matchSearch && matchKat
   })
@@ -612,8 +602,6 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: { storeI
 
   return (
     <div className="flex-1 overflow-auto p-4 space-y-3">
-
-
       {filtered.length > 0 && totalNilai > 0 && (
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400">Nilai Stok Toko</p>
@@ -621,23 +609,22 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: { storeI
           <p className="text-xs text-gray-400 mt-0.5">{filtered.length} item</p>
         </div>
       )}
-
       <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
         {TOKO_FILTERS.map(({ k, l }) => (
           <button key={k} onClick={() => setFilterTokoKat(k)}
-            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${filterTokoKat===k?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>{l}</button>
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${filterTokoKat === k ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
+            {l}
+          </button>
         ))}
       </div>
-
       <input value={search} onChange={e => setSearch(e.target.value)}
         className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
         placeholder="Cari nama produk / bahan..." />
-
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {filtered.map((s, idx) => (
           <div key={s.id}
-            onClick={() => { if (isOwnerManager) { setEditStock(s); } }}
-              className={`flex items-center px-4 py-3 ${idx!==0?'border-t border-gray-50':''} ${isOwnerManager?'cursor-pointer active:bg-gray-50':''}`}>
+            onClick={() => { if (isOwnerManager) setEditStock(s) }}
+            className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${isOwnerManager ? 'cursor-pointer active:bg-gray-50' : ''}`}>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900">{s.displayName}</p>
               <div className="flex items-center gap-1.5 mt-0.5">
@@ -647,13 +634,11 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: { storeI
                 {s.avg_cost > 0 && <p className="text-xs text-gray-300">· Avg {formatRupiah(s.avg_cost)}/{s.displayUnit}</p>}
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="text-right">
-                <p className={`text-sm font-semibold ${s.qty_on_hand<=0?'text-red-500':'text-gray-900'}`}>
-                  {s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.displayUnit}</span>
-                </p>
-                {s.avg_cost > 0 && <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand*s.avg_cost)}</p>}
-              </div>
+            <div className="text-right">
+              <p className={`text-sm font-semibold ${s.qty_on_hand <= 0 ? 'text-red-500' : 'text-gray-900'}`}>
+                {s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.displayUnit}</span>
+              </p>
+              {s.avg_cost > 0 && <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand * s.avg_cost)}</p>}
             </div>
           </div>
         ))}
@@ -663,13 +648,8 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: { storeI
           </div>
         )}
       </div>
-
-      {showStokAwal && isOwnerManager && (
-        <StokAwalTokoForm storeId={storeId} onClose={() => setShowStokAwal(false)} />
-      )}
-      {editStock && isOwnerManager && (
-        <EditStokTokoForm stock={editStock} onClose={() => setEditStock(null)} />
-      )}
+      {showStokAwal && isOwnerManager && <StokAwalTokoForm storeId={storeId} onClose={() => setShowStokAwal(false)} />}
+      {editStock    && isOwnerManager && <EditStokTokoForm stock={editStock} onClose={() => setEditStock(null)} />}
     </div>
   )
 }
@@ -693,13 +673,13 @@ function StokAwalTokoForm({ storeId, onClose }: { storeId: string; onClose: () =
           )
         ).first()
         const data: any = {
-          id:           existing?.id || generateId(),
-          store_id:     storeId,
+          id:            existing?.id || generateId(),
+          store_id:      storeId,
           ingredient_id: item.material_id,
-          material_id:  item.material_id,
-          qty_on_hand:  Number(item.qty),
-          avg_cost:     Number(item.avg_cost) || 0,
-          last_updated: now(),
+          material_id:   item.material_id,
+          qty_on_hand:   Number(item.qty),
+          avg_cost:      Number(item.avg_cost) || 0,
+          last_updated:  now(),
         }
         await db.stock.put(data)
         if (existing) {
@@ -726,31 +706,34 @@ function StokAwalTokoForm({ storeId, onClose }: { storeId: string; onClose: () =
           return (
             <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
               <select className="input text-sm" value={item.material_id}
-                onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,material_id:e.target.value} : x))}>
+                onChange={e => setItems(p => p.map((x, idx) => idx === i ? { ...x, material_id: e.target.value } : x))}>
                 <option value="">Pilih bahan / produk</option>
                 {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
               </select>
               <div className="grid grid-cols-2 gap-2">
-                <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit||'unit'})`}
-                  value={item.qty} onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,qty:e.target.value} : x))} />
+                <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit || 'unit'})`}
+                  value={item.qty} onChange={e => setItems(p => p.map((x, idx) => idx === i ? { ...x, qty: e.target.value } : x))} />
                 <input className="input text-sm" type="number" placeholder="Harga avg"
-                  value={item.avg_cost} onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,avg_cost:e.target.value} : x))} />
+                  value={item.avg_cost} onChange={e => setItems(p => p.map((x, idx) => idx === i ? { ...x, avg_cost: e.target.value } : x))} />
               </div>
-              {items.length > 1 && <button onClick={() => setItems(p => p.filter((_,idx) => idx!==i))} className="text-xs text-red-400">Hapus</button>}
+              {items.length > 1 && (
+                <button onClick={() => setItems(p => p.filter((_, idx) => idx !== i))} className="text-xs text-red-400">Hapus</button>
+              )}
             </div>
           )
         })}
-        <button onClick={() => setItems(p => [...p, {material_id:'',qty:'',avg_cost:''}])} className="text-sm text-blue-600 font-medium">+ Tambah Item</button>
+        <button onClick={() => setItems(p => [...p, { material_id: '', qty: '', avg_cost: '' }])}
+          className="text-sm text-blue-600 font-medium">+ Tambah Item</button>
       </div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
       </div>
     </Modal>
   )
 }
 
-// ── FORM: Edit Stok Toko (single item) ───────────────────────
+// ── FORM: Edit Stok Toko ──────────────────────────────────────
 function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void }) {
   const [qty,    setQty]    = useState(String(stock.qty_on_hand || 0))
   const [avg,    setAvg]    = useState(String(stock.avg_cost || 0))
@@ -775,7 +758,7 @@ function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void 
       </div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
       </div>
     </Modal>
   )
@@ -783,14 +766,14 @@ function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void 
 
 // ── FORM: Tambah/Edit Bahan ───────────────────────────────────
 function MaterialForm({ material, isOwner, onClose }: { material: Material | null; isOwner: boolean; onClose: () => void }) {
-  const [name,       setName]      = useState(material?.name || '')
-  const [category,   setCategory]  = useState(material?.category || 'bahan_baku')
-  const [unit,       setUnit]      = useState(material?.unit || '')
-  const [unitCost,   setUnitCost]  = useState(String(material?.unit_cost || '0'))
-  const [minStock,   setMinStock]  = useState(String(material?.min_stock || '0'))
-  const [customUnit, setCustom]    = useState(material ? !SATUAN.map(s => s.toLowerCase()).includes((material.unit||'').toLowerCase()) : false)
-  const [isActive,   setIsActive]  = useState(material?.is_active ?? true)
-  const [saving,     setSaving]    = useState(false)
+  const [name,       setName]     = useState(material?.name || '')
+  const [category,   setCategory] = useState(material?.category || 'bahan_baku')
+  const [unit,       setUnit]     = useState(material?.unit || '')
+  const [unitCost,   setUnitCost] = useState(String(material?.unit_cost || '0'))
+  const [minStock,   setMinStock] = useState(String(material?.min_stock || '0'))
+  const [customUnit, setCustom]   = useState(material ? !SATUAN.map(s => s.toLowerCase()).includes((material.unit || '').toLowerCase()) : false)
+  const [isActive,   setIsActive] = useState(material?.is_active ?? true)
+  const [saving,     setSaving]   = useState(false)
 
   async function handleDelete() {
     if (!material || !isOwner) return
@@ -820,7 +803,11 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
     }
     setSaving(true)
     try {
-      const data: Material = { id: material?.id || generateId(), name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock), is_active: isActive, created_at: material?.created_at || now(), updated_at: now() }
+      const data: Material = {
+        id: material?.id || generateId(), name: name.trim(), category, unit,
+        unit_cost: Number(unitCost), min_stock: Number(minStock),
+        is_active: isActive, created_at: material?.created_at || now(), updated_at: now(),
+      }
       await db.materials.put(data)
       const { error } = await supabase.from('materials').upsert(data)
       if (error) throw error
@@ -883,7 +870,7 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
 function OpeningStockForm({ onClose }: { onClose: () => void }) {
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const [items,  setItems]  = useState([{ material_id: '', qty: '', unit_cost: '' }])
-  const [date,   setDate]   = useState(new Date().toISOString().slice(0,10))
+  const [date,   setDate]   = useState(new Date().toISOString().slice(0, 10))
   const [notes,  setNotes]  = useState('Saldo awal migrasi')
   const [saving, setSaving] = useState(false)
 
@@ -891,7 +878,10 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
     setItems(p => p.map((item, idx) => {
       if (idx !== i) return item
       const updated = { ...item, [f]: v }
-      if (f === 'material_id') { const mat = materials?.find(m => m.id === v); if (mat) updated.unit_cost = String(mat.avg_cost || mat.unit_cost || 0) }
+      if (f === 'material_id') {
+        const mat = materials?.find(m => m.id === v)
+        if (mat) updated.unit_cost = String(mat.avg_cost || mat.unit_cost || 0)
+      }
       return updated
     }))
   }
@@ -902,8 +892,9 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
     setSaving(true)
     try {
       for (const item of valid) {
-        const qty = Number(item.qty), cost = Number(item.unit_cost) || 0
-        const ws  = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
+        const qty  = Number(item.qty)
+        const cost = Number(item.unit_cost) || 0
+        const ws   = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
         const wsd: WarehouseStock = { id: ws?.id || generateId(), material_id: item.material_id, qty_on_hand: qty, last_updated: now() }
         await db.warehouse_stock.put(wsd)
         await supabase.from('warehouse_stock').upsert(wsd)
@@ -912,7 +903,7 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
           await supabase.from('materials').update({ unit_cost: cost, avg_cost: cost }).eq('id', item.material_id)
         }
         const mutId = generateId()
-        const mut = { id: mutId, mutation_type: 'opening_stock', destination_name: 'Saldo Awal', notes: notes || 'Stok awal', status: 'confirmed', created_by: 'system', created_at: `${date}T00:00:00.000Z`, confirmed_at: now(), confirmed_by: 'system' }
+        const mut   = { id: mutId, mutation_type: 'opening_stock', destination_name: 'Saldo Awal', notes: notes || 'Stok awal', status: 'confirmed', created_by: 'system', created_at: `${date}T00:00:00.000Z`, confirmed_at: now(), confirmed_by: 'system' }
         await db.warehouse_mutations.add(mut as any)
         await supabase.from('warehouse_mutations').insert(mut)
         const mi = { id: generateId(), mutation_id: mutId, material_id: item.material_id, qty, unit_cost: cost }
@@ -921,7 +912,7 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
       }
       toast.success(`${valid.length} item stok awal disimpan`)
       onClose()
-    } catch (e) { toast.error('Gagal menyimpan') }
+    } catch { toast.error('Gagal menyimpan') }
     finally { setSaving(false) }
   }
 
@@ -942,25 +933,32 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
             const mat = materials?.find(m => m.id === item.material_id)
             return (
               <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
-                <select className="input text-sm" value={item.material_id} onChange={e => updateItem(i,'material_id',e.target.value)}>
+                <select className="input text-sm" value={item.material_id} onChange={e => updateItem(i, 'material_id', e.target.value)}>
                   <option value="">Pilih bahan</option>
                   {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
                 </select>
                 <div className="grid grid-cols-2 gap-2">
-                  <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit||'unit'})`} value={item.qty} onChange={e => updateItem(i,'qty',e.target.value)} />
-                  <input className="input text-sm" type="number" placeholder="Harga/unit" value={item.unit_cost} onChange={e => updateItem(i,'unit_cost',e.target.value)} />
+                  <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit || 'unit'})`}
+                    value={item.qty} onChange={e => updateItem(i, 'qty', e.target.value)} />
+                  <input className="input text-sm" type="number" placeholder="Harga/unit"
+                    value={item.unit_cost} onChange={e => updateItem(i, 'unit_cost', e.target.value)} />
                 </div>
-                {item.qty && item.unit_cost && <p className="text-xs text-gray-400">Nilai: {formatRupiah(Number(item.qty)*Number(item.unit_cost))}</p>}
-                {items.length > 1 && <button onClick={() => setItems(p => p.filter((_,idx) => idx!==i))} className="text-xs text-red-400">Hapus</button>}
+                {item.qty && item.unit_cost && (
+                  <p className="text-xs text-gray-400">Nilai: {formatRupiah(Number(item.qty) * Number(item.unit_cost))}</p>
+                )}
+                {items.length > 1 && (
+                  <button onClick={() => setItems(p => p.filter((_, idx) => idx !== i))} className="text-xs text-red-400">Hapus</button>
+                )}
               </div>
             )
           })}
         </div>
-        <button onClick={() => setItems(p => [...p,{material_id:'',qty:'',unit_cost:''}])} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
+        <button onClick={() => setItems(p => [...p, { material_id: '', qty: '', unit_cost: '' }])}
+          className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
-        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan Stok Awal'}</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan Stok Awal'}</button>
       </div>
     </Modal>
   )

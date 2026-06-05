@@ -1,11 +1,9 @@
 // src/pages/produksi/ProduksiPage.tsx
-// CHANGELOG v3:
-// - FIX CRITICAL: query recipes di ProduksiTokoTab pakai .where('store_id').equals()
-//   lalu filter recipe_type di JS — bukan langsung filter di .filter() karena
-//   recipe_type tidak ada di Dexie index sehingga data tidak terdeteksi
-// - FIX: sync store_recipes + items diperkuat — pull SEMUA items (tidak filter store_id)
-//   karena store_recipe_items tidak punya store_id, hanya recipe_id
-// - FIX: auto-sync dipanggil saat komponen mount + activeStoreId berubah
+// CHANGELOG v4:
+// - FIX: CatatProduksiTab logs query — hapus referensi activeStoreId yang tidak ada di scope
+// - FIX: ProduksiTokoTab logs query — tambah load materials untuk detail bahan
+// - FIX: tag penutup </div> yang kurang di ProduksiTokoTab
+// - FIX: syncStoreRecipes tambah production_log_materials
 
 import { useState, useEffect, useMemo, createContext, useContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -119,37 +117,37 @@ export default function ProduksiPage() {
     setIsSyncing(true)
     try {
       const storeId = user?.store_id || ''
-      const [mats, pstock, fgs, recipes, recipeItems, logs, mutations, mutItems, partners, products, stores, storeRecipes, storeRecipeItems] = await Promise.all([
+      const [mats, pstock, fgs, recipes, recipeItems, logs, logMats, mutations, mutItems, partners, products, stores, storeRecipes, storeRecipeItems] = await Promise.all([
         supabase.from('materials').select('*').eq('is_active', true),
         supabase.from('production_stock').select('*'),
         supabase.from('finished_goods_stock').select('*'),
         supabase.from('production_recipes').select('*'),
         supabase.from('production_recipe_items').select('*'),
         supabase.from('production_logs').select('*').order('created_at', { ascending: false }).limit(200),
+        supabase.from('production_log_materials').select('*'),
         supabase.from('production_mutations').select('*').order('created_at', { ascending: false }).limit(200),
         supabase.from('production_mutation_items').select('*'),
         supabase.from('partners').select('*'),
         supabase.from('products').select('*').eq('is_active', true),
         supabase.from('stores').select('*').eq('is_active', true),
-        // FIX: selalu sync store_recipes + items saat syncData dipanggil
         storeId ? supabase.from('store_recipes').select('*').eq('store_id', storeId) : Promise.resolve({ data: [] }),
         supabase.from('store_recipe_items').select('*'),
       ])
 
       await Promise.all([
-        mats.data?.length        ? db.materials.bulkPut(mats.data)                          : Promise.resolve(),
-        pstock.data !== null     ? (async () => { await db.production_stock.clear();         if (pstock.data?.length)      await db.production_stock.bulkPut(pstock.data)      })() : Promise.resolve(),
-        fgs.data?.length         ? db.finished_goods_stock.bulkPut(fgs.data)                : Promise.resolve(),
-        recipes.data !== null    ? (async () => { await db.production_recipes.clear();       if (recipes.data?.length)     await db.production_recipes.bulkPut(recipes.data)    })() : Promise.resolve(),
-        recipeItems.data !== null ? (async () => { await db.production_recipe_items.clear(); if (recipeItems.data?.length) await db.production_recipe_items.bulkPut(recipeItems.data) })() : Promise.resolve(),
-        logs.data?.length        ? db.production_logs.bulkPut(logs.data)                    : Promise.resolve(),
-        mutations.data?.length   ? db.production_mutations.bulkPut(mutations.data)          : Promise.resolve(),
-        mutItems.data?.length    ? db.production_mutation_items.bulkPut(mutItems.data)      : Promise.resolve(),
-        partners.data?.length    ? db.partners.bulkPut(partners.data)                       : Promise.resolve(),
-        products.data?.length    ? db.products.bulkPut(products.data)                       : Promise.resolve(),
-        stores.data?.length      ? db.stores.bulkPut(stores.data)                           : Promise.resolve(),
-        // FIX: store_recipes dan items selalu di-upsert (bulkPut), tidak pernah di-clear
-        (storeRecipes as any).data?.length    ? db.store_recipes.bulkPut((storeRecipes as any).data)         : Promise.resolve(),
+        mats.data?.length         ? db.materials.bulkPut(mats.data)                           : Promise.resolve(),
+        pstock.data !== null      ? (async () => { await db.production_stock.clear();          if (pstock.data?.length)       await db.production_stock.bulkPut(pstock.data)       })() : Promise.resolve(),
+        fgs.data?.length          ? db.finished_goods_stock.bulkPut(fgs.data)                 : Promise.resolve(),
+        recipes.data !== null     ? (async () => { await db.production_recipes.clear();        if (recipes.data?.length)      await db.production_recipes.bulkPut(recipes.data)     })() : Promise.resolve(),
+        recipeItems.data !== null ? (async () => { await db.production_recipe_items.clear();   if (recipeItems.data?.length)  await db.production_recipe_items.bulkPut(recipeItems.data) })() : Promise.resolve(),
+        logs.data?.length         ? db.production_logs.bulkPut(logs.data)                     : Promise.resolve(),
+        logMats.data?.length      ? db.production_log_materials.bulkPut(logMats.data)         : Promise.resolve(),
+        mutations.data?.length    ? db.production_mutations.bulkPut(mutations.data)           : Promise.resolve(),
+        mutItems.data?.length     ? db.production_mutation_items.bulkPut(mutItems.data)       : Promise.resolve(),
+        partners.data?.length     ? db.partners.bulkPut(partners.data)                        : Promise.resolve(),
+        products.data?.length     ? db.products.bulkPut(products.data)                        : Promise.resolve(),
+        stores.data?.length       ? db.stores.bulkPut(stores.data)                            : Promise.resolve(),
+        (storeRecipes as any).data?.length     ? db.store_recipes.bulkPut((storeRecipes as any).data)          : Promise.resolve(),
         (storeRecipeItems as any).data?.length ? db.store_recipe_items.bulkPut((storeRecipeItems as any).data) : Promise.resolve(),
       ])
 
@@ -255,23 +253,22 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
     return () => setToolbar(null)
   }, [groupMode])
 
+  // FIX: hapus referensi activeStoreId yang tidak ada di scope CatatProduksiTab
+  // Tab divisi produksi load SEMUA logs produksi (bukan per toko)
   const logs = useLiveQuery(async () => {
-  const today = new Date().toLocaleDateString('sv-SE')
-  const all = await db.production_logs
-    .filter(l => (l as any).store_id === activeStoreId && l.created_at.slice(0, 10) === today)
-    .reverse().sortBy('created_at')
-  const rMap = Object.fromEntries((await db.store_recipes.toArray()).map(r => [r.id, r]))
-  // FIX: tambah load materials
-  const logMats = await db.production_log_materials.toArray()
-  const matDefs = await db.materials.toArray()
-  const mMap    = Object.fromEntries(matDefs.map(m => [m.id, m]))
-  return all.map(l => {
-    const materials  = logMats.filter(m => m.log_id === l.id).map(m => ({ ...m, material: mMap[m.material_id] }))
-    const totalCost  = materials.reduce((s, m) => s + m.qty_used * (m.material?.unit_cost || 0), 0)
-    const hppPerUnit = l.total_yield > 0 ? totalCost / l.total_yield : 0
-    return { ...l, recipe: rMap[(l as any).recipe_id], materials, total_cost: totalCost, hpp_per_unit: hppPerUnit }
-  })
-}, [activeStoreId])
+    const l       = await db.production_logs.orderBy('created_at').reverse().limit(200).toArray()
+    const recipes = await db.production_recipes.toArray()
+    const rMap    = Object.fromEntries(recipes.map(r => [r.id, r]))
+    const mats    = await db.production_log_materials.toArray()
+    const matDefs = await db.materials.toArray()
+    const mMap    = Object.fromEntries(matDefs.map(m => [m.id, m]))
+    return l.map(log => {
+      const logMats   = mats.filter(m => m.log_id === log.id).map(m => ({ ...m, material: mMap[m.material_id] }))
+      const totalCost = logMats.reduce((s, m) => s + m.qty_used * (m.material?.unit_cost || 0), 0)
+      const hpp       = log.total_yield > 0 ? totalCost / log.total_yield : 0
+      return { ...log, recipe: rMap[log.recipe_id], materials: logMats, total_cost: totalCost, hpp_per_unit: hpp }
+    })
+  }, [])
 
   const todayTotal = useMemo(() => {
     if (!logs) return { count: 0, yield: 0 }
@@ -390,9 +387,7 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
 
 function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isOwnerManager?: boolean; onClose: () => void }) {
   const allStores = useLiveQuery(() =>
-    isOwnerManager
-      ? db.stores.filter(s => s.is_active).toArray()
-      : Promise.resolve([])
+    isOwnerManager ? db.stores.filter(s => s.is_active).toArray() : Promise.resolve([])
   , [isOwnerManager])
 
   const [inputAsStore, setInputAsStore] = useState('')
@@ -675,51 +670,51 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
     }
   }, [stores])
 
-  // FIX CRITICAL: sync store_recipes + items setiap kali activeStoreId berubah
-  // dan saat komponen pertama kali mount
   async function syncStoreRecipes(sid: string) {
-  setIsSyncing(true)
-  try {
-    const [{ data: recs }, { data: items }, { data: logMats }] = await Promise.all([
-      supabase.from('store_recipes').select('*').eq('store_id', sid),
-      supabase.from('store_recipe_items').select('*'),
-      // FIX: sync production_log_materials untuk toko ini
-      supabase.from('production_log_materials').select('*'),
-    ])
-    if (recs?.length)    await db.store_recipes.bulkPut(recs)
-    if (items?.length)   await db.store_recipe_items.bulkPut(items)
-    if (logMats?.length) await db.production_log_materials.bulkPut(logMats)
-    console.log('[ProduksiToko] sync done:', recs?.length, 'resep,', items?.length, 'items,', logMats?.length, 'log materials')
-  } catch (e) {
-    console.warn('[ProduksiToko] sync gagal:', e)
-  } finally {
-    setIsSyncing(false)
+    setIsSyncing(true)
+    try {
+      const [{ data: recs }, { data: items }, { data: logMats }] = await Promise.all([
+        supabase.from('store_recipes').select('*').eq('store_id', sid),
+        supabase.from('store_recipe_items').select('*'),
+        supabase.from('production_log_materials').select('*'),
+      ])
+      if (recs?.length)    await db.store_recipes.bulkPut(recs)
+      if (items?.length)   await db.store_recipe_items.bulkPut(items)
+      if (logMats?.length) await db.production_log_materials.bulkPut(logMats)
+      console.log('[ProduksiToko] sync done:', recs?.length, 'resep,', items?.length, 'items,', logMats?.length, 'log materials')
+    } catch (e) {
+      console.warn('[ProduksiToko] sync gagal:', e)
+    } finally {
+      setIsSyncing(false)
+    }
   }
-}
 
   useEffect(() => {
     if (!activeStoreId) return
     syncStoreRecipes(activeStoreId)
   }, [activeStoreId])
 
-  // FIX CRITICAL: query pakai .where('store_id').equals() dulu
-  // lalu filter recipe_type === 'production' di JS
-  // JANGAN langsung .filter() dengan kedua kondisi sekaligus karena
-  // recipe_type tidak ada di Dexie index → data tidak ter-cache dengan benar
   const recipes = useLiveQuery(async () => {
-    // Step 1: ambil semua store_recipes untuk toko ini (pakai index store_id)
     const all = await db.store_recipes.where('store_id').equals(activeStoreId).toArray()
-    // Step 2: filter recipe_type di JavaScript (bukan di Dexie query)
     return all.filter(r => (r as any).recipe_type === 'production')
   }, [activeStoreId])
 
+  // FIX: load materials untuk detail bahan di log produksi toko
   const logs = useLiveQuery(async () => {
     const today = new Date().toLocaleDateString('sv-SE')
     const all = await db.production_logs
       .filter(l => (l as any).store_id === activeStoreId && l.created_at.slice(0, 10) === today)
       .reverse().sortBy('created_at')
-    const rMap = Object.fromEntries((await db.store_recipes.toArray()).map(r => [r.id, r]))
-    return all.map(l => ({ ...l, recipe: rMap[(l as any).recipe_id] }))
+    const rMap    = Object.fromEntries((await db.store_recipes.toArray()).map(r => [r.id, r]))
+    const logMats = await db.production_log_materials.toArray()
+    const matDefs = await db.materials.toArray()
+    const mMap    = Object.fromEntries(matDefs.map(m => [m.id, m]))
+    return all.map(l => {
+      const materials  = logMats.filter(m => m.log_id === l.id).map(m => ({ ...m, material: mMap[m.material_id] }))
+      const totalCost  = materials.reduce((s, m) => s + m.qty_used * (m.material?.unit_cost || 0), 0)
+      const hppPerUnit = l.total_yield > 0 ? totalCost / l.total_yield : 0
+      return { ...l, recipe: rMap[(l as any).recipe_id], materials, total_cost: totalCost, hpp_per_unit: hppPerUnit }
+    })
   }, [activeStoreId])
 
   const totalHariIni = logs?.reduce((s, l) => s + l.total_yield, 0) || 0
@@ -745,9 +740,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400">Resep Tersedia</p>
-          <p className="text-lg font-bold text-blue-600">
-            {isSyncing ? '...' : (recipes?.length || 0)}
-          </p>
+          <p className="text-lg font-bold text-blue-600">{isSyncing ? '...' : (recipes?.length || 0)}</p>
           <p className="text-xs text-gray-400">jenis produk</p>
         </div>
       </div>
@@ -781,48 +774,50 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Produksi Hari Ini</p>
           </div>
           {logs.map((l, idx) => (
-  <div key={l.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
-    <div className="flex items-start justify-between">
-      <div className="flex-1 min-w-0">
-        {(l as any).log_number && (
-          <p className="text-xs font-mono text-blue-600 mb-0.5">{(l as any).log_number}</p>
-        )}
-        <p className="text-sm font-medium text-gray-900">{(l.recipe as any)?.product_name || 'Produksi'}</p>
-        <p className="text-xs text-gray-400">
-          {new Date(l.created_at).toLocaleTimeString('id-ID', {hour:'2-digit',minute:'2-digit',hour12:false})}
-          {' · '}{l.batch_count} batch
-        </p>
-      </div>
-      <p className="text-sm font-bold text-blue-600 flex-shrink-0 ml-3">
-        {l.total_yield} {(l.recipe as any)?.yield_unit || 'pcs'}
-      </p>
-    </div>
-    {(l as any).materials?.length > 0 && (
-      <div className="mt-2 border-t border-gray-50 pt-1.5 space-y-0.5">
-        {(l as any).materials.map((m: any) => (
-          <div key={m.id} className="flex justify-between text-xs text-gray-400">
-            <span>{m.material?.name} × {m.qty_used} {m.material?.unit}{m.material?.unit_cost > 0 ? ` @ ${formatRupiah(m.material.unit_cost)}` : ''}</span>
-            {m.material?.unit_cost > 0 && <span>{formatRupiah(m.qty_used * m.material.unit_cost)}</span>}
-          </div>
-        ))}
-        {(l as any).total_cost > 0 && (
-          <div className="pt-1 border-t border-gray-100 mt-1 space-y-0.5">
-            <div className="flex justify-between text-xs font-medium text-gray-700">
-              <span>Total Biaya Bahan</span>
-              <span>{formatRupiah((l as any).total_cost)}</span>
-            </div>
-            {(l as any).hpp_per_unit > 0 && (
-              <div className="flex justify-between text-xs text-gray-500">
-                <span>HPP per {(l.recipe as any)?.yield_unit || 'pcs'}</span>
-                <span>{formatRupiah((l as any).hpp_per_unit)}</span>
+            <div key={l.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  {(l as any).log_number && (
+                    <p className="text-xs font-mono text-blue-600 mb-0.5">{(l as any).log_number}</p>
+                  )}
+                  <p className="text-sm font-medium text-gray-900">{(l.recipe as any)?.product_name || 'Produksi'}</p>
+                  <p className="text-xs text-gray-400">
+                    {new Date(l.created_at).toLocaleTimeString('id-ID', {hour:'2-digit',minute:'2-digit',hour12:false})}
+                    {' · '}{l.batch_count} batch
+                  </p>
+                </div>
+                <p className="text-sm font-bold text-blue-600 flex-shrink-0 ml-3">
+                  {l.total_yield} {(l.recipe as any)?.yield_unit || 'pcs'}
+                </p>
               </div>
-            )}
-          </div>
-        )}
-      </div>
-    )}
-  </div>
-))}
+              {(l as any).materials?.length > 0 && (
+                <div className="mt-2 border-t border-gray-50 pt-1.5 space-y-0.5">
+                  {(l as any).materials.map((m: any) => (
+                    <div key={m.id} className="flex justify-between text-xs text-gray-400">
+                      <span>{m.material?.name} × {m.qty_used} {m.material?.unit}{m.material?.unit_cost > 0 ? ` @ ${formatRupiah(m.material.unit_cost)}` : ''}</span>
+                      {m.material?.unit_cost > 0 && <span>{formatRupiah(m.qty_used * m.material.unit_cost)}</span>}
+                    </div>
+                  ))}
+                  {(l as any).total_cost > 0 && (
+                    <div className="pt-1 border-t border-gray-100 mt-1 space-y-0.5">
+                      <div className="flex justify-between text-xs font-medium text-gray-700">
+                        <span>Total Biaya Bahan</span>
+                        <span>{formatRupiah((l as any).total_cost)}</span>
+                      </div>
+                      {(l as any).hpp_per_unit > 0 && (
+                        <div className="flex justify-between text-xs text-gray-500">
+                          <span>HPP per {(l.recipe as any)?.yield_unit || 'pcs'}</span>
+                          <span>{formatRupiah((l as any).hpp_per_unit)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {showForm && (
         <ProduksiTokoForm
@@ -869,7 +864,6 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
       const { error } = await supabase.from('production_logs').insert(logData)
       if (error) console.error('[PTOKO LOG ERROR]', error)
 
-      // Kurangi bahan dari stok toko
       const recipeItems = await db.store_recipe_items.where('recipe_id').equals(recipeId).toArray()
       for (const ri of recipeItems) {
         const used     = ri.qty_used * Number(batchCount)
@@ -886,7 +880,6 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
         supabase.from('production_log_materials').insert(lm).then(() => {})
       }
 
-      // Tambah hasil ke stok toko sebagai bahan setengah jadi
       const productName = (selectedRecipe as any)?.product_name || ''
       if (productName) {
         const mat = await db.materials.filter(m => m.name.toLowerCase() === productName.toLowerCase()).first()

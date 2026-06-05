@@ -109,6 +109,7 @@ export default function CashierPage() {
 
   const [showVoidModal,    setShowVoidModal]    = useState(false)
   const [showPrinterModal, setShowPrinterModal] = useState(false)
+  const [showMobileCart,   setShowMobileCart]   = useState(false)
   const [printerConfigTs,  setPrinterConfigTs]  = useState(0)
   const [expandedTxId,   setExpandedTxId]   = useState<string|null>(null)
   const [payFilter,      setPayFilter]      = useState<string>('semua')
@@ -835,11 +836,79 @@ export default function CashierPage() {
 
       {/* Mobile bayar */}
       {mainTab === 'pos' && (items.length>0||cartPakets.length>0) && (
-        <div className="md:hidden bg-white border-t border-gray-100 px-4 py-3 flex-shrink-0">
-          <button onClick={() => setShowCheckout(true)} className="w-full py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold flex items-center justify-between px-4">
-            <span className="flex items-center gap-2"><ShoppingCart size={18}/>{items.length+cartPakets.length} item</span>
+        <div className="md:hidden bg-white border-t border-gray-100 px-3 py-2.5 flex-shrink-0 flex gap-2">
+          {/* Tombol lihat keranjang */}
+          <button onClick={() => setShowMobileCart(true)}
+            className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-gray-100 text-gray-700 text-sm font-medium relative">
+            <ShoppingCart size={18}/>
+            <span className="absolute -top-1.5 -right-1.5 bg-gray-900 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
+              {items.reduce((s,i)=>s+i.qty,0)+cartPakets.length}
+            </span>
+          </button>
+          {/* Tombol bayar */}
+          <button onClick={() => setShowCheckout(true)}
+            className="flex-1 py-2.5 rounded-xl bg-gray-900 text-white text-sm font-semibold flex items-center justify-between px-4">
+            <span>Bayar</span>
             <span>{formatRupiah(grandTotal)}</span>
           </button>
+        </div>
+      )}
+
+      {/* Mobile Cart Sheet */}
+      {showMobileCart && (
+        <div className="md:hidden fixed inset-0 z-50 flex flex-col justify-end" onClick={() => setShowMobileCart(false)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative bg-white rounded-t-2xl max-h-[80vh] flex flex-col max-w-lg mx-auto w-full" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-shrink-0">
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                <ShoppingCart size={16}/> Keranjang
+                <span className="text-sm text-gray-400 font-normal">({items.reduce((s,i)=>s+i.qty,0)+cartPakets.length} item)</span>
+              </h3>
+              <div className="flex items-center gap-2">
+                {(items.length>0||cartPakets.length>0) && (
+                  <button onClick={() => { clearCart(); setCartPakets([]); setShowMobileCart(false) }}
+                    className="text-xs text-red-500 border border-red-200 px-2.5 py-1 rounded-lg">
+                    Kosongkan
+                  </button>
+                )}
+                <button onClick={() => setShowMobileCart(false)} className="p-1 text-gray-400"><X size={18}/></button>
+              </div>
+            </div>
+            {/* Item list */}
+            <div className="overflow-auto flex-1 p-3 space-y-2">
+              {items.map(item => (
+                <CartItemRow key={item.product.id} item={item}
+                  onQtyChange={q => updateQty(item.product.id, q)}
+                  onRemove={() => removeItem(item.product.id)} />
+              ))}
+              {cartPakets.map((cp, i) => (
+                <div key={i} className="bg-gray-50 rounded-xl p-2 border border-gray-100 flex items-center justify-between">
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-gray-800 flex items-center gap-1"><Package size={12}/>{cp.paket.name}</span>
+                    <p className="text-xs text-gray-500 mt-0.5">{cp.pilihan.map(p=>`${p.product.name} x${p.qty}`).join(', ')}</p>
+                  </div>
+                  <div className="flex items-center gap-2 ml-2">
+                    <span className="text-sm font-semibold">{formatRupiah(cp.subtotal)}</span>
+                    <button onClick={() => hapusPaketCart(i)} className="text-red-400 p-1"><Trash2 size={14}/></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Summary + bayar */}
+            <div className="p-4 border-t border-gray-100 space-y-2 flex-shrink-0">
+              <div className="flex justify-between text-sm text-gray-600"><span>Subtotal</span><span>{formatRupiah(rawSubtotal)}</span></div>
+              {paketDiscount > 0 && <div className="flex justify-between text-sm text-green-600"><span>Diskon Paket 🎁</span><span>-{formatRupiah(paketDiscount)}</span></div>}
+              {buy1get1Discount > 0 && <div className="flex justify-between text-sm text-green-600"><span>Diskon B1G1</span><span>-{formatRupiah(buy1get1Discount)}</span></div>}
+              <div className="flex justify-between font-bold text-gray-900 border-t border-gray-100 pt-2">
+                <span>Total</span><span>{formatRupiah(grandTotal)}</span>
+              </div>
+              <button onClick={() => { setShowMobileCart(false); setShowCheckout(true) }}
+                className="w-full py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold">
+                Lanjut Bayar
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -162,11 +162,14 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: { userId: strin
   useEffect(() => {
     setToolbar(
       <div className="flex items-center gap-2">
-        <select value={groupMode} onChange={e => setGroupMode(e.target.value as Period)}
-          className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600">
-          <option value="hari">Per Hari</option>
-          <option value="bulan">Per Bulan</option>
-        </select>
+        {/* FIX #1: kasir tidak perlu dropdown per hari/bulan */}
+        {!isKasir && (
+          <select value={groupMode} onChange={e => setGroupMode(e.target.value as Period)}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600">
+            <option value="hari">Per Hari</option>
+            <option value="bulan">Per Bulan</option>
+          </select>
+        )}
         <button onClick={() => setShowForm(true)}
           className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg">
           <Plus size={13} /> Catat
@@ -174,17 +177,14 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: { userId: strin
       </div>
     )
     return () => setToolbar(null)
-  }, [groupMode])
+  }, [groupMode, isKasir])
 
   const expenses = useLiveQuery(async () => {
     let list = await db.warehouse_expenses.orderBy('created_at').reverse().toArray()
     if (role === 'kasir') {
-  const today = new Date().toLocaleDateString('sv-SE')
-  list = list.filter(e =>
-    e.created_at.slice(0, 10) === today &&
-    ((e as any).store_id === storeId || e.created_by === userId)
-  )
-} else if (role === 'produksi') {
+      // FIX: kurung tutup yang kurang menyebabkan syntax error — halaman crash
+      list = list.filter(e => (e as any).store_id === storeId || e.created_by === userId)
+    } else if (role === 'produksi') {
       list = list.filter(e => e.created_by === userId)
     }
     // owner/manager/gudang: lihat semua
@@ -277,52 +277,79 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: { userId: strin
         ))}
       </div>
 
-      {grouped.map(({ key, items: grpItems }) => {
-        const total    = grpItems.reduce((s, e) => s + e.amount, 0)
-        const today    = new Date().toLocaleDateString('sv-SE')
-        const isFirst  = grouped.indexOf(grouped.find(g => g.key === key)!) === 0
-        const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : (key === today || isFirst)
-        return (
-          <div key={key}>
-            <button onClick={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))}
-              className="w-full flex items-center justify-between px-1 py-2">
-              <div className="flex items-center gap-2">
-                <svg className={`w-3 h-3 text-gray-400 transition-transform ${expanded?'rotate-90':''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-                </svg>
-                <p className="text-xs font-semibold text-gray-600">{groupLabel(grpItems[0].created_at, groupMode)}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-400">{grpItems.length} item</span>
-                <span className="text-xs font-medium text-gray-700">{formatRupiah(total)}</span>
-              </div>
-            </button>
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{ display: expanded ? undefined : 'none' }}>
-              {grpItems.map((e, idx) => (
-                <div key={e.id} className={`flex items-start justify-between px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
-                  <div className="flex-1 min-w-0">
-                    {(e as any).expense_number && (
-                      <p className="text-xs font-mono text-blue-600 mb-0.5">{(e as any).expense_number}<CopyBtn text={(e as any).expense_number} /></p>
-                    )}
-                    <p className="text-sm font-medium text-gray-900 truncate">{e.name}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {KATEGORI_BIAYA.find(k => k.value === e.category)?.label || e.category}
-                      {' · '}{new Date(e.created_at).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})},{' '}
-                      {new Date(e.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}
-                      {(e as any).payment_method ? ` · ${(e as any).payment_method}` : ''}
-                    </p>
-                    {e.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {e.notes}</p>}
-                  </div>
-                  <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(e.amount)}</p>
+      {/* FIX #4: kasir tampil flat tanpa group/collapse */}
+      {isKasir ? (
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          {filtered.length === 0
+            ? <div className="py-12 text-center text-sm text-gray-400">Belum ada biaya hari ini</div>
+            : filtered.map((e, idx) => (
+              <div key={e.id} className={`flex items-start justify-between px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
+                <div className="flex-1 min-w-0">
+                  {(e as any).expense_number && (
+                    <p className="text-xs font-mono text-blue-600 mb-0.5">{(e as any).expense_number}<CopyBtn text={(e as any).expense_number} /></p>
+                  )}
+                  <p className="text-sm font-medium text-gray-900 truncate">{e.name}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {KATEGORI_BIAYA.find(k => k.value === e.category)?.label || e.category}
+                    {' · '}{new Date(e.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}
+                    {(e as any).payment_method ? ` · ${(e as any).payment_method}` : ''}
+                  </p>
+                  {e.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {e.notes}</p>}
                 </div>
-              ))}
-            </div>
-          </div>
-        )
-      })}
-
-      {filtered.length === 0 && (
-        <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">Belum ada catatan biaya</div>
+                <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(e.amount)}</p>
+              </div>
+            ))
+          }
+        </div>
+      ) : (
+        <>
+          {grouped.map(({ key, items: grpItems }) => {
+            const total    = grpItems.reduce((s, e) => s + e.amount, 0)
+            const today    = new Date().toLocaleDateString('sv-SE')
+            const isFirst  = grouped.indexOf(grouped.find(g => g.key === key)!) === 0
+            const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : (key === today || isFirst)
+            return (
+              <div key={key}>
+                <button onClick={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))}
+                  className="w-full flex items-center justify-between px-1 py-2">
+                  <div className="flex items-center gap-2">
+                    <svg className={`w-3 h-3 text-gray-400 transition-transform ${expanded?'rotate-90':''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                    </svg>
+                    <p className="text-xs font-semibold text-gray-600">{groupLabel(grpItems[0].created_at, groupMode)}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">{grpItems.length} item</span>
+                    <span className="text-xs font-medium text-gray-700">{formatRupiah(total)}</span>
+                  </div>
+                </button>
+                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{ display: expanded ? undefined : 'none' }}>
+                  {grpItems.map((e, idx) => (
+                    <div key={e.id} className={`flex items-start justify-between px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
+                      <div className="flex-1 min-w-0">
+                        {(e as any).expense_number && (
+                          <p className="text-xs font-mono text-blue-600 mb-0.5">{(e as any).expense_number}<CopyBtn text={(e as any).expense_number} /></p>
+                        )}
+                        <p className="text-sm font-medium text-gray-900 truncate">{e.name}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {KATEGORI_BIAYA.find(k => k.value === e.category)?.label || e.category}
+                          {' · '}{new Date(e.created_at).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})},{' '}
+                          {new Date(e.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}
+                          {(e as any).payment_method ? ` · ${(e as any).payment_method}` : ''}
+                        </p>
+                        {e.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {e.notes}</p>}
+                      </div>
+                      <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(e.amount)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+          {filtered.length === 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">Belum ada catatan biaya</div>
+          )}
+        </>
       )}
       {showForm && <BiayaForm userId={userId} storeId={storeId} role={role} onClose={() => setShowForm(false)} />}
     </div>

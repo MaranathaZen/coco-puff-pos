@@ -160,11 +160,14 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   useEffect(() => {
     setToolbar(
       <div className="flex items-center gap-2">
-        <select value={groupMode} onChange={e => setGroupMode(e.target.value as Period)}
-          className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600">
-          <option value="hari">Per Hari</option>
-          <option value="bulan">Per Bulan</option>
-        </select>
+        {/* FIX #1: kasir tidak perlu dropdown per hari/bulan */}
+        {!isKasir && (
+          <select value={groupMode} onChange={e => setGroupMode(e.target.value as Period)}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600">
+            <option value="hari">Per Hari</option>
+            <option value="bulan">Per Bulan</option>
+          </select>
+        )}
         <button onClick={() => setShowForm(true)}
           className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg">
           <Plus size={13} /> Baru
@@ -172,19 +175,15 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
       </div>
     )
     return () => setToolbar(null)
-  }, [groupMode])
+  }, [groupMode, isKasir])
 
   const purchases = useLiveQuery(async () => {
     let p = await db.purchases.orderBy('created_at').reverse().toArray()
     // FIX: kasir lihat semua pembelian toko (tidak dibatasi hari ini di query)
     // filter hari ini hanya untuk card total, history tetap tampil semua
     if (role === 'kasir') {
-  const today = new Date().toLocaleDateString('sv-SE')
-  p = p.filter(x =>
-    x.created_at.slice(0, 10) === today &&
-    ((x as any).store_id === storeId || x.created_by === userId)
-  )
-}
+      p = p.filter(x => (x as any).store_id === storeId || x.created_by === userId)
+    }
     const pi   = await db.purchase_items.toArray()
     const mats = await db.materials.toArray()
     const sups = await db.suppliers.toArray()
@@ -268,71 +267,108 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
         className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
         placeholder="Cari supplier, PO, bahan..." />
 
-      {grouped.map(({ key, items: grpItems }) => {
-        const total    = grpItems.reduce((s, p) => s + p.total_amount, 0)
-        const today    = new Date().toLocaleDateString('sv-SE')
-        const isFirst  = grouped.indexOf(grouped.find(g => g.key === key)!) === 0
-        const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : (key === today || isFirst)
-        return (
-          <div key={key}>
-            <button onClick={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))}
-              className="w-full flex items-center justify-between px-1 py-2">
-              <div className="flex items-center gap-2">
-                <svg className={`w-3 h-3 text-gray-400 transition-transform ${expanded?'rotate-90':''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-                </svg>
-                <p className="text-xs font-semibold text-gray-600">{groupLabel(grpItems[0].created_at, groupMode)}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-400">{grpItems.length} item</span>
-                <span className="text-xs font-medium text-gray-700">{formatRupiah(total)}</span>
-              </div>
-            </button>
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{ display: expanded ? undefined : 'none' }}>
-              {grpItems.map((p, idx) => (
-                <div key={p.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
-                  <div className="flex items-start justify-between mb-1">
-                    <div className="flex-1 min-w-0">
-                      {(p as any).po_number && (
-                        <p className="text-xs font-mono text-blue-600 mb-0.5">{(p as any).po_number}<CopyBtn text={(p as any).po_number} /></p>
-                      )}
-                      <p className="text-sm font-medium text-gray-900">{p.supplier?.name || 'Tanpa Supplier'}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        {new Date(p.created_at).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})},{' '}
-                        {new Date(p.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}
-                        {(p as any).payment_method ? ` · ${(p as any).payment_method}` : ''}
-                        {isOwnerManager && storeMap[(p as any).storeId] && (
-                          <span className="ml-1 text-gray-300">· {storeMap[(p as any).storeId]}</span>
-                        )}
-                      </p>
-                      {p.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {p.notes}</p>}
-                    </div>
-                    <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(p.total_amount)}</p>
+      {/* FIX #4: kasir tampil flat tanpa group/collapse */}
+      {isKasir ? (
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          {filtered.length === 0
+            ? <div className="py-12 text-center text-sm text-gray-400">Belum ada pembelian hari ini</div>
+            : filtered.map((p, idx) => (
+              <div key={p.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
+                <div className="flex items-start justify-between mb-1">
+                  <div className="flex-1 min-w-0">
+                    {(p as any).po_number && (
+                      <p className="text-xs font-mono text-blue-600 mb-0.5">{(p as any).po_number}<CopyBtn text={(p as any).po_number} /></p>
+                    )}
+                    <p className="text-sm font-medium text-gray-900">{p.supplier?.name || 'Tanpa Supplier'}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {new Date(p.created_at).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})},{' '}
+                      {new Date(p.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}
+                      {(p as any).payment_method ? ` · ${(p as any).payment_method}` : ''}
+                    </p>
+                    {p.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {p.notes}</p>}
                   </div>
-                  {p.items.length > 0 && (
-                    <div className="mt-1.5 border-t border-gray-50 pt-1.5 space-y-0.5">
-                      {p.items.map(i => (
-                        <div key={i.id} className="flex justify-between text-xs text-gray-400">
-                          <span>{i.material?.name} × {i.qty} {i.material?.unit}{i.unit_cost > 0 ? ` @ ${formatRupiah(i.unit_cost)}` : ''}</span>
-                          <span>{formatRupiah(i.subtotal)}</span>
-                        </div>
-                      ))}
-                      <div className="flex justify-between text-xs font-medium text-gray-600 pt-1 border-t border-gray-50 mt-1">
-                        <span>Total</span><span>{formatRupiah(p.items.reduce((s,i)=>s+i.subtotal,0))}</span>
-                      </div>
-                    </div>
-                  )}
+                  <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(p.total_amount)}</p>
                 </div>
-              ))}
-            </div>
-          </div>
-        )
-      })}
-
-      {filtered.length === 0 && (
-        <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">
-          Belum ada pembelian
+                {p.items.length > 0 && (
+                  <div className="mt-1.5 border-t border-gray-50 pt-1.5 space-y-0.5">
+                    {p.items.map(i => (
+                      <div key={i.id} className="flex justify-between text-xs text-gray-400">
+                        <span>{i.material?.name} × {i.qty} {i.material?.unit}{i.unit_cost > 0 ? ` @ ${formatRupiah(i.unit_cost)}` : ''}</span>
+                        <span>{formatRupiah(i.subtotal)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))
+          }
         </div>
+      ) : (
+        <>
+          {grouped.map(({ key, items: grpItems }) => {
+            const total    = grpItems.reduce((s, p) => s + p.total_amount, 0)
+            const today    = new Date().toLocaleDateString('sv-SE')
+            const isFirst  = grouped.indexOf(grouped.find(g => g.key === key)!) === 0
+            const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : (key === today || isFirst)
+            return (
+              <div key={key}>
+                <button onClick={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))}
+                  className="w-full flex items-center justify-between px-1 py-2">
+                  <div className="flex items-center gap-2">
+                    <svg className={`w-3 h-3 text-gray-400 transition-transform ${expanded?'rotate-90':''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                    </svg>
+                    <p className="text-xs font-semibold text-gray-600">{groupLabel(grpItems[0].created_at, groupMode)}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">{grpItems.length} item</span>
+                    <span className="text-xs font-medium text-gray-700">{formatRupiah(total)}</span>
+                  </div>
+                </button>
+                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{ display: expanded ? undefined : 'none' }}>
+                  {grpItems.map((p, idx) => (
+                    <div key={p.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
+                      <div className="flex items-start justify-between mb-1">
+                        <div className="flex-1 min-w-0">
+                          {(p as any).po_number && (
+                            <p className="text-xs font-mono text-blue-600 mb-0.5">{(p as any).po_number}<CopyBtn text={(p as any).po_number} /></p>
+                          )}
+                          <p className="text-sm font-medium text-gray-900">{p.supplier?.name || 'Tanpa Supplier'}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {new Date(p.created_at).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})},{' '}
+                            {new Date(p.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}
+                            {(p as any).payment_method ? ` · ${(p as any).payment_method}` : ''}
+                            {isOwnerManager && storeMap[(p as any).storeId] && (
+                              <span className="ml-1 text-gray-300">· {storeMap[(p as any).storeId]}</span>
+                            )}
+                          </p>
+                          {p.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {p.notes}</p>}
+                        </div>
+                        <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(p.total_amount)}</p>
+                      </div>
+                      {p.items.length > 0 && (
+                        <div className="mt-1.5 border-t border-gray-50 pt-1.5 space-y-0.5">
+                          {p.items.map(i => (
+                            <div key={i.id} className="flex justify-between text-xs text-gray-400">
+                              <span>{i.material?.name} × {i.qty} {i.material?.unit}{i.unit_cost > 0 ? ` @ ${formatRupiah(i.unit_cost)}` : ''}</span>
+                              <span>{formatRupiah(i.subtotal)}</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between text-xs font-medium text-gray-600 pt-1 border-t border-gray-50 mt-1">
+                            <span>Total</span><span>{formatRupiah(p.items.reduce((s,i)=>s+i.subtotal,0))}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+          {filtered.length === 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">Belum ada pembelian</div>
+          )}
+        </>
       )}
       {showForm && <PembelianForm userId={userId} storeId={storeId} role={role} onClose={() => setShowForm(false)} />}
     </div>
@@ -349,6 +385,23 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
 
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const suppliers = useLiveQuery(() => db.suppliers.filter(s => s.is_active !== false).toArray(), [])
+
+  // FIX #3: untuk kasir, ambil stok toko sebagai pilihan bahan
+  const storeStockMats = useLiveQuery(async () => {
+    if (role !== 'kasir') return []
+    const stocks = await db.stock.where('store_id').equals(activeStoreId).toArray()
+    const mats   = await db.materials.toArray()
+    const mMap   = Object.fromEntries(mats.map(m => [m.id, m]))
+    return stocks
+      .filter(s => (s.qty_on_hand || 0) > 0)
+      .map(s => {
+        const id  = (s as any).material_id || s.ingredient_id || ''
+        const mat = mMap[id]
+        if (!mat) return null
+        return { id, name: mat.name, unit: mat.unit || 'pcs', unit_cost: mat.unit_cost || 0 }
+      })
+      .filter(Boolean) as { id: string; name: string; unit: string; unit_cost: number }[]
+  }, [activeStoreId, role])
 
   const [supplierId, setSupp]       = useState('')
   const [invoiceNo,  setInv]        = useState('')
@@ -464,13 +517,17 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
       <div><Label required>Item</Label>
         <div className="space-y-2">
           {items.map((item, i) => {
-            const mat = materials?.find(m => m.id === item.material_id)
+            // FIX #3: kasir hanya pilih dari stok toko, bukan master materials
+            const matOptions = role === 'kasir'
+              ? (storeStockMats || [])
+              : (materials || [])
+            const mat = matOptions?.find((m: any) => m.id === item.material_id) as any
             const uc  = getUnitCost(item)
             return (
               <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
                 <select className="input text-sm" value={item.material_id} onChange={e => updateItem(i,'material_id',e.target.value)}>
                   <option value="">Pilih bahan</option>
-                  {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
+                  {matOptions?.map((m: any) => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
                 </select>
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-gray-500">Input per pack?</span>

@@ -1,9 +1,7 @@
 // src/pages/mutasi/UnifiedMutasiPage.tsx
-// CHANGELOG v4:
-// - FIX: kasir filter tidak pakai filterStore (yang default ke gudang) → kasir selalu lihat mutasinya
-// - FIX: label card "Total Nilai Mutasi Bulan Ini" → "Total Nilai Mutasi Hari Ini" untuk kasir
-// - FIX: subtitle card kasir tampilkan jumlah transaksi hari ini
-// - Semua fix v3 tetap berlaku
+// CHANGELOG v5:
+// - FIX #1/#4: kasir tidak ada dropdown per hari/bulan, tidak ada collapse group
+// - FIX: kasir tampil list flat (tanpa group header) karena sudah filter hari ini
 
 import { useState, useMemo, useEffect, useContext, createContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -146,27 +144,24 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
   const isOwnerManager = ['owner','manager'].includes(role)
   const isKasir = role === 'kasir'
 
-  const stores = useLiveQuery(() =>
-    db.stores.filter(s => s.is_active).toArray()
-  , [])
+  const stores = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
 
-  // Auto-select gudang sebagai default filter (hanya untuk owner/manager)
-  // FIX: default ke 'semua' bukan gudang, supaya semua mutasi langsung terlihat
   useEffect(() => {
     if (!isOwnerManager) return
-    if (stores && stores.length > 0 && !filterStore) {
-      setFilterStore('semua')
-    }
+    if (stores && stores.length > 0 && !filterStore) setFilterStore('semua')
   }, [stores, isOwnerManager])
 
   useEffect(() => {
     setToolbar(
       <div className="flex items-center gap-2">
-        <select value={groupMode} onChange={e => setGroupMode(e.target.value as Period)}
-          className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600">
-          <option value="hari">Per Hari</option>
-          <option value="bulan">Per Bulan</option>
-        </select>
+        {/* FIX #1: kasir tidak perlu dropdown per hari/bulan */}
+        {!isKasir && (
+          <select value={groupMode} onChange={e => setGroupMode(e.target.value as Period)}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600">
+            <option value="hari">Per Hari</option>
+            <option value="bulan">Per Bulan</option>
+          </select>
+        )}
         <button onClick={() => setShowForm(true)}
           className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg">
           <Plus size={13} /> Baru
@@ -174,20 +169,24 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
       </div>
     )
     return () => setToolbar(null)
-  }, [groupMode])
+  }, [groupMode, isKasir])
 
   const mutations = useLiveQuery(async () => {
     let m = await db.warehouse_mutations.orderBy('created_at').reverse().toArray()
-    if (role === 'produksi') m = m.filter(x => x.created_by === userId)
-    else if (role === 'kasir') {
-      // FIX: kasir lihat semua mutasi tokonya — tidak difilter oleh filterStore
+    if (role === 'kasir') {
+      const today = new Date().toLocaleDateString('sv-SE')
       m = m.filter(x =>
-        x.destination_id === storeId ||
-        x.created_by === userId ||
-        (x as any).acting_store_id === storeId
+        x.created_at.slice(0, 10) === today && (
+          x.destination_id === storeId ||
+          x.created_by === userId ||
+          (x as any).acting_store_id === storeId
+        )
       )
+    } else if (role === 'produksi') {
+      m = m.filter(x => x.created_by === userId)
+    } else if (role === 'gudang') {
+      m = m.filter(x => x.created_by === userId || x.destination_id === storeId)
     }
-    else if (role === 'gudang') m = m.filter(x => x.created_by === userId || x.destination_id === storeId)
     const mi    = await db.warehouse_mutation_items.toArray()
     const mats  = await db.materials.toArray()
     const prods = await db.products.toArray()
@@ -207,7 +206,6 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
     if (!mutations) return []
     let list = mutations
     if (filterType !== 'semua') list = list.filter(m => m.mutation_type === filterType)
-    // FIX: filterStore untuk owner/manager — match destination ATAU source (acting_store_id)
     if (isOwnerManager && filterStore && filterStore !== 'semua') {
       list = list.filter(m =>
         m.destination_id === filterStore ||
@@ -228,23 +226,17 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
 
   const grouped = useMemo(() => groupBy(filtered, m => groupKey(m.created_at, groupMode)), [filtered, groupMode])
 
-  // FIX: kasir hitung total hari ini saja, owner/manager hitung bulan ini
   const { totalNilaiMutasi, totalCountCard } = useMemo(() => {
     const now2 = new Date()
     const todayStr = now2.toLocaleDateString('sv-SE')
     const baseList = mutations || []
     if (isKasir) {
-      // Kasir: total hari ini dari semua mutasi toko
-      const todayMuts = baseList.filter(m => {
-        const d = new Date(m.created_at)
-        return d.toLocaleDateString('sv-SE') === todayStr
-      })
+      const todayMuts = baseList.filter(m => new Date(m.created_at).toLocaleDateString('sv-SE') === todayStr)
       return {
         totalNilaiMutasi: todayMuts.reduce((s, m) => s + m.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0),
         totalCountCard: todayMuts.length,
       }
     } else {
-      // Owner/manager: total bulan ini
       const monthMuts = baseList.filter(m => {
         const d = new Date(m.created_at)
         return d.getMonth() === now2.getMonth() && d.getFullYear() === now2.getFullYear()
@@ -256,18 +248,65 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
     }
   }, [mutations, isKasir])
 
+  // Render item mutasi (dipakai di flat list dan grouped list)
+  function MutasiItem({ m, idx }: { m: any; idx: number }) {
+    const tc         = TYPE_CONFIG[m.mutation_type] || { label: m.mutation_type, color: 'text-gray-600 bg-gray-100' }
+    const totalNilai = m.items.reduce((s: number, i: any) => s + i.qty * i.unit_cost, 0)
+    const mutNo      = (m as any).mutation_number
+    return (
+      <div className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+        <div className="flex items-start justify-between">
+          <div className="flex-1 min-w-0">
+            {mutNo && <p className="text-xs font-mono text-blue-600 mb-1">{mutNo}<CopyBtn text={mutNo} /></p>}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tc.color}`}>{tc.label}</span>
+              {m.destination_name && <span className="text-xs font-semibold text-gray-800">{m.destination_name}</span>}
+              {isOwnerManager && storeMap[m.destination_id || ''] && (
+                <span className="text-xs text-gray-400">{storeMap[m.destination_id || '']}</span>
+              )}
+            </div>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {new Date(m.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })},{' '}
+              {new Date(m.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12:false })}
+            </p>
+            {(m as any).notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {(m as any).notes}</p>}
+          </div>
+          {totalNilai > 0 && <p className="text-sm font-semibold text-gray-900 flex-shrink-0 ml-3">{formatRupiah(totalNilai)}</p>}
+        </div>
+        {m.items.length > 0 && (
+          <div className="mt-2 space-y-0.5 border-t border-gray-50 pt-1.5">
+            {m.items.map((i: any) => {
+              const mat      = i.material as any
+              const subtotal = i.qty * i.unit_cost
+              return (
+                <div key={i.id} className="flex items-center justify-between text-xs">
+                  <span className="text-gray-600">
+                    {mat?.name || '—'} × {i.qty}{mat?.unit ? ` ${mat.unit}` : ''}{i.unit_cost > 0 ? ` @ ${formatRupiah(i.unit_cost)}` : ''}
+                  </span>
+                  {subtotal > 0 && <span className="text-gray-500 ml-2 flex-shrink-0">{formatRupiah(subtotal)}</span>}
+                </div>
+              )
+            })}
+            {m.items.length > 1 && totalNilai > 0 && (
+              <div className="flex justify-between text-xs font-semibold text-gray-700 pt-1 border-t border-gray-100 mt-1">
+                <span>Total Nilai</span><span>{formatRupiah(totalNilai)}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="p-4 space-y-3">
-      {/* FIX: label dan subtitle card disesuaikan per role */}
       <div className="bg-white rounded-xl border border-gray-100 p-4">
         <p className="text-xs text-gray-400 mb-1">
           {isKasir ? 'Total Nilai Mutasi Hari Ini' : 'Total Nilai Mutasi Bulan Ini'}
         </p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalNilaiMutasi)}</p>
         <p className="text-xs text-gray-400 mt-0.5">
-          {isKasir
-            ? `${totalCountCard} transaksi hari ini`
-            : `${totalCountCard} transaksi`}
+          {isKasir ? `${totalCountCard} transaksi hari ini` : `${totalCountCard} transaksi`}
         </p>
       </div>
 
@@ -303,83 +342,48 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
         ))}
       </div>
 
-      {grouped.map(({ key, items: grpItems }) => {
-        const total    = grpItems.reduce((s, m) => s + m.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0)
-        const today    = new Date().toLocaleDateString('sv-SE')
-        const isFirst  = grouped.indexOf(grouped.find(g => g.key === key)!) === 0
-        const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : (key === today || key.slice(0,10) === today || isFirst)
-        return (
-          <div key={key}>
-            <button onClick={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))}
-              className="w-full flex items-center justify-between px-1 py-2">
-              <div className="flex items-center gap-2">
-                <svg className={`w-3 h-3 text-gray-400 transition-transform ${expanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-                </svg>
-                <p className="text-xs font-semibold text-gray-600">{groupLabel(grpItems[0].created_at, groupMode)}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-400">{grpItems.length} item</span>
-                {total > 0 && <span className="text-xs font-medium text-gray-700">{formatRupiah(total)}</span>}
-              </div>
-            </button>
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{ display: expanded ? undefined : 'none' }}>
-              {grpItems.map((m, idx) => {
-                const tc         = TYPE_CONFIG[m.mutation_type] || { label: m.mutation_type, color: 'text-gray-600 bg-gray-100' }
-                const totalNilai = m.items.reduce((s, i) => s + i.qty * i.unit_cost, 0)
-                const mutNo      = (m as any).mutation_number
-                return (
-                  <div key={m.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        {mutNo && <p className="text-xs font-mono text-blue-600 mb-1">{mutNo}<CopyBtn text={mutNo} /></p>}
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tc.color}`}>{tc.label}</span>
-                          {m.destination_name && <span className="text-xs font-semibold text-gray-800">{m.destination_name}</span>}
-                          {isOwnerManager && storeMap[m.destination_id || ''] && (
-                            <span className="text-xs text-gray-400">{storeMap[m.destination_id || '']}</span>
-                          )}
-                        </div>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {new Date(m.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })},{' '}
-                          {new Date(m.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12:false })}
-                        </p>
-                        {(m as any).notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {(m as any).notes}</p>}
-                      </div>
-                      {totalNilai > 0 && <p className="text-sm font-semibold text-gray-900 flex-shrink-0 ml-3">{formatRupiah(totalNilai)}</p>}
-                    </div>
-                    {m.items.length > 0 && (
-                      <div className="mt-2 space-y-0.5 border-t border-gray-50 pt-1.5">
-                        {m.items.map(i => {
-                          const mat      = i.material as any
-                          const subtotal = i.qty * i.unit_cost
-                          return (
-                            <div key={i.id} className="flex items-center justify-between text-xs">
-                              <span className="text-gray-600">
-                                {mat?.name || '—'} × {i.qty}{mat?.unit ? ` ${mat.unit}` : ''}{i.unit_cost > 0 ? ` @ ${formatRupiah(i.unit_cost)}` : ''}
-                              </span>
-                              {subtotal > 0 && <span className="text-gray-500 ml-2 flex-shrink-0">{formatRupiah(subtotal)}</span>}
-                            </div>
-                          )
-                        })}
-                        {m.items.length > 1 && totalNilai > 0 && (
-                          <div className="flex justify-between text-xs font-semibold text-gray-700 pt-1 border-t border-gray-100 mt-1">
-                            <span>Total Nilai</span><span>{formatRupiah(totalNilai)}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
+      {/* FIX #4: kasir tampil flat (tanpa group/collapse), owner pakai grouped */}
+      {isKasir ? (
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          {filtered.length === 0
+            ? <div className="py-12 text-center text-sm text-gray-400">Belum ada mutasi hari ini</div>
+            : filtered.map((m, idx) => <MutasiItem key={m.id} m={m} idx={idx} />)
+          }
+        </div>
+      ) : (
+        <>
+          {grouped.map(({ key, items: grpItems }) => {
+            const total    = grpItems.reduce((s, m) => s + m.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0)
+            const today    = new Date().toLocaleDateString('sv-SE')
+            const isFirst  = grouped.indexOf(grouped.find(g => g.key === key)!) === 0
+            const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : (key === today || key.slice(0,10) === today || isFirst)
+            return (
+              <div key={key}>
+                <button onClick={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))}
+                  className="w-full flex items-center justify-between px-1 py-2">
+                  <div className="flex items-center gap-2">
+                    <svg className={`w-3 h-3 text-gray-400 transition-transform ${expanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                    </svg>
+                    <p className="text-xs font-semibold text-gray-600">{groupLabel(grpItems[0].created_at, groupMode)}</p>
                   </div>
-                )
-              })}
-            </div>
-          </div>
-        )
-      })}
-
-      {filtered.length === 0 && (
-        <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">Belum ada mutasi</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">{grpItems.length} item</span>
+                    {total > 0 && <span className="text-xs font-medium text-gray-700">{formatRupiah(total)}</span>}
+                  </div>
+                </button>
+                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{ display: expanded ? undefined : 'none' }}>
+                  {grpItems.map((m, idx) => <MutasiItem key={m.id} m={m} idx={idx} />)}
+                </div>
+              </div>
+            )
+          })}
+          {filtered.length === 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 py-12 text-center text-sm text-gray-400">Belum ada mutasi</div>
+          )}
+        </>
       )}
+
       {showForm && <MutasiForm userId={userId} role={role} storeId={storeId} onClose={() => setShowForm(false)} />}
     </div>
   )
@@ -398,25 +402,18 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
 
   const materials  = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const partners   = useLiveQuery(() => db.partners.filter(p => p.is_active).toArray(), [])
-  const stores     = useLiveQuery(() =>
-    db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
-  , [])
+  const stores     = useLiveQuery(() => db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray(), [])
 
   const warehouseStocks = useLiveQuery(async () => {
     if (!['owner','manager','gudang'].includes(effectiveRole)) return []
     const ws   = await db.warehouse_stock.toArray()
     const mats = await db.materials.filter(m => m.is_active).toArray()
     const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
-    return ws
-      .filter(s => s.qty_on_hand > 0)
-      .map(s => ({
-        id:       s.material_id,
-        name:     mMap[s.material_id]?.name || '',
-        unit:     mMap[s.material_id]?.unit || '',
-        qty:      s.qty_on_hand,
-        avg_cost: (mMap[s.material_id] as any)?.avg_cost || mMap[s.material_id]?.unit_cost || 0,
-      }))
-      .filter(s => s.name)
+    return ws.filter(s => s.qty_on_hand > 0).map(s => ({
+      id: s.material_id, name: mMap[s.material_id]?.name || '',
+      unit: mMap[s.material_id]?.unit || '', qty: s.qty_on_hand,
+      avg_cost: (mMap[s.material_id] as any)?.avg_cost || mMap[s.material_id]?.unit_cost || 0,
+    })).filter(s => s.name)
   }, [effectiveRole])
 
   const prodStocks = useLiveQuery(async () => {
@@ -424,17 +421,12 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
     const ps   = await db.production_stock.toArray()
     const mats = await db.materials.toArray()
     const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
-    return ps
-      .filter(s => s.qty_on_hand > 0)
-      .map(s => ({
-        id:       s.material_id,
-        name:     mMap[s.material_id]?.name || '',
-        unit:     mMap[s.material_id]?.unit || '',
-        qty:      s.qty_on_hand,
-        avg_cost: (s as any).avg_cost || mMap[s.material_id]?.unit_cost || 0,
-        category: mMap[s.material_id]?.category || '',
-      }))
-      .filter(s => s.name)
+    return ps.filter(s => s.qty_on_hand > 0).map(s => ({
+      id: s.material_id, name: mMap[s.material_id]?.name || '',
+      unit: mMap[s.material_id]?.unit || '', qty: s.qty_on_hand,
+      avg_cost: (s as any).avg_cost || mMap[s.material_id]?.unit_cost || 0,
+      category: mMap[s.material_id]?.category || '',
+    })).filter(s => s.name)
   }, [effectiveRole])
 
   const fgStocks = useLiveQuery(async () => {
@@ -442,34 +434,20 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
     return await db.finished_goods_stock.filter(f => f.qty_on_hand > 0).toArray()
   }, [effectiveRole])
 
+  // FIX #3: kasir hanya lihat stok tokonya sendiri (bukan master materials)
   const storeStocks = useLiveQuery(async () => {
     if (effectiveRole !== 'kasir') return []
     const stocks = await db.stock.where('store_id').equals(effectiveStoreId).toArray()
-    const prods  = await db.products.toArray()
     const mats   = await db.materials.toArray()
-    const pMap   = Object.fromEntries(prods.map(p => [p.id, p]))
     const mMap   = Object.fromEntries(mats.map(m => [m.id, m]))
     const result: { id: string; name: string; unit: string; qty: number }[] = []
     for (const s of stocks) {
       const qty = s.qty_on_hand || (s as any).qty || 0
       if (qty <= 0) continue
-      const id   = (s as any).material_id || s.ingredient_id || ''
-      const prod = pMap[id]; const mat = mMap[id]
-      if (!prod && !mat) continue
-      result.push({
-        id,
-        name: prod?.name || mat?.name || '',
-        unit: prod?.unit || mat?.unit || 'pcs',
-        qty,
-      })
-    }
-    const fgs = await db.finished_goods_stock.filter(f => f.qty_on_hand > 0).toArray()
-    const existingIds = new Set(result.map(r => r.id))
-    for (const f of fgs) {
-      const id = f.product_id || f.id
-      if (!existingIds.has(id)) {
-        result.push({ id, name: f.product_name || '', unit: 'pcs', qty: f.qty_on_hand })
-      }
+      const id  = (s as any).material_id || s.ingredient_id || ''
+      const mat = mMap[id]
+      if (!mat) continue  // FIX: hanya tampil yang ada di materials (ada nama)
+      result.push({ id, name: mat.name, unit: mat.unit || 'pcs', qty })
     }
     return result
   }, [effectiveStoreId, effectiveRole])
@@ -490,8 +468,9 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
         }))
       }
       const bahanOpts = (prodStocks || []).map(s => ({ id: s.id, name: s.name, unit: s.unit, qty: s.qty, avg_cost: s.avg_cost }))
-      const fgOpts = (fgStocks || []).map((f: any) => ({
-        id: f.product_id ?? f.id, name: `${f.product_name ?? f.name} (Produk Jadi)`, unit: 'pcs', qty: f.qty_on_hand, avg_cost: (f as any).hpp_per_unit || 0,
+      const fgOpts    = (fgStocks || []).map((f: any) => ({
+        id: f.product_id ?? f.id, name: `${f.product_name ?? f.name} (Produk Jadi)`,
+        unit: 'pcs', qty: f.qty_on_hand, avg_cost: (f as any).hpp_per_unit || 0,
       }))
       return [...bahanOpts, ...fgOpts]
     }
@@ -529,7 +508,6 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
     if (!valid.length)                    return toast.error('Tambahkan minimal 1 item')
     if (type === 'to_store'   && !destId) return toast.error('Pilih toko tujuan')
     if (type === 'to_partner' && !destId) return toast.error('Pilih franchise tujuan')
-
     if (type !== 'adjustment') {
       const opts = getOptions()
       if (opts.length > 0) {
@@ -542,7 +520,6 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
         }
       }
     }
-
     setSaving(true)
     try {
       const destName =
@@ -550,7 +527,6 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
         type === 'to_store'      ? (stores?.find(s => s.id === destId)?.name || '') :
         type === 'to_partner'    ? partners?.find(p => p.id === destId)?.name || '' :
         type === 'internal_use'  ? 'Pemakaian Internal' : ''
-
       const mutId     = generateId()
       const mutNumber = await generateMutationNumber()
       const mut: any  = {
@@ -560,8 +536,6 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
         created_by: userId, acting_store_id: effectiveStoreId,
         created_at: now(), confirmed_at: now(), confirmed_by: userId,
       }
-      // FIX: pakai put (upsert) di Dexie dan upsert di Supabase
-      // supaya retry tidak conflict kalau sebelumnya gagal di tengah jalan
       await db.warehouse_mutations.put(mut)
       const { error: mutErr } = await supabase.from('warehouse_mutations').upsert(mut)
       if (mutErr) { console.error('[MUT INSERT ERROR]', mutErr); throw new Error(mutErr.message) }
@@ -583,8 +557,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
             )
           ).first()
           if (ss) {
-            const currentQty = ss.qty_on_hand || (ss as any).qty || 0
-            const newQty = Math.max(0, currentQty - Number(item.qty))
+            const newQty = Math.max(0, (ss.qty_on_hand || 0) - Number(item.qty))
             await db.stock.update(ss.id, { qty_on_hand: newQty, last_updated: now() } as any)
             await supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', ss.id)
           }
@@ -599,21 +572,11 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
               await supabase.from('finished_goods_stock').update({ qty_on_hand: n, last_updated: now() }).eq('id', fg.id)
             }
           } else {
-            const isFgItem = (fgStocks || []).some((f: any) => (f.product_id ?? f.id) === item.material_id)
-            if (isFgItem) {
-              const fg = await db.finished_goods_stock.filter((f: any) => (f.product_id ?? f.id) === item.material_id).first()
-              if (fg) {
-                const n = Math.max(0, fg.qty_on_hand - Number(item.qty))
-                await db.finished_goods_stock.update(fg.id, { qty_on_hand: n, last_updated: now() })
-                await supabase.from('finished_goods_stock').update({ qty_on_hand: n, last_updated: now() }).eq('id', fg.id)
-              }
-            } else {
-              const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
-              if (ps) {
-                const n = Math.max(0, ps.qty_on_hand - Number(item.qty))
-                await db.production_stock.update(ps.id, { qty_on_hand: n, last_updated: now() })
-                await supabase.from('production_stock').update({ qty_on_hand: n, last_updated: now() }).eq('id', ps.id)
-              }
+            const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
+            if (ps) {
+              const n = Math.max(0, ps.qty_on_hand - Number(item.qty))
+              await db.production_stock.update(ps.id, { qty_on_hand: n, last_updated: now() })
+              await supabase.from('production_stock').update({ qty_on_hand: n, last_updated: now() }).eq('id', ps.id)
             }
           }
         } else {
@@ -638,37 +601,32 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
         }
 
         if (type === 'to_store' && destId) {
-          const existingStock = await db.stock
-            .filter(s => s.store_id === destId && (
+          const existingStock = await db.stock.filter(s =>
+            s.store_id === destId && (
               (s as any).material_id === item.material_id || s.ingredient_id === item.material_id
-            ))
-            .first()
-          const prevQty  = existingStock?.qty_on_hand || (existingStock as any)?.qty || 0
+            )
+          ).first()
+          const prevQty  = existingStock?.qty_on_hand || 0
           const prevCost = (existingStock as any)?.avg_cost ?? 0
           const inQty    = Number(item.qty)
           const newQty   = prevQty + inQty
           const newAvg   = newQty > 0 ? (prevQty * prevCost + inQty * snapshotCost) / newQty : snapshotCost
           if (existingStock) {
             await db.stock.update(existingStock.id, { qty_on_hand: newQty, avg_cost: newAvg, last_updated: now() } as any)
-            const { error: updateErr } = await supabase.from('stock').update({ qty_on_hand: newQty, avg_cost: newAvg, last_updated: now() }).eq('id', existingStock.id)
-            if (updateErr) console.error('[STOCK UPDATE ERROR]', updateErr)
+            await supabase.from('stock').update({ qty_on_hand: newQty, avg_cost: newAvg, last_updated: now() }).eq('id', existingStock.id)
           } else {
-            const newStock: any = { id: generateId(), store_id: destId, ingredient_id: item.material_id, material_id: item.material_id, qty_on_hand: inQty, avg_cost: newAvg, last_updated: now(), updated_at: now() }
+            const newStock: any = { id: generateId(), store_id: destId, ingredient_id: item.material_id, material_id: item.material_id, qty_on_hand: inQty, avg_cost: newAvg, last_updated: now() }
             await db.stock.add(newStock)
-            const { error: insertErr } = await supabase.from('stock').insert({ id: newStock.id, store_id: destId, ingredient_id: item.material_id, material_id: item.material_id, qty_on_hand: inQty, avg_cost: newAvg })
-            if (insertErr) console.error('[STOCK INSERT ERROR]', insertErr)
+            await supabase.from('stock').insert({ id: newStock.id, store_id: destId, ingredient_id: item.material_id, material_id: item.material_id, qty_on_hand: inQty, avg_cost: newAvg })
           }
         }
       }
-
       toast.success('Mutasi berhasil dicatat')
       onClose()
     } catch (e) {
       console.error('[MutasiForm]', e)
       toast.error('Gagal menyimpan: ' + String((e as any)?.message || e))
-    } finally {
-      setSaving(false)
-    }
+    } finally { setSaving(false) }
   }
 
   const opts = getOptions()
@@ -705,7 +663,6 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           ))}
         </div>
       </div>
-
       {type === 'to_store' && (
         <div>
           <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Toko Tujuan *</label>
@@ -724,23 +681,13 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           </select>
         </div>
       )}
-
-      {role === 'produksi' && (type === 'to_store' || type === 'to_partner') && (
-        <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
-          <p className="text-xs text-blue-700 font-medium">Kirim Produk Jadi</p>
-          <p className="text-xs text-blue-500 mt-0.5">Hanya produk jadi yang tersedia untuk dikirim ke toko/franchise</p>
-        </div>
-      )}
-
       <div>
         <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
           Item <span className="text-red-500 font-bold">*</span>
         </label>
         {opts.length === 0 ? (
           <div className="bg-gray-50 rounded-xl p-4 text-center text-sm text-gray-400">
-            {role === 'produksi' && (type === 'to_store' || type === 'to_partner')
-              ? 'Belum ada produk jadi di stok'
-              : 'Tidak ada bahan dengan stok tersedia'}
+            {role === 'kasir' ? 'Tidak ada stok tersedia di toko ini' : 'Tidak ada bahan dengan stok tersedia'}
           </div>
         ) : (
           <div className="space-y-2">
@@ -779,19 +726,16 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           </div>
         )}
       </div>
-
       {totalNilai > 0 && (
         <div className="flex items-center justify-between py-2 bg-gray-50 rounded-xl px-3">
           <span className="text-sm text-gray-600">Total Nilai</span>
           <span className="text-sm font-semibold text-gray-900">{formatRupiah(totalNilai)}</span>
         </div>
       )}
-
       <div>
         <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Catatan</label>
         <input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opsional" />
       </div>
-
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving || opts.length === 0}

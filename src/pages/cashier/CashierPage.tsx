@@ -272,7 +272,33 @@ export default function CashierPage() {
     }
     return s
   }, 0)
-  const rawDiscount   = totalDiscount() + buy1get1Discount
+
+  // FIX #7: diskon paket otomatis — kelipatan qty_total puff dapat diskon per pcs
+  // Contoh: paket 5 puff = 60.000, harga satuan 14.000 → diskon 2.000/pcs
+  // Berlaku otomatis, tidak perlu klik tombol Paket
+  const paketDiscount = useMemo(() => {
+    if (!pakets.length || !Object.keys(paketProducts).length) return 0
+    let total = 0
+    for (const item of items) {
+      // Cari paket yang mengandung produk ini
+      const matchingPaket = pakets.find(pkt =>
+        paketProducts[pkt.id]?.includes(item.product.id)
+      )
+      if (!matchingPaket) continue
+      const qtyPerPaket  = matchingPaket.qty_total
+      const hargaPaket   = matchingPaket.price
+      const hargaSatuan  = item.unit_price
+      const hargaPerPcsDalamPaket = hargaPaket / qtyPerPaket
+      const discPerPcs   = hargaSatuan - hargaPerPcsDalamPaket
+      if (discPerPcs <= 0) continue
+      // Hanya kelipatan penuh yang dapat diskon
+      const qtyPaket     = Math.floor(item.qty / qtyPerPaket) * qtyPerPaket
+      total += qtyPaket * discPerPcs
+    }
+    return Math.round(total)
+  }, [items, pakets, paketProducts])
+
+  const rawDiscount   = totalDiscount() + buy1get1Discount + paketDiscount
   const afterDiscount = rawSubtotal - rawDiscount
   const ppnAmount     = ppnPct > 0 ? Math.round(afterDiscount * ppnPct / 100) : 0
   const grandTotal    = afterDiscount + ppnAmount
@@ -487,17 +513,24 @@ export default function CashierPage() {
       setLastTxData({
         tx, txItems: [...txItems, ...txPakets], receiptNo,
         storeName, grandTotal, rawSubtotal, rawDiscount, ppnAmount, ppnPct,
+        buy1get1Discount, paketDiscount,
         payMethod: finalPay, cashPaid: paidAmt, change: paidAmt - grandTotal,
         orderType, onlinePlatform: isOnlineOrder ? onlinePlatform : null,
         onlineOrderNo: isOnlineOrder ? onlineOrderNo : null,
         items: items.map(i => {
           const isBuy1Get1   = (i.product as any).promo_buy1get1 && i.qty >= 2
           const b1g1Discount = isBuy1Get1 ? Math.floor(i.qty / 2) * i.unit_price : 0
+          // Hitung diskon paket per item
+          const matchPaket   = pakets.find(pkt => paketProducts[pkt.id]?.includes(i.product.id))
+          const itemPaketDisc = matchPaket
+            ? Math.floor(i.qty / matchPaket.qty_total) * matchPaket.qty_total * (i.unit_price - matchPaket.price / matchPaket.qty_total)
+            : 0
+          const totalItemDisc = isBuy1Get1 ? b1g1Discount : (((i.product as any).promo_discount || 0) * i.qty + itemPaketDisc)
           return {
             name: i.product.name, qty: i.qty, price: i.unit_price,
-            subtotal: isBuy1Get1 ? i.qty * i.unit_price - b1g1Discount : i.subtotal,
-            promoName: (i.product as any).promo_name,
-            promoDiscount: isBuy1Get1 ? b1g1Discount : ((i.product as any).promo_discount || 0) * i.qty,
+            subtotal: Math.max(0, i.qty * i.unit_price - totalItemDisc),
+            promoName: matchPaket ? `Paket ${matchPaket.qty_total}` : (i.product as any).promo_name,
+            promoDiscount: Math.round(totalItemDisc),
           }
         }),
         pakets: cartPakets.map(cp => ({ name: cp.paket.name, subtotal: cp.subtotal })),
@@ -783,7 +816,14 @@ export default function CashierPage() {
             {(items.length>0||cartPakets.length>0) && (
               <div className="p-4 border-t border-gray-100 space-y-2">
                 <div className="flex justify-between text-sm text-gray-600"><span>Subtotal</span><span>{formatRupiah(rawSubtotal)}</span></div>
-                {rawDiscount>0 && <div className="flex justify-between text-sm text-green-600"><span>Diskon</span><span>-{formatRupiah(rawDiscount)}</span></div>}
+                {buy1get1Discount > 0 && <div className="flex justify-between text-sm text-green-600"><span>Diskon B1G1</span><span>-{formatRupiah(buy1get1Discount)}</span></div>}
+                {paketDiscount > 0 && (
+                  <div className="flex justify-between text-sm text-green-600">
+                    <span>Diskon Paket 🎁</span>
+                    <span>-{formatRupiah(paketDiscount)}</span>
+                  </div>
+                )}
+                {(totalDiscount() - buy1get1Discount) > 0 && <div className="flex justify-between text-sm text-green-600"><span>Diskon Promo</span><span>-{formatRupiah(totalDiscount() - buy1get1Discount)}</span></div>}
                 {/* PPN tidak tampil di sidebar — hanya di konfirmasi bayar */}
                 <div className="flex justify-between font-semibold text-gray-900 text-base border-t border-gray-100 pt-2"><span>Total</span><span>{formatRupiah(grandTotal)}</span></div>
                 <button onClick={() => setShowCheckout(true)} className="w-full py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold">Bayar</button>
@@ -841,7 +881,19 @@ export default function CashierPage() {
             {/* Total breakdown — PPN tampil di sini */}
             <div className="space-y-1.5 border border-gray-100 rounded-xl p-3">
               <div className="flex justify-between text-sm text-gray-600"><span>Subtotal</span><span>{formatRupiah(rawSubtotal)}</span></div>
-              {rawDiscount>0 && <div className="flex justify-between text-sm text-green-600"><span>Diskon</span><span>-{formatRupiah(rawDiscount)}</span></div>}
+              {buy1get1Discount > 0 && <div className="flex justify-between text-sm text-green-600"><span>Diskon B1G1</span><span>-{formatRupiah(buy1get1Discount)}</span></div>}
+              {paketDiscount > 0 && (
+                <div className="flex justify-between text-sm text-green-600">
+                  <span>Diskon Paket 🎁</span>
+                  <span>-{formatRupiah(paketDiscount)}</span>
+                </div>
+              )}
+              {(totalDiscount() - buy1get1Discount) > 0 && (
+                <div className="flex justify-between text-sm text-green-600">
+                  <span>Diskon Promo</span>
+                  <span>-{formatRupiah(totalDiscount() - buy1get1Discount)}</span>
+                </div>
+              )}
               {ppnAmount>0 && <div className="flex justify-between text-sm text-gray-600"><span>PPN {ppnPct}%</span><span>+{formatRupiah(ppnAmount)}</span></div>}
               <div className="flex justify-between font-bold text-gray-900 border-t border-gray-100 pt-1.5"><span>Total</span><span>{formatRupiah(grandTotal)}</span></div>
             </div>
@@ -1225,7 +1277,10 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
 
     // SUBTOTAL & DISKON & PPN
     lines.push(row38('Subtotal', formatRupiah(data.rawSubtotal)))
-    if (data.rawDiscount > 0) lines.push(row38('Diskon', '-' + formatRupiah(data.rawDiscount)))
+    if ((data.buy1get1Discount || 0) > 0) lines.push(row38('Diskon B1G1', '-' + formatRupiah(data.buy1get1Discount)))
+    if ((data.paketDiscount    || 0) > 0) lines.push(row38('Diskon Paket', '-' + formatRupiah(data.paketDiscount)))
+    const promoOnlyDisc = (data.rawDiscount||0) - (data.buy1get1Discount||0) - (data.paketDiscount||0)
+    if (promoOnlyDisc > 0) lines.push(row38('Diskon Promo', '-' + formatRupiah(promoOnlyDisc)))
     if (data.ppnAmount   > 0) lines.push(row38(`PPN ${data.ppnPct}%`, '+' + formatRupiah(data.ppnAmount)))
 
     lines.push(SEP)
@@ -1335,7 +1390,11 @@ pre {
             ))}
             <div className="border-t border-dashed border-gray-300 my-2"/>
             <div className="flex justify-between"><span>Subtotal</span><span>{formatRupiah(data.rawSubtotal)}</span></div>
-            {data.rawDiscount>0 && <div className="flex justify-between text-green-600"><span>Diskon</span><span>-{formatRupiah(data.rawDiscount)}</span></div>}
+            {(data.buy1get1Discount||0) > 0 && <div className="flex justify-between text-green-600"><span>Diskon B1G1</span><span>-{formatRupiah(data.buy1get1Discount)}</span></div>}
+            {(data.paketDiscount||0)    > 0 && <div className="flex justify-between text-green-600"><span>Diskon Paket 🎁</span><span>-{formatRupiah(data.paketDiscount)}</span></div>}
+            {((data.rawDiscount||0) - (data.buy1get1Discount||0) - (data.paketDiscount||0)) > 0 && (
+              <div className="flex justify-between text-green-600"><span>Diskon Promo</span><span>-{formatRupiah((data.rawDiscount||0)-(data.buy1get1Discount||0)-(data.paketDiscount||0))}</span></div>
+            )}
             {data.ppnAmount>0 && <div className="flex justify-between"><span>PPN {data.ppnPct}%</span><span>+{formatRupiah(data.ppnAmount)}</span></div>}
             <div className="flex justify-between font-bold text-sm border-t border-dashed border-gray-300 pt-1 mt-1"><span>TOTAL</span><span>{formatRupiah(data.grandTotal)}</span></div>
             <div className="flex justify-between"><span>Bayar ({payLabel[data.payMethod]||data.payMethod})</span><span>{formatRupiah(data.cashPaid)}</span></div>

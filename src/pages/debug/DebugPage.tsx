@@ -1,14 +1,13 @@
 // src/pages/debug/DebugPage.tsx
-// Halaman debug khusus owner — cek status sistem secara menyeluruh
-// Hanya tampil untuk role owner/manager
+// v2 — Diagnostik sistem lengkap
+// Checks: PPN, stok, resep BOM, sync, transaksi, shift, mutasi, paket, user, network
 
 import { useState, useEffect } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
-import { RefreshCw, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
+import { RefreshCw, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronRight, Wifi, WifiOff } from 'lucide-react'
 
 type Status = 'ok' | 'warn' | 'error' | 'loading'
 
@@ -50,22 +49,30 @@ function CheckRow({ check }: { check: CheckResult }) {
   )
 }
 
-function Section({ title, checks }: { title: string; checks: CheckResult[] }) {
+function Section({ title, checks, emoji }: { title: string; checks: CheckResult[]; emoji: string }) {
+  const [collapsed, setCollapsed] = useState(false)
   const hasError = checks.some(c => c.status === 'error')
   const hasWarn  = checks.some(c => c.status === 'warn')
   const allOk    = checks.every(c => c.status === 'ok')
   const loading  = checks.some(c => c.status === 'loading')
   return (
     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-      <div className={`flex items-center justify-between px-4 py-3 border-b ${hasError ? 'border-red-100 bg-red-50' : hasWarn ? 'border-amber-100 bg-amber-50' : 'border-gray-50 bg-gray-50'}`}>
-        <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">{title}</p>
-        {loading ? <RefreshCw size={12} className="animate-spin text-gray-400" />
-          : hasError ? <XCircle size={14} className="text-red-500" />
-          : hasWarn  ? <AlertCircle size={14} className="text-amber-500" />
-          : allOk    ? <CheckCircle size={14} className="text-green-500" />
-          : null}
-      </div>
-      {checks.map((c, i) => <CheckRow key={i} check={c} />)}
+      <button onClick={() => setCollapsed(!collapsed)}
+        className={`w-full flex items-center justify-between px-4 py-3 border-b text-left ${hasError ? 'border-red-100 bg-red-50' : hasWarn ? 'border-amber-100 bg-amber-50' : 'border-gray-50 bg-gray-50'}`}>
+        <div className="flex items-center gap-2">
+          <span>{emoji}</span>
+          <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">{title}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {loading ? <RefreshCw size={12} className="animate-spin text-gray-400" />
+            : hasError ? <XCircle size={14} className="text-red-500" />
+            : hasWarn  ? <AlertCircle size={14} className="text-amber-500" />
+            : allOk    ? <CheckCircle size={14} className="text-green-500" />
+            : null}
+          {collapsed ? <ChevronRight size={14} className="text-gray-400"/> : <ChevronDown size={14} className="text-gray-400"/>}
+        </div>
+      </button>
+      {!collapsed && checks.map((c, i) => <CheckRow key={i} check={c} />)}
     </div>
   )
 }
@@ -73,13 +80,22 @@ function Section({ title, checks }: { title: string; checks: CheckResult[] }) {
 export default function DebugPage() {
   const { user } = useAuthStore()
   const storeId  = user?.store_id || ''
-  const [running,    setRunning]    = useState(false)
-  const [lastRun,    setLastRun]    = useState<Date | null>(null)
-  const [ppnChecks,  setPpnChecks]  = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
-  const [stokChecks, setStokChecks] = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
-  const [bomChecks,  setBomChecks]  = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
-  const [syncChecks, setSyncChecks] = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
-  const [txChecks,   setTxChecks]   = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
+  const [running,  setRunning]  = useState(false)
+  const [lastRun,  setLastRun]  = useState<Date | null>(null)
+  const [latency,  setLatency]  = useState<number | null>(null)
+
+  const [ppnChecks,     setPpnChecks]     = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
+  const [stokChecks,    setStokChecks]    = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
+  const [bomChecks,     setBomChecks]     = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
+  const [syncChecks,    setSyncChecks]    = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
+  const [txChecks,      setTxChecks]      = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
+  const [shiftChecks,   setShiftChecks]   = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
+  const [mutasiChecks,  setMutasiChecks]  = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
+  const [paketChecks,   setPaketChecks]   = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
+  const [userChecks,    setUserChecks]    = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
+  const [netChecks,     setNetChecks]     = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
+  const [perfChecks,    setPerfChecks]    = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
+  const [syncQChecks,   setSyncQChecks]   = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
 
   if (!['owner','manager'].includes(user?.role || '')) {
     return (
@@ -93,11 +109,35 @@ export default function DebugPage() {
     setRunning(true)
     setLastRun(new Date())
 
-    // ── PPN ─────────────────────────────────────────────────
+    // ── 1. NETWORK ────────────────────────────────────────────
+    try {
+      const t0 = Date.now()
+      const { data, error } = await supabase.from('stores').select('id').eq('id', storeId).single()
+      const ms = Date.now() - t0
+      setLatency(ms)
+      setNetChecks([
+        {
+          label: 'Koneksi Supabase',
+          status: error ? 'error' : ms < 500 ? 'ok' : 'warn',
+          value: error ? 'Gagal' : `${ms}ms`,
+          detail: error ? JSON.stringify(error) : undefined,
+        },
+        {
+          label: 'Status Browser',
+          status: navigator.onLine ? 'ok' : 'error',
+          value: navigator.onLine ? 'Online' : 'Offline',
+        },
+      ])
+    } catch (e) {
+      setNetChecks([{ label: 'Koneksi Supabase', status: 'error', value: 'Timeout', detail: String(e) }])
+    }
+
+    // ── 2. PPN ────────────────────────────────────────────────
     try {
       const { data: storeData } = await supabase.from('stores')
-        .select('ppn_enabled, ppn_rate, ppn_mode').eq('id', storeId).single()
+        .select('ppn_enabled, ppn_rate, ppn_mode, name').eq('id', storeId).single()
       const dexieStore = await db.stores.get(storeId)
+      const ppnMatch   = storeData?.ppn_rate === (dexieStore as any)?.ppn_rate
 
       setPpnChecks([
         {
@@ -109,49 +149,65 @@ export default function DebugPage() {
           label: 'PPN Dexie (lokal)',
           status: (dexieStore as any)?.ppn_rate > 0 ? 'ok' : 'warn',
           value: (dexieStore as any)?.ppn_rate ? `${(dexieStore as any).ppn_rate}%` : 'Tidak ada',
-          detail: dexieStore ? JSON.stringify(dexieStore, null, 2) : 'Store tidak ada di Dexie',
         },
         {
           label: 'Sinkronisasi PPN',
-          status: storeData?.ppn_rate === (dexieStore as any)?.ppn_rate ? 'ok' : 'warn',
-          value: storeData?.ppn_rate === (dexieStore as any)?.ppn_rate ? 'Sinkron' : 'Tidak sinkron',
+          status: ppnMatch ? 'ok' : 'warn',
+          value: ppnMatch ? 'Sinkron ✓' : '⚠ Tidak sinkron',
+          detail: !ppnMatch ? `Supabase: ${storeData?.ppn_rate}% | Dexie: ${(dexieStore as any)?.ppn_rate}%\nFix: klik "Sync store data" di bawah` : undefined,
         },
       ])
     } catch (e) {
       setPpnChecks([{ label: 'Error cek PPN', status: 'error', detail: String(e) }])
     }
 
-    // ── STOK TOKO ────────────────────────────────────────────
+    // ── 3. STOK TOKO ─────────────────────────────────────────
     try {
-      const { data: stocks } = await supabase.from('stock')
-        .select('ingredient_id, material_id, qty_on_hand')
-        .eq('store_id', storeId)
-      const { data: mats } = await supabase.from('materials').select('id, name, unit')
-      const matMap = Object.fromEntries((mats || []).map(m => [m.id, m]))
+      const { data: stocks }   = await supabase.from('stock').select('ingredient_id, material_id, qty_on_hand').eq('store_id', storeId)
+      const { data: stocksDex } = await Promise.resolve({ data: await db.stock.where('store_id').equals(storeId).toArray() })
+      const { data: mats }     = await supabase.from('materials').select('id, name, unit')
+      const matMap  = Object.fromEntries((mats || []).map(m => [m.id, m]))
 
-      const stokList = (stocks || []).map(s => {
-        const id   = s.ingredient_id || s.material_id || ''
-        const mat  = matMap[id]
-        const nama = mat?.name || `ID: ${id.slice(0,8)}`
-        return { ...s, nama, hasName: !!mat }
+      const sbIds  = new Set((stocks || []).map(s => s.ingredient_id || s.material_id))
+      const dxIds  = new Set(stocksDex.map(s => s.ingredient_id || (s as any).material_id))
+      const noName = (stocks || []).filter(s => {
+        const id = s.ingredient_id || s.material_id || ''
+        return !matMap[id]
       })
-
-      const noName = stokList.filter(s => !s.hasName)
-      const hasStok = stokList.length > 0
+      const qtyMismatch = (stocks || []).filter(s => {
+        const id    = s.ingredient_id || s.material_id || ''
+        const dxStk = stocksDex.find(d => (d.ingredient_id || (d as any).material_id) === id)
+        return dxStk && Math.abs(dxStk.qty_on_hand - s.qty_on_hand) > 0.01
+      })
 
       setStokChecks([
         {
-          label: 'Jumlah item stok toko',
-          status: hasStok ? 'ok' : 'warn',
-          value: `${stokList.length} item`,
-          detail: stokList.map(s => `${s.nama}: ${s.qty_on_hand} ${matMap[s.ingredient_id || s.material_id || '']?.unit || 'pcs'}`).join('\n'),
+          label: 'Jumlah item stok (Supabase)',
+          status: (stocks || []).length > 0 ? 'ok' : 'warn',
+          value: `${(stocks || []).length} item`,
+          detail: (stocks || []).map(s => {
+            const id = s.ingredient_id || s.material_id || ''
+            return `${matMap[id]?.name || id}: ${s.qty_on_hand} ${matMap[id]?.unit || ''}`
+          }).join('\n') || 'Kosong',
         },
         {
-          label: 'Item tanpa nama (ID tidak match materials)',
+          label: 'ID tidak ada di materials',
           status: noName.length === 0 ? 'ok' : 'error',
           value: noName.length === 0 ? 'Semua match ✓' : `${noName.length} item`,
           detail: noName.length > 0
-            ? noName.map(s => `ID: ${s.ingredient_id || s.material_id}`).join('\n')
+            ? `Item berikut tidak ada di tabel materials:\n${noName.map(s => s.ingredient_id || s.material_id).join('\n')}\n\nSolusi: tambahkan ke tabel materials`
+            : undefined,
+        },
+        {
+          label: 'Qty Supabase vs Dexie',
+          status: qtyMismatch.length === 0 ? 'ok' : 'warn',
+          value: qtyMismatch.length === 0 ? 'Sinkron ✓' : `${qtyMismatch.length} berbeda`,
+          detail: qtyMismatch.length > 0
+            ? qtyMismatch.map(s => {
+                const id    = s.ingredient_id || s.material_id || ''
+                const dxStk = stocksDex.find(d => (d.ingredient_id || (d as any).material_id) === id)
+                return `${matMap[id]?.name || id}: SB=${s.qty_on_hand} | DX=${dxStk?.qty_on_hand}`
+              }).join('\n')
             : undefined,
         },
       ])
@@ -159,15 +215,13 @@ export default function DebugPage() {
       setStokChecks([{ label: 'Error cek stok', status: 'error', detail: String(e) }])
     }
 
-    // ── RESEP BOM ─────────────────────────────────────────────
+    // ── 4. RESEP BOM ──────────────────────────────────────────
     try {
-      const { data: recipes } = await supabase.from('store_recipes')
-        .select('id, product_id, product_name, recipe_type').eq('store_id', storeId)
+      const { data: recipes }     = await supabase.from('store_recipes').select('id, product_id, product_name, recipe_type').eq('store_id', storeId)
       const { data: recipeItems } = await supabase.from('store_recipe_items').select('*')
-      const { data: stocks } = await supabase.from('stock').select('ingredient_id, material_id, qty_on_hand').eq('store_id', storeId)
-      const { data: mats } = await supabase.from('materials').select('id, name')
-      const { data: products } = await supabase.from('products').select('id, name').eq('is_active', true)
-
+      const { data: stocks }      = await supabase.from('stock').select('ingredient_id, material_id, qty_on_hand').eq('store_id', storeId)
+      const { data: mats }        = await supabase.from('materials').select('id, name, unit')
+      const { data: products }    = await supabase.from('products').select('id, name').eq('is_active', true)
       const matMap  = Object.fromEntries((mats || []).map(m => [m.id, m]))
       const prodMap = Object.fromEntries((products || []).map(p => [p.id, p]))
       const stockIds = new Set([
@@ -176,125 +230,303 @@ export default function DebugPage() {
       ].filter(Boolean))
 
       const bomRecipes = (recipes || []).filter(r => r.recipe_type !== 'production')
-      const bomChecksResult: CheckResult[] = []
+      const bomResult: CheckResult[] = []
 
-      // Cek apakah product_id di resep ada di tabel products
+      if (bomRecipes.length === 0) {
+        bomResult.push({ label: 'Belum ada resep BOM', status: 'warn', value: '0 resep' })
+      }
+
       for (const recipe of bomRecipes) {
-        const prodName = prodMap[recipe.product_id || '']?.name || recipe.product_name
-        const items    = (recipeItems || []).filter(ri => ri.recipe_id === recipe.id)
-        const missingStock: string[] = []
-
+        const items  = (recipeItems || []).filter(ri => ri.recipe_id === recipe.id)
+        const prodName = prodMap[recipe.product_id || '']?.name || recipe.product_name || recipe.product_id?.slice(0,8)
+        const missing: string[] = []
+        const present: string[] = []
         for (const item of items) {
-          if (!stockIds.has(item.material_id)) {
-            const matName = matMap[item.material_id]?.name || item.material_id
-            missingStock.push(matName)
+          const matName = matMap[item.material_id]?.name || item.material_id
+          if (stockIds.has(item.material_id)) {
+            const stk = (stocks || []).find(s => s.ingredient_id === item.material_id || s.material_id === item.material_id)
+            present.push(`✓ ${matName}: ${stk?.qty_on_hand || 0} ${matMap[item.material_id]?.unit || ''} (butuh ${item.qty_used}/unit)`)
+          } else {
+            missing.push(`❌ ${matName} — belum ada di stok toko`)
           }
         }
-
-        bomChecksResult.push({
-          label: `Resep: ${prodName || recipe.product_id?.slice(0,8)}`,
-          status: missingStock.length === 0 ? 'ok' : 'error',
-          value: missingStock.length === 0 ? `${items.length} bahan ✓` : `${missingStock.length} bahan tidak ada stok`,
-          detail: missingStock.length > 0
-            ? `Bahan berikut tidak ada di stok toko:\n${missingStock.map(m => `❌ ${m}`).join('\n')}\n\nSolusi: mutasi bahan ini ke toko`
-            : items.map(i => `✓ ${matMap[i.material_id]?.name || i.material_id}: ${i.qty_used} per unit`).join('\n'),
+        bomResult.push({
+          label: `${prodName}`,
+          status: missing.length === 0 ? 'ok' : 'error',
+          value: missing.length === 0 ? `${items.length} bahan ✓` : `${missing.length} bahan kurang`,
+          detail: [...present, ...missing].join('\n') || 'Tidak ada bahan',
         })
       }
-
-      if (bomChecksResult.length === 0) {
-        bomChecksResult.push({ label: 'Belum ada resep BOM', status: 'warn', value: '0 resep' })
-      }
-
-      setBomChecks(bomChecksResult)
+      setBomChecks(bomResult)
     } catch (e) {
       setBomChecks([{ label: 'Error cek BOM', status: 'error', detail: String(e) }])
     }
 
-    // ── SYNC DEXIE VS SUPABASE ───────────────────────────────
+    // ── 5. SINKRONISASI DEXIE ─────────────────────────────────
     try {
+      const today = new Date().toLocaleDateString('sv-SE')
       const [
-        dexieTx, dexieStock, dexieMats, dexieRecipes,
-        { count: sbTx }, { count: sbStock }, { count: sbMats }, { count: sbRecipes }
+        dexieTx, dexieStock, dexieMats, dexieRecipes, dexieProds,
+        { count: sbTx }, { count: sbStock }, { count: sbMats },
+        { count: sbRecipes }, { count: sbProds },
       ] = await Promise.all([
         db.transactions.count(),
         db.stock.count(),
         db.materials.count(),
         db.store_recipes.count(),
-        supabase.from('transactions').select('*', { count: 'exact', head: true }).eq('store_id', storeId),
+        db.products.count(),
+        supabase.from('transactions').select('*', { count: 'exact', head: true }).eq('store_id', storeId).gte('created_at', today + 'T00:00:00+07:00'),
         supabase.from('stock').select('*', { count: 'exact', head: true }).eq('store_id', storeId),
         supabase.from('materials').select('*', { count: 'exact', head: true }),
         supabase.from('store_recipes').select('*', { count: 'exact', head: true }).eq('store_id', storeId),
+        supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true),
       ])
-
       setSyncChecks([
-        {
-          label: 'Transaksi',
-          status: Math.abs(dexieTx - (sbTx || 0)) <= 2 ? 'ok' : 'warn',
-          value: `Lokal: ${dexieTx} | Server: ${sbTx}`,
-        },
-        {
-          label: 'Stok toko',
-          status: Math.abs(dexieStock - (sbStock || 0)) <= 1 ? 'ok' : 'warn',
-          value: `Lokal: ${dexieStock} | Server: ${sbStock}`,
-        },
-        {
-          label: 'Materials',
-          status: Math.abs(dexieMats - (sbMats || 0)) <= 5 ? 'ok' : 'warn',
-          value: `Lokal: ${dexieMats} | Server: ${sbMats}`,
-        },
-        {
-          label: 'Resep toko',
-          status: dexieRecipes === (sbRecipes || 0) ? 'ok' : 'warn',
-          value: `Lokal: ${dexieRecipes} | Server: ${sbRecipes}`,
-        },
+        { label: 'Transaksi hari ini', status: Math.abs(dexieTx - (sbTx||0)) <= 3 ? 'ok' : 'warn', value: `Lokal: ${dexieTx} | Server: ${sbTx}` },
+        { label: 'Stok toko', status: Math.abs(dexieStock - (sbStock||0)) <= 1 ? 'ok' : 'warn', value: `Lokal: ${dexieStock} | Server: ${sbStock}` },
+        { label: 'Materials', status: Math.abs(dexieMats - (sbMats||0)) <= 5 ? 'ok' : 'warn', value: `Lokal: ${dexieMats} | Server: ${sbMats}` },
+        { label: 'Resep toko', status: dexieRecipes === (sbRecipes||0) ? 'ok' : 'warn', value: `Lokal: ${dexieRecipes} | Server: ${sbRecipes}` },
+        { label: 'Produk', status: Math.abs(dexieProds - (sbProds||0)) <= 2 ? 'ok' : 'warn', value: `Lokal: ${dexieProds} | Server: ${sbProds}` },
       ])
     } catch (e) {
       setSyncChecks([{ label: 'Error cek sync', status: 'error', detail: String(e) }])
     }
 
-    // ── TRANSAKSI TERAKHIR ───────────────────────────────────
+    // ── 6. TRANSAKSI ─────────────────────────────────────────
     try {
       const today = new Date().toLocaleDateString('sv-SE')
       const { data: txs } = await supabase.from('transactions')
-        .select('id, receipt_no, total, status, created_at, payment_method')
+        .select('id, receipt_no, total, status, payment_method, created_at')
         .eq('store_id', storeId)
         .gte('created_at', today + 'T00:00:00+07:00')
         .order('created_at', { ascending: false })
-        .limit(5)
+      const completed   = (txs || []).filter(t => t.status === 'completed')
+      const voided      = (txs || []).filter(t => t.status === 'voided')
+      const voidReq     = (txs || []).filter(t => t.status === 'void_requested')
+      const totalPenjualan = completed.reduce((s, t) => s + t.total, 0)
 
-      const { data: voidTxs } = await supabase.from('transactions')
-        .select('id, receipt_no, total, status, void_reason')
-        .eq('store_id', storeId)
-        .in('status', ['voided', 'void_requested'])
-        .gte('created_at', today + 'T00:00:00+07:00')
-
-      const totalHariIni = (txs || []).filter(t => t.status === 'completed').reduce((s, t) => s + t.total, 0)
+      // Cek transaksi yang ada di Dexie tapi tidak di Supabase (gagal sync)
+      const dexieTxs  = await db.transactions.where('store_id').equals(storeId)
+        .filter(t => t.created_at.slice(0,10) === today).toArray()
+      const sbIds     = new Set((txs || []).map(t => t.id))
+      const notSynced = dexieTxs.filter(t => !sbIds.has(t.id))
 
       setTxChecks([
         {
           label: 'Transaksi hari ini',
           status: 'ok',
-          value: `${(txs || []).filter(t => t.status === 'completed').length} tx · ${formatRupiah(totalHariIni)}`,
-          detail: (txs || []).map(t =>
-            `${t.receipt_no} | ${formatRupiah(t.total)} | ${t.payment_method} | ${t.status} | ${new Date(t.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`
-          ).join('\n') || 'Belum ada transaksi',
+          value: `${completed.length} tx · ${formatRupiah(totalPenjualan)}`,
+          detail: completed.map(t =>
+            `${t.receipt_no} | ${formatRupiah(t.total)} | ${t.payment_method} | ${new Date(t.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' })}`
+          ).join('\n') || 'Belum ada',
         },
         {
           label: 'Void hari ini',
-          status: (voidTxs || []).length === 0 ? 'ok' : 'warn',
-          value: `${(voidTxs || []).length} transaksi`,
-          detail: (voidTxs || []).length > 0
-            ? (voidTxs || []).map(t => `${t.receipt_no} | ${formatRupiah(t.total)} | ${t.status}\nAlasan: ${t.void_reason || '-'}`).join('\n\n')
+          status: voided.length === 0 && voidReq.length === 0 ? 'ok' : 'warn',
+          value: `${voided.length} void, ${voidReq.length} pending`,
+          detail: [...voided, ...voidReq].length > 0
+            ? [...voided, ...voidReq].map(t => `${t.receipt_no} | ${t.status} | ${formatRupiah(t.total)}`).join('\n')
             : undefined,
         },
         {
-          label: 'Status Supabase',
-          status: 'ok',
-          value: 'Terhubung ✓',
+          label: 'Transaksi tidak tersync ke server',
+          status: notSynced.length === 0 ? 'ok' : 'error',
+          value: notSynced.length === 0 ? 'Semua tersync ✓' : `${notSynced.length} belum sync`,
+          detail: notSynced.length > 0
+            ? notSynced.map(t => `${t.receipt_no} | ${formatRupiah(t.total)} | ${t.status}`).join('\n')
+            : undefined,
         },
       ])
     } catch (e) {
       setTxChecks([{ label: 'Error cek transaksi', status: 'error', detail: String(e) }])
+    }
+
+    // ── 7. SHIFT ─────────────────────────────────────────────
+    try {
+      const { data: shifts } = await supabase.from('shifts')
+        .select('id, store_id, user_id, status, opened_at, closed_at')
+        .eq('store_id', storeId)
+        .order('opened_at', { ascending: false })
+        .limit(10)
+      const { data: users } = await supabase.from('users').select('id, name').eq('store_id', storeId)
+      const uMap = Object.fromEntries((users || []).map(u => [u.id, u.name]))
+
+      const openShifts = (shifts || []).filter(s => s.status === 'open')
+      const today = new Date().toLocaleDateString('sv-SE')
+      const oldOpenShifts = openShifts.filter(s => s.opened_at.slice(0,10) < today)
+
+      setShiftChecks([
+        {
+          label: 'Shift aktif sekarang',
+          status: openShifts.length <= 3 ? 'ok' : 'warn',
+          value: `${openShifts.length} shift open`,
+          detail: openShifts.map(s => `${uMap[s.user_id] || s.user_id} | Open: ${new Date(s.opened_at).toLocaleString('id-ID')}`).join('\n') || 'Tidak ada',
+        },
+        {
+          label: 'Shift lama yang tidak ditutup',
+          status: oldOpenShifts.length === 0 ? 'ok' : 'warn',
+          value: oldOpenShifts.length === 0 ? 'Bersih ✓' : `${oldOpenShifts.length} shift`,
+          detail: oldOpenShifts.length > 0
+            ? oldOpenShifts.map(s => `${uMap[s.user_id] || s.user_id} | Dibuka: ${new Date(s.opened_at).toLocaleString('id-ID')}`).join('\n')
+            : undefined,
+        },
+        {
+          label: '5 shift terakhir',
+          status: 'ok',
+          value: `${(shifts || []).length} total`,
+          detail: (shifts || []).slice(0, 5).map(s =>
+            `${uMap[s.user_id] || s.user_id} | ${s.status} | ${new Date(s.opened_at).toLocaleString('id-ID')}`
+          ).join('\n'),
+        },
+      ])
+    } catch (e) {
+      setShiftChecks([{ label: 'Error cek shift', status: 'error', detail: String(e) }])
+    }
+
+    // ── 8. MUTASI ─────────────────────────────────────────────
+    try {
+      const { data: mutations } = await supabase.from('warehouse_mutations')
+        .select('id, mutation_type, mutation_number, destination_id, created_at')
+        .or(`destination_id.eq.${storeId},acting_store_id.eq.${storeId}`)
+        .order('created_at', { ascending: false })
+        .limit(20)
+      const { data: mutItems } = await supabase.from('warehouse_mutation_items')
+        .select('mutation_id')
+      const mutWithItems = new Set((mutItems || []).map(m => m.mutation_id))
+      const emptyMuts    = (mutations || []).filter(m => !mutWithItems.has(m.id))
+
+      setMutasiChecks([
+        {
+          label: 'Mutasi terbaru',
+          status: 'ok',
+          value: `${(mutations || []).length} mutasi`,
+          detail: (mutations || []).slice(0, 10).map(m =>
+            `${m.mutation_number || m.id.slice(0,8)} | ${m.mutation_type} | ${new Date(m.created_at).toLocaleDateString('id-ID')}`
+          ).join('\n') || 'Belum ada',
+        },
+        {
+          label: 'Mutasi tanpa items (gagal simpan)',
+          status: emptyMuts.length === 0 ? 'ok' : 'error',
+          value: emptyMuts.length === 0 ? 'Semua lengkap ✓' : `${emptyMuts.length} mutasi kosong`,
+          detail: emptyMuts.length > 0
+            ? `Mutasi berikut tidak punya items:\n${emptyMuts.map(m => `${m.mutation_number || m.id} | ${m.mutation_type} | ${new Date(m.created_at).toLocaleString('id-ID')}`).join('\n')}\n\nSolusi: hapus dan buat ulang mutasi ini`
+            : undefined,
+        },
+      ])
+    } catch (e) {
+      setMutasiChecks([{ label: 'Error cek mutasi', status: 'error', detail: String(e) }])
+    }
+
+    // ── 9. PAKET ─────────────────────────────────────────────
+    try {
+      const { data: pkgs }   = await supabase.from('packages').select('*').eq('is_active', true)
+      const { data: pkgItems, error: pkgErr } = await supabase.from('package_items').select('*')
+      const { data: prods }  = await supabase.from('products').select('id, name').eq('is_active', true)
+      const prodMap = Object.fromEntries((prods || []).map(p => [p.id, p.name]))
+
+      const paketResult: CheckResult[] = []
+      if (pkgErr) {
+        paketResult.push({ label: 'Tabel package_items', status: 'error', value: 'Tidak ada', detail: 'Jalankan SQL: CREATE TABLE package_items ...' })
+      } else {
+        for (const pkg of (pkgs || [])) {
+          const items = (pkgItems || []).filter(i => i.package_id === pkg.id)
+          const discPerPcs = pkg.price / pkg.qty_total
+          paketResult.push({
+            label: `${pkg.name}`,
+            status: items.length > 0 ? 'ok' : 'warn',
+            value: items.length > 0 ? `${items.length} produk · Rp${discPerPcs.toLocaleString('id-ID')}/pcs` : 'Belum ada produk',
+            detail: items.length > 0
+              ? `${pkg.qty_total} pcs = ${formatRupiah(pkg.price)} (${formatRupiah(discPerPcs)}/pcs)\nProduk:\n${items.map(i => `  - ${prodMap[i.product_id] || i.product_id}`).join('\n')}`
+              : `Paket ${pkg.name} tidak punya produk di package_items`,
+          })
+        }
+        if ((pkgs || []).length === 0) paketResult.push({ label: 'Belum ada paket', status: 'warn', value: '0 paket' })
+      }
+      setPaketChecks(paketResult)
+    } catch (e) {
+      setPaketChecks([{ label: 'Error cek paket', status: 'error', detail: String(e) }])
+    }
+
+    // ── 10. USER ─────────────────────────────────────────────
+    try {
+      const { data: users } = await supabase.from('users').select('id, name, role, is_active').eq('store_id', storeId)
+      const active   = (users || []).filter(u => u.is_active)
+      const inactive = (users || []).filter(u => !u.is_active)
+
+      setUserChecks([
+        {
+          label: 'User aktif di toko ini',
+          status: active.length > 0 ? 'ok' : 'warn',
+          value: `${active.length} user`,
+          detail: active.map(u => `${u.name} (${u.role})`).join('\n') || 'Tidak ada',
+        },
+        {
+          label: 'User nonaktif',
+          status: 'ok',
+          value: `${inactive.length} user`,
+          detail: inactive.length > 0 ? inactive.map(u => `${u.name} (${u.role})`).join('\n') : undefined,
+        },
+      ])
+    } catch (e) {
+      setUserChecks([{ label: 'Error cek user', status: 'error', detail: String(e) }])
+    }
+
+    // ── 11. SYNC QUEUE ────────────────────────────────────────
+    try {
+      let syncQueue: any[] = []
+      try { syncQueue = await (db as any).sync_queue?.toArray() ?? [] } catch {}
+      const pending = syncQueue.filter(q => q.status === 'pending' || !q.status)
+      const failed  = syncQueue.filter(q => q.status === 'failed' || (q.retry_count || 0) >= 3)
+
+      setSyncQChecks([
+        {
+          label: 'Antrian sync pending',
+          status: pending.length === 0 ? 'ok' : pending.length < 10 ? 'warn' : 'error',
+          value: `${pending.length} item`,
+          detail: pending.length > 0
+            ? pending.slice(0,10).map(q => `${q.table_name} | ${q.operation} | ${q.record_id?.slice(0,8)}`).join('\n')
+            : undefined,
+        },
+        {
+          label: 'Sync gagal (perlu perhatian)',
+          status: failed.length === 0 ? 'ok' : 'error',
+          value: failed.length === 0 ? 'Tidak ada ✓' : `${failed.length} item`,
+          detail: failed.length > 0
+            ? failed.slice(0,10).map(q => `${q.table_name} | ${q.operation} | Error: ${q.last_error || '-'}`).join('\n')
+            : undefined,
+        },
+      ])
+    } catch (e) {
+      setSyncQChecks([{ label: 'Sync queue tidak tersedia', status: 'warn', detail: String(e) }])
+    }
+
+    // ── 12. PERFORMANCE ───────────────────────────────────────
+    try {
+      const counts = await Promise.all([
+        db.transactions.count(),
+        db.transaction_items.count(),
+        db.stock.count(),
+        db.materials.count(),
+        db.products.count(),
+        db.warehouse_mutations.count(),
+        db.production_logs.count(),
+      ])
+      const labels = ['Transaksi','Tx Items','Stok','Materials','Produk','Mutasi','Log Produksi']
+      setPerfChecks([
+        {
+          label: 'Ukuran database Dexie',
+          status: counts[0] < 10000 ? 'ok' : counts[0] < 50000 ? 'warn' : 'error',
+          value: `${counts.reduce((a,b)=>a+b,0).toLocaleString()} records`,
+          detail: counts.map((c, i) => `${labels[i]}: ${c.toLocaleString()}`).join('\n'),
+        },
+        {
+          label: 'Cache produk',
+          status: counts[4] > 0 ? 'ok' : 'warn',
+          value: `${counts[4]} produk`,
+        },
+      ])
+    } catch (e) {
+      setPerfChecks([{ label: 'Error cek performa', status: 'error', detail: String(e) }])
     }
 
     setRunning(false)
@@ -302,7 +534,11 @@ export default function DebugPage() {
 
   useEffect(() => { runChecks() }, [storeId])
 
-  const allChecks = [...ppnChecks, ...stokChecks, ...bomChecks, ...syncChecks, ...txChecks]
+  const allChecks = [
+    ...ppnChecks, ...stokChecks, ...bomChecks, ...syncChecks,
+    ...txChecks, ...shiftChecks, ...mutasiChecks, ...paketChecks,
+    ...userChecks, ...netChecks, ...perfChecks, ...syncQChecks,
+  ]
   const errorCount = allChecks.filter(c => c.status === 'error').length
   const warnCount  = allChecks.filter(c => c.status === 'warn').length
   const okCount    = allChecks.filter(c => c.status === 'ok').length
@@ -313,7 +549,9 @@ export default function DebugPage() {
         <div>
           <h1 className="text-lg font-semibold text-gray-900">Debug & Diagnostik</h1>
           <p className="text-xs text-gray-400 mt-0.5">
-            {lastRun ? `Terakhir cek: ${lastRun.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Belum pernah cek'}
+            {lastRun
+              ? `Terakhir: ${lastRun.toLocaleTimeString('id-ID')}${latency ? ` · Latensi: ${latency}ms` : ''}`
+              : 'Belum pernah cek'}
           </p>
         </div>
         <button onClick={runChecks} disabled={running}
@@ -323,7 +561,7 @@ export default function DebugPage() {
         </button>
       </div>
 
-      {/* Summary bar */}
+      {/* Summary */}
       <div className="bg-white border-b border-gray-100 px-4 py-2 flex gap-4 flex-shrink-0">
         <div className="flex items-center gap-1.5">
           <XCircle size={13} className="text-red-500" />
@@ -337,16 +575,28 @@ export default function DebugPage() {
           <CheckCircle size={13} className="text-green-500" />
           <span className="text-sm font-medium text-green-600">{okCount} ok</span>
         </div>
+        <div className="flex items-center gap-1.5 ml-auto">
+          {navigator.onLine
+            ? <><Wifi size={13} className="text-green-500"/><span className="text-xs text-green-600">Online</span></>
+            : <><WifiOff size={13} className="text-red-500"/><span className="text-xs text-red-600">Offline</span></>}
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto p-4 space-y-3">
-        <Section title="💰 PPN & Pajak"        checks={ppnChecks}  />
-        <Section title="📦 Stok Toko"           checks={stokChecks} />
-        <Section title="🧾 Resep BOM (Kasir)"   checks={bomChecks}  />
-        <Section title="🔄 Sinkronisasi Dexie"  checks={syncChecks} />
-        <Section title="🧾 Transaksi Hari Ini"  checks={txChecks}   />
+        <Section emoji="🌐" title="Network & Koneksi"          checks={netChecks}    />
+        <Section emoji="💰" title="PPN & Pajak"                checks={ppnChecks}    />
+        <Section emoji="📦" title="Stok Toko"                  checks={stokChecks}   />
+        <Section emoji="🧾" title="Resep BOM (Kasir)"          checks={bomChecks}    />
+        <Section emoji="🎁" title="Paket & Diskon"             checks={paketChecks}  />
+        <Section emoji="💳" title="Transaksi Hari Ini"         checks={txChecks}     />
+        <Section emoji="⏱️" title="Shift Kasir"                checks={shiftChecks}  />
+        <Section emoji="🔄" title="Mutasi Stok"                checks={mutasiChecks} />
+        <Section emoji="👥" title="User & Akses"               checks={userChecks}   />
+        <Section emoji="🔁" title="Sinkronisasi Dexie/Server"  checks={syncChecks}   />
+        <Section emoji="⚡" title="Antrian Sync"               checks={syncQChecks}  />
+        <Section emoji="📊" title="Performa Database"          checks={perfChecks}   />
 
-        {/* Quick actions */}
+        {/* Quick Actions */}
         <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-50 bg-gray-50">
             <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">⚡ Quick Fix</p>
@@ -354,38 +604,72 @@ export default function DebugPage() {
           <div className="p-4 space-y-2">
             <button onClick={async () => {
               const { data } = await supabase.from('stores').select('*').eq('id', storeId).single()
-              if (data) { await db.stores.put(data); alert('Store sync berhasil!') }
+              if (data) { await db.stores.put(data); alert('Store sync berhasil! PPN terbaru sudah diload.') }
             }} className="w-full py-2 text-sm text-left px-3 bg-blue-50 text-blue-700 rounded-lg border border-blue-100">
               🔄 Sync store data (PPN) dari Supabase ke Dexie
             </button>
             <button onClick={async () => {
-              const { data: recs }  = await supabase.from('store_recipes').select('*').eq('store_id', storeId)
-              const { data: items } = await supabase.from('store_recipe_items').select('*')
-              const { data: mats }  = await supabase.from('materials').select('*')
-              const { data: stocks } = await supabase.from('stock').select('*').eq('store_id', storeId)
-              if (recs?.length)   await db.store_recipes.bulkPut(recs)
-              if (items?.length)  await db.store_recipe_items.bulkPut(items)
-              if (mats?.length)   await db.materials.bulkPut(mats)
-              if (stocks?.length) await db.stock.bulkPut(stocks)
-              alert(`Sync selesai: ${recs?.length} resep, ${mats?.length} material, ${stocks?.length} stok`)
+              const [recs, items, mats, stocks, pkgs, pkgItems] = await Promise.all([
+                supabase.from('store_recipes').select('*').eq('store_id', storeId),
+                supabase.from('store_recipe_items').select('*'),
+                supabase.from('materials').select('*'),
+                supabase.from('stock').select('*').eq('store_id', storeId),
+                supabase.from('packages').select('*').eq('is_active', true),
+                supabase.from('package_items').select('*').catch(() => ({ data: [] })),
+              ])
+              if (recs.data?.length)    await db.store_recipes.bulkPut(recs.data)
+              if (items.data?.length)   await db.store_recipe_items.bulkPut(items.data)
+              if (mats.data?.length)    await db.materials.bulkPut(mats.data)
+              if (stocks.data?.length)  await db.stock.bulkPut(stocks.data)
+              if (pkgs.data?.length)    await db.promotions.bulkPut(pkgs.data as any)
+              alert(`Sync selesai:\n- ${recs.data?.length} resep\n- ${mats.data?.length} material\n- ${stocks.data?.length} stok`)
               runChecks()
             }} className="w-full py-2 text-sm text-left px-3 bg-green-50 text-green-700 rounded-lg border border-green-100">
-              🔄 Sync resep, material & stok toko dari Supabase
+              🔄 Sync resep, material, stok & paket dari Supabase
+            </button>
+            <button onClick={async () => {
+              const { data: txs } = await supabase.from('transactions')
+                .select('*').eq('store_id', storeId)
+                .gte('created_at', new Date().toLocaleDateString('sv-SE') + 'T00:00:00+07:00')
+              const { data: txItems } = await supabase.from('transaction_items').select('*')
+                .in('transaction_id', (txs || []).map((t:any) => t.id))
+              if (txs?.length) await db.transactions.bulkPut(txs)
+              if (txItems?.length) await db.transaction_items.bulkPut(txItems)
+              alert(`Sync ${txs?.length} transaksi hari ini selesai`)
+              runChecks()
+            }} className="w-full py-2 text-sm text-left px-3 bg-purple-50 text-purple-700 rounded-lg border border-purple-100">
+              🔄 Sync transaksi hari ini dari Supabase
             </button>
             <button onClick={async () => {
               const { data } = await supabase.from('stock').select('ingredient_id, material_id, qty_on_hand').eq('store_id', storeId)
               const { data: mats } = await supabase.from('materials').select('id, name, unit')
-              const matMap = Object.fromEntries((mats || []).map(m => [m.id, m]))
-              const result = (data || []).map(s => {
+              const matMap = Object.fromEntries((mats||[]).map(m => [m.id, m]))
+              const result = (data||[]).map(s => {
                 const id = s.ingredient_id || s.material_id || ''
-                return `${matMap[id]?.name || id}: ${s.qty_on_hand} ${matMap[id]?.unit || 'pcs'}`
+                return `${matMap[id]?.name || id}: ${s.qty_on_hand} ${matMap[id]?.unit || ''}`
               }).join('\n')
-              alert('STOK TOKO SEKARANG:\n\n' + (result || 'Kosong'))
+              alert('STOK TOKO (dari Supabase):\n\n' + (result || 'Kosong'))
             }} className="w-full py-2 text-sm text-left px-3 bg-gray-50 text-gray-700 rounded-lg border border-gray-200">
-              👁 Lihat stok toko saat ini (dari Supabase)
+              👁 Lihat stok toko saat ini (real-time dari server)
+            </button>
+            <button onClick={() => {
+              const info = [
+                `User: ${user?.name} (${user?.role})`,
+                `Store: ${storeId}`,
+                `Browser: ${navigator.userAgent.split(' ').slice(-2).join(' ')}`,
+                `Online: ${navigator.onLine}`,
+                `Latency: ${latency}ms`,
+                `Waktu: ${new Date().toLocaleString('id-ID')}`,
+                `Checks: ${errorCount} error, ${warnCount} warn, ${okCount} ok`,
+              ].join('\n')
+              navigator.clipboard.writeText(info).then(() => alert('Info debug disalin ke clipboard!'))
+            }} className="w-full py-2 text-sm text-left px-3 bg-amber-50 text-amber-700 rounded-lg border border-amber-100">
+              📋 Copy info debug ke clipboard (untuk laporan)
             </button>
           </div>
         </div>
+
+        <div className="h-4" />
       </div>
     </div>
   )

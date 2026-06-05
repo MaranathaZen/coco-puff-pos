@@ -8,10 +8,13 @@ import LoginPage            from '@/pages/auth/LoginPage'
 import Layout               from '@/components/layout/Layout'
 import CashierPage          from '@/pages/cashier/CashierPage'
 import ProductsPage         from '@/pages/settings/SettingsProductPage'
+import StoreRecipePage      from '@/pages/products/StoreRecipePage'
+import ReportsPage          from '@/pages/reports/ReportsPage'
 import SettingsPage         from '@/pages/settings/SettingsPage'
 import OwnerPage            from '@/pages/owner/OwnerPage'
+import GudangPage           from '@/pages/gudang/GudangPage'
 import ProduksiPage         from '@/pages/produksi/ProduksiPage'
-import LaporanPage          from '@/pages/laporan/LaporanPage'
+import LaporanGudangPage    from '@/pages/laporan/LaporanGudangPage'
 import EndOfDayPage         from '@/pages/cashier/EndOfDayPage'
 import CloseOrderPage       from '@/pages/cashier/CloseOrderPage'
 import ResepPage            from '@/pages/resep/ResepPage'
@@ -20,6 +23,7 @@ import UnifiedPembelianPage from '@/pages/pembelian/UnifiedPembelianPage'
 import UnifiedMutasiPage    from '@/pages/mutasi/UnifiedMutasiPage'
 import UnifiedBiayaPage     from '@/pages/biaya/UnifiedBiayaPage'
 import AccountingPage       from '@/pages/accounting/AccountingPage'
+import DebugPage            from '@/pages/debug/DebugPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const user = useAuthStore(s => s.user)
@@ -28,11 +32,16 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 function RequireRole({ roles, children }: { roles: string[]; children: React.ReactNode }) {
-  const user = useAuthStore(s => s.user)
-  if (!user || !roles.includes(user.role)) return <Navigate to="/" replace />
+  const user      = useAuthStore(s => s.user)
+  const hydrated  = useAuthStore.persist?.hasHydrated?.() ?? true
+  // FIX: tunggu hydration selesai dulu sebelum redirect
+  if (!hydrated) return null
+  if (!user) return <Navigate to="/login" replace />
+  if (!roles.includes(user.role)) return <Navigate to="/" replace />
   return <>{children}</>
 }
 
+// ── Auto-update notifier ──────────────────────────────────────
 function useAutoUpdate() {
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
@@ -100,31 +109,29 @@ export default function App() {
           <Route index element={<RoleRedirect />} />
 
           {/* Halaman utama per role */}
-          <Route path="owner"      element={<RequireRole roles={['owner','manager']}><OwnerPage /></RequireRole>} />
-          <Route path="kasir"      element={<CashierPage />} />
-          <Route path="tutup-toko" element={<CloseOrderAllPage />} />
+          <Route path="owner"         element={<RequireRole roles={['owner','manager']}><OwnerPage /></RequireRole>} />
+          <Route path="kasir"         element={<CashierPage />} />
+          <Route path="tutup-toko"    element={<CloseOrderAllPage />} />
 
           {/* Unified pages — akses per role dikontrol di dalam komponen */}
-          <Route path="stok"      element={<UnifiedStokPage />} />
-          <Route path="pembelian" element={<UnifiedPembelianPage />} />
-          <Route path="mutasi"    element={<UnifiedMutasiPage />} />
-          <Route path="biaya"     element={<UnifiedBiayaPage />} />
-          <Route path="produksi"  element={<RequireRole roles={['owner','manager','produksi','kasir']}><ProduksiPage /></RequireRole>} />
-
-          {/* Laporan — LaporanPage baru (toko+produksi+gudang) */}
-          <Route path="laporan"        element={<RequireRole roles={['owner','manager','kasir','gudang','produksi']}><LaporanPage /></RequireRole>} />
-          {/* Laporan gudang lama — redirect ke laporan baru */}
-          <Route path="laporan-gudang" element={<Navigate to="/laporan" replace />} />
+          <Route path="stok"          element={<UnifiedStokPage />} />
+          <Route path="pembelian"     element={<UnifiedPembelianPage />} />
+          <Route path="mutasi"        element={<UnifiedMutasiPage />} />
+          <Route path="biaya"         element={<UnifiedBiayaPage />} />
 
           {/* Owner/Manager only */}
-          <Route path="resep"      element={<RequireRole roles={['owner','manager']}><ResepPage /></RequireRole>} />
-          <Route path="produk"     element={<RequireRole roles={['owner','manager']}><ProductsPage /></RequireRole>} />
-          <Route path="pengaturan" element={<RequireRole roles={['owner','manager']}><SettingsPage /></RequireRole>} />
-          <Route path="accounting" element={<AccountingPage />} />
+          <Route path="laporan"       element={<RequireRole roles={['owner','manager']}><ReportsPage /></RequireRole>} />
+          <Route path="laporan-gudang" element={<RequireRole roles={['owner','manager','gudang']}><LaporanGudangPage /></RequireRole>} />
+          <Route path="resep"         element={<RequireRole roles={['owner','manager']}><ResepPage /></RequireRole>} />
+          <Route path="produk"        element={<RequireRole roles={['owner','manager']}><ProductsPage /></RequireRole>} />
+          <Route path="resep-toko"    element={<RequireRole roles={['owner','manager']}><StoreRecipePage /></RequireRole>} />
+          <Route path="pengaturan"    element={<RequireRole roles={['owner','manager']}><SettingsPage /></RequireRole>} />
+          <Route path="accounting"    element={<AccountingPage />} />
+          <Route path="debug" element={<RequireRole roles={['owner','manager']}><DebugPage /></RequireRole>} />
 
-          {/* Legacy redirects */}
-          <Route path="gudang"    element={<Navigate to="/stok" replace />} />
-          <Route path="laporan-owner" element={<Navigate to="/laporan" replace />} />
+          {/* Legacy routes — redirect ke halaman baru */}
+          <Route path="gudang"        element={<Navigate to="/stok" replace />} />
+          <Route path="produksi"      element={<RequireRole roles={['owner','manager','produksi']}><ProduksiPage /></RequireRole>} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
@@ -132,9 +139,12 @@ export default function App() {
   )
 }
 
+
 function CloseOrderAllPage() {
   const { user } = useAuthStore()
   const isOwnerManager = ['owner','manager','gudang','produksi'].includes(user?.role || '')
+  // Owner/manager/gudang/produksi → view semua toko
+  // Kasir → EndOfDay untuk toko sendiri
   if (!isOwnerManager) return <EndOfDayPage />
   return <CloseOrderPage />
 }

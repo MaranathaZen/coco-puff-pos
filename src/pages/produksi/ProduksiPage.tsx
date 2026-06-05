@@ -253,10 +253,10 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
     return () => setToolbar(null)
   }, [groupMode])
 
-  // FIX: hapus referensi activeStoreId yang tidak ada di scope CatatProduksiTab
-  // Tab divisi produksi load SEMUA logs produksi (bukan per toko)
+  // FIX: hanya load log divisi produksi — yang TIDAK punya store_id (bukan log produksi toko)
   const logs = useLiveQuery(async () => {
-    const l       = await db.production_logs.orderBy('created_at').reverse().limit(200).toArray()
+    const all     = await db.production_logs.orderBy('created_at').reverse().limit(200).toArray()
+    const l       = all.filter(log => !(log as any).store_id)
     const recipes = await db.production_recipes.toArray()
     const rMap    = Object.fromEntries(recipes.map(r => [r.id, r]))
     const mats    = await db.production_log_materials.toArray()
@@ -661,8 +661,20 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
       : Promise.resolve([])
   , [isOwnerManager])
 
+  const setToolbar = useContext(ToolbarCtx)
   const [activeStoreId, setActiveStoreId] = useState(storeId)
   const [showForm, setShowForm] = useState(false)
+
+  // Button Catat di toolbar kanan atas (sama seperti tab divisi)
+  useEffect(() => {
+    setToolbar(
+      <button onClick={() => setShowForm(true)} disabled={isSyncing}
+        className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-200 bg-white px-2.5 py-1.5 rounded-lg disabled:opacity-50">
+        <Plus size={13} /> Catat
+      </button>
+    )
+    return () => setToolbar(null)
+  }, [isSyncing])
 
   useEffect(() => {
     if (isOwnerManager && (storeId.includes('gudang') || storeId.includes('produksi'))) {
@@ -752,10 +764,6 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
         </div>
       )}
 
-      <button onClick={() => setShowForm(true)} disabled={isSyncing}
-        className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50">
-        + Catat Produksi Toko
-      </button>
 
       {!isSyncing && recipes?.length === 0 && (
         <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-center">

@@ -67,18 +67,26 @@ export default function CashierPage() {
 
   const { items, addItem, removeItem, updateQty, clearCart, subtotal, totalDiscount } = useCartStore()
 
-  // PPN dari settings
-  const ppnSetting = useLiveQuery(async () => {
-    try {
-      const keys = ['ppn_percent', 'ppn', 'tax_percent']
-      for (const key of keys) {
-        const s = await (db as any).settings?.get?.(key)
-        if (s?.value !== undefined) return Number(s.value) || 0
+  // PPN dari Supabase stores table langsung
+  const [ppnPct, setPpnPct] = useState(0)
+  useEffect(() => {
+    if (!STORE_ID) return
+    // Coba baca dari Dexie dulu (cepat)
+    db.stores.get(STORE_ID).then(store => {
+      if (store && (store as any).ppn_enabled && (store as any).ppn_rate > 0) {
+        setPpnPct(Number((store as any).ppn_rate) || 0)
       }
-      return 0
-    } catch { return 0 }
-  }, [])
-  const ppnPct = ppnSetting ?? 0
+    }).catch(() => {})
+    // Lalu fetch dari Supabase (akurat)
+    supabase.from('stores').select('ppn_enabled, ppn_rate').eq('id', STORE_ID).single()
+      .then(({ data }) => {
+        if (data?.ppn_enabled && data?.ppn_rate > 0) {
+          setPpnPct(Number(data.ppn_rate) || 0)
+        } else {
+          setPpnPct(0)
+        }
+      }).catch(() => {})
+  }, [STORE_ID])
 
   const [mainTab,       setMainTab]       = useState<MainTab>('pos')
   const [orderType,     setOrderType]     = useState<OrderType>('take_away')

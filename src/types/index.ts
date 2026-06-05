@@ -1,3 +1,9 @@
+// src/types/index.ts
+// CHANGELOG v2:
+// - FIX: Promotion.promo_type include 'buy1get1'
+// - FIX: Transaction include ppn_amount, ppn_percent, order_type, order_source, online fields
+// - FIX: TransactionItem include promo_id, promo_discount, manual_discount
+
 // ── Auth & Users ──────────────────────────────────────────────
 export type Role = 'owner' | 'manager' | 'kasir' | 'gudang' | 'produksi'
 
@@ -54,9 +60,14 @@ export interface Product {
   is_active: boolean
   created_at: string
   updated_at: string
-  // joined
+  // joined / computed
   category?: Category
   effective_price?: number
+  promo_discount?: number
+  promo_name?: string
+  promo_id?: string
+  promo_buy1get1?: boolean
+  promo_type?: string
 }
 
 export interface StoreProductPrice {
@@ -64,16 +75,20 @@ export interface StoreProductPrice {
   store_id: string
   product_id: string
   override_price: number
+  price_dine_in?: number
+  price_take_away?: number
+  price_online?: number
   is_active: boolean
   updated_at: string
 }
 
+// FIX: tambah 'buy1get1' ke promo_type
 export interface Promotion {
   id: string
   store_id: string
   product_id: string
   name: string
-  promo_type: 'percent' | 'fixed'
+  promo_type: 'percent' | 'fixed' | 'buy1get1'
   value: number
   valid_from: string
   valid_until: string
@@ -100,6 +115,7 @@ export interface Recipe {
 
 // ── Transactions ─────────────────────────────────────────────
 export type PaymentMethod = 'cash' | 'qris' | 'transfer' | 'gopay' | 'grab' | 'shopeefood'
+export type OrderType = 'dine_in' | 'take_away' | 'online'
 
 export interface Transaction {
   id: string
@@ -109,20 +125,29 @@ export interface Transaction {
   receipt_no: string
   subtotal: number
   discount: number
+  // FIX: tambah ppn fields
+  ppn_amount?: number
+  ppn_percent?: number
   total: number
   payment_method: PaymentMethod
   cash_paid: number
   change_given: number
-  status: 'completed' | 'voided'
+  status: 'completed' | 'voided' | 'void_requested'
   void_reason?: string
   voided_by?: string
   voided_at?: string
+  // FIX: tambah order type & online fields
+  order_type?: OrderType
+  order_source?: string
+  online_order_no?: string
+  online_buyer?: string
   created_at: string
   // joined
   items?: TransactionItem[]
   cashier?: User
 }
 
+// FIX: tambah promo_id, promo_discount, manual_discount
 export interface TransactionItem {
   id: string
   transaction_id: string
@@ -132,7 +157,12 @@ export interface TransactionItem {
   qty_dus: number
   unit_price: number
   discount: number
+  promo_id?: string | null
+  promo_discount?: number
+  manual_discount?: number
   subtotal: number
+  item_type?: 'unit' | 'package'
+  package_id?: string
 }
 
 // ── Cart (state POS, tidak disimpan ke DB) ───────────────────
@@ -150,10 +180,7 @@ export interface Stock {
   store_id: string
   ingredient_id: string
   qty_on_hand: number
-  // FIX: tambah material_id sebagai jembatan ke sistem gudang baru
-  // Saat mutasi gudang → toko, ingredient_id dan material_id diisi nilai yang sama
   material_id?: string
-  // FIX: avg_cost isolated per toko, tidak ikut berubah saat gudang beli lagi
   avg_cost?: number
   last_updated: string
   ingredient?: Ingredient

@@ -543,7 +543,7 @@ export default function CashierPage() {
       if (autoPrintNow) {
         setTimeout(() => {
           // Build struk pakai format sama (38 karakter, 76mm)
-          const AW   = 38
+          const AW   = 32
           const ASEP = '='.repeat(AW)
           const asep = '-'.repeat(AW)
           const actr = (s: string) => s.padStart(Math.floor((AW + Math.min(s.length,AW)) / 2)).padEnd(AW)
@@ -576,7 +576,7 @@ export default function CashierPage() {
           if (printModeNow === 'rawbt') {
             window.location.href = `rawbt:${encodeURIComponent(aLines.join('\n'))}`
           } else {
-            const html2 = `<html><head><style>*{margin:0;padding:0;}body{margin:0;padding:1mm 0;}pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;white-space:pre;letter-spacing:0;}@page{margin:0mm;size:76mm auto;}@media print{pre{width:74mm;}}</style></head><body><pre>${aLines.join('\n')}</pre></body></html>`
+            const html2 = `<html><head><style>*{margin:0;padding:0;}body{margin:0;padding:1mm 0;}pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;white-space:pre;letter-spacing:0;}@page{margin:0mm;size:58mm auto;}@media print{pre{width:56mm;}}</style></head><body><pre>${aLines.join('\n')}</pre></body></html>`
             const iframe2 = document.createElement('iframe')
             iframe2.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;'
             document.body.appendChild(iframe2)
@@ -1181,7 +1181,7 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
   const payLabel: Record<string,string> = { cash:'Tunai', qris:'QRIS', transfer:'Transfer', gopay:'GoPay', grab:'GrabPay', shopeefood:'ShopeePay' }
 
   // ── FORMAT STRUK — mengacu sistem lama (38 karakter, kertas 76mm) ──
-  const W   = 38  // Kertas 76mm dot matrix = 38 karakter
+  const W   = 32  // Kertas 58mm = 32 karakter
   const SEP = '='.repeat(W)
   const sep = '-'.repeat(W)
 
@@ -1325,10 +1325,10 @@ pre {
 }
 @page {
   margin: 0mm;
-  size: 76mm auto;
+  size: 58mm auto;
 }
 @media print {
-  pre { width: 74mm; }
+  pre { width: 56mm; }
 }
 </style>
 </head>

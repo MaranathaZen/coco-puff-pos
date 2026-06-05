@@ -256,19 +256,22 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
   }, [groupMode])
 
   const logs = useLiveQuery(async () => {
-    const l       = await db.production_logs.orderBy('created_at').reverse().limit(200).toArray()
-    const recipes = await db.production_recipes.toArray()
-    const rMap    = Object.fromEntries(recipes.map(r => [r.id, r]))
-    const mats    = await db.production_log_materials.toArray()
-    const matDefs = await db.materials.toArray()
-    const mMap    = Object.fromEntries(matDefs.map(m => [m.id, m]))
-    return l.map(log => {
-      const logMats   = mats.filter(m => m.log_id === log.id).map(m => ({ ...m, material: mMap[m.material_id] }))
-      const totalCost = logMats.reduce((s, m) => s + m.qty_used * (m.material?.unit_cost || 0), 0)
-      const hpp       = log.total_yield > 0 ? totalCost / log.total_yield : 0
-      return { ...log, recipe: rMap[log.recipe_id], materials: logMats, total_cost: totalCost, hpp_per_unit: hpp }
-    })
-  }, [])
+  const today = new Date().toLocaleDateString('sv-SE')
+  const all = await db.production_logs
+    .filter(l => (l as any).store_id === activeStoreId && l.created_at.slice(0, 10) === today)
+    .reverse().sortBy('created_at')
+  const rMap = Object.fromEntries((await db.store_recipes.toArray()).map(r => [r.id, r]))
+  // FIX: tambah load materials
+  const logMats = await db.production_log_materials.toArray()
+  const matDefs = await db.materials.toArray()
+  const mMap    = Object.fromEntries(matDefs.map(m => [m.id, m]))
+  return all.map(l => {
+    const materials  = logMats.filter(m => m.log_id === l.id).map(m => ({ ...m, material: mMap[m.material_id] }))
+    const totalCost  = materials.reduce((s, m) => s + m.qty_used * (m.material?.unit_cost || 0), 0)
+    const hppPerUnit = l.total_yield > 0 ? totalCost / l.total_yield : 0
+    return { ...l, recipe: rMap[(l as any).recipe_id], materials, total_cost: totalCost, hpp_per_unit: hppPerUnit }
+  })
+}, [activeStoreId])
 
   const todayTotal = useMemo(() => {
     if (!logs) return { count: 0, yield: 0 }
@@ -775,19 +778,48 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Produksi Hari Ini</p>
           </div>
           {logs.map((l, idx) => (
-            <div key={l.id} className={`flex items-center px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-gray-900">{(l.recipe as any)?.product_name || 'Produksi'}</p>
-                <p className="text-xs text-gray-400">
-                  {new Date(l.created_at).toLocaleTimeString('id-ID', {hour:'2-digit',minute:'2-digit',hour12:false})}
-                  {(l as any).log_number ? ` · ${(l as any).log_number}` : ''}
-                </p>
-              </div>
-              <p className="text-sm font-bold text-blue-600">{l.total_yield} {(l.recipe as any)?.yield_unit || 'pcs'}</p>
+  <div key={l.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
+    <div className="flex items-start justify-between">
+      <div className="flex-1 min-w-0">
+        {(l as any).log_number && (
+          <p className="text-xs font-mono text-blue-600 mb-0.5">{(l as any).log_number}</p>
+        )}
+        <p className="text-sm font-medium text-gray-900">{(l.recipe as any)?.product_name || 'Produksi'}</p>
+        <p className="text-xs text-gray-400">
+          {new Date(l.created_at).toLocaleTimeString('id-ID', {hour:'2-digit',minute:'2-digit',hour12:false})}
+          {' · '}{l.batch_count} batch
+        </p>
+      </div>
+      <p className="text-sm font-bold text-blue-600 flex-shrink-0 ml-3">
+        {l.total_yield} {(l.recipe as any)?.yield_unit || 'pcs'}
+      </p>
+    </div>
+    {(l as any).materials?.length > 0 && (
+      <div className="mt-2 border-t border-gray-50 pt-1.5 space-y-0.5">
+        {(l as any).materials.map((m: any) => (
+          <div key={m.id} className="flex justify-between text-xs text-gray-400">
+            <span>{m.material?.name} × {m.qty_used} {m.material?.unit}{m.material?.unit_cost > 0 ? ` @ ${formatRupiah(m.material.unit_cost)}` : ''}</span>
+            {m.material?.unit_cost > 0 && <span>{formatRupiah(m.qty_used * m.material.unit_cost)}</span>}
+          </div>
+        ))}
+        {(l as any).total_cost > 0 && (
+          <div className="pt-1 border-t border-gray-100 mt-1 space-y-0.5">
+            <div className="flex justify-between text-xs font-medium text-gray-700">
+              <span>Total Biaya Bahan</span>
+              <span>{formatRupiah((l as any).total_cost)}</span>
             </div>
-          ))}
-        </div>
-      )}
+            {(l as any).hpp_per_unit > 0 && (
+              <div className="flex justify-between text-xs text-gray-500">
+                <span>HPP per {(l.recipe as any)?.yield_unit || 'pcs'}</span>
+                <span>{formatRupiah((l as any).hpp_per_unit)}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )}
+  </div>
+))}
 
       {showForm && (
         <ProduksiTokoForm

@@ -1,8 +1,7 @@
 // src/components/layout/Layout.tsx
 // CHANGELOG v3:
-// - FIX: debug menu tampil — kalau menu tidak ada di menu_role_config, default visible
-// - Kasir: urutan Kasir, Stok, Produksi, Mutasi, Close Order, Lainnya(Pembelian+Biaya)
-// - Desktop sidebar + mobile bottom nav
+// - FIX: warning saat logout kalau shift masih open atau ada pending sync
+// - FIX: warning saat logout kalau ada transaksi belum sync
 
 import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
@@ -70,17 +69,17 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
     { path: '/debug',      label: 'Debug'       },
   ],
   gudang: [
-    { path: '/stok',       label: 'Stok'        },
-    { path: '/pembelian',  label: 'Pembelian'   },
-    { path: '/mutasi',     label: 'Mutasi'      },
-    { path: '/biaya',      label: 'Biaya'       },
-    { path: '/tutup-toko', label: 'Close Order' },
-    { path: '/accounting', label: 'Accounting'  },
+    { path: '/stok',           label: 'Stok'        },
+    { path: '/pembelian',      label: 'Pembelian'   },
+    { path: '/mutasi',         label: 'Mutasi'      },
+    { path: '/biaya',          label: 'Biaya'       },
+    { path: '/tutup-toko',     label: 'Close Order' },
+    { path: '/accounting',     label: 'Accounting'  },
   ],
   produksi: [
-    { path: '/stok',     label: 'Stok'     },
-    { path: '/produksi', label: 'Produksi' },
-    { path: '/mutasi',   label: 'Mutasi'   },
+    { path: '/stok',           label: 'Stok'        },
+    { path: '/produksi',       label: 'Produksi'    },
+    { path: '/mutasi',         label: 'Mutasi'      },
   ],
   kasir: [
     { path: '/kasir',      label: 'Kasir'       },
@@ -96,11 +95,13 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
 const MAX_NAV = 4
 
 export default function Layout() {
-  const { user, logout } = useAuthStore()
+  const { user, logout, activeShift } = useAuthStore()
   const navigate   = useNavigate()
   const location   = useLocation()
-  const [showMore, setShowMore] = useState(false)
-  const [isOnline, setIsOnline] = useState(navigator.onLine)
+  const [showMore,        setShowMore]        = useState(false)
+  const [isOnline,        setIsOnline]        = useState(navigator.onLine)
+  const [showLogoutModal, setShowLogoutModal] = useState(false)
+  const [pendingCount,    setPendingCount]    = useState(0)
 
   useEffect(() => {
     const up = () => setIsOnline(true)
@@ -109,6 +110,26 @@ export default function Layout() {
     window.addEventListener('offline', dn)
     return () => { window.removeEventListener('online', up); window.removeEventListener('offline', dn) }
   }, [])
+
+  // FIX: cek pending sync sebelum logout
+  async function checkAndLogout() {
+    try {
+      const count = await db.sync_queue.where('status').anyOf(['pending','failed']).count()
+      setPendingCount(count)
+      const shiftOpen = activeShift?.status === 'open'
+      if (count > 0 || shiftOpen) {
+        setShowLogoutModal(true)
+        return
+      }
+    } catch {}
+    doLogout()
+  }
+
+  function doLogout() {
+    setShowLogoutModal(false)
+    logout()
+    navigate('/login')
+  }
 
   const dbMenus = useLiveQuery(async () => {
     if (!user?.role) return []
@@ -120,23 +141,15 @@ export default function Layout() {
     if (!dbMenus || dbMenus.length === 0) {
       return defaults.map(d => ({ menu_path: d.path, menu_label: d.label }))
     }
-    // FIX: kalau menu tidak ada di dbMap → default visible (true)
-    // Hanya sembunyikan kalau explicitly is_visible = false
     const dbMap = Object.fromEntries(dbMenus.map(m => [m.menu_path, m.is_visible]))
     return defaults
-      .filter(d => dbMap[d.path] !== false)  // undefined → lolos, false → disembunyikan
+      .filter(d => dbMap[d.path] !== false)
       .map(d => ({ menu_path: d.path, menu_label: d.label }))
   })()
 
   const navMenus     = allMenus.slice(0, MAX_NAV)
   const moreMenus    = allMenus.slice(MAX_NAV)
   const isMoreActive = moreMenus.some(m => location.pathname.startsWith(m.menu_path))
-
-  function handleLogout() {
-    if (!confirm('Yakin ingin keluar?')) return
-    logout()
-    navigate('/login')
-  }
 
   function NavItem({ menu_path, menu_label, onClick }: { menu_path: string; menu_label: string; onClick?: () => void }) {
     const Icon     = ICON_MAP[menu_path] || Package
@@ -178,7 +191,7 @@ export default function Layout() {
               ? <><Wifi size={14} className="text-green-500" /><span className="text-xs text-green-600">Online</span></>
               : <><WifiOff size={14} className="text-amber-500" /><span className="text-xs text-amber-600">Offline</span></>}
           </div>
-          <button onClick={handleLogout}
+          <button onClick={checkAndLogout}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-red-500 hover:bg-red-50 transition-colors">
             <LogOut size={18} /><span>Keluar</span>
           </button>
@@ -249,10 +262,55 @@ export default function Layout() {
                 })}
               </div>
             )}
-            <button onClick={handleLogout}
+            <button onClick={() => { setShowMore(false); checkAndLogout() }}
               className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-gray-200 text-sm font-medium text-red-500 active:bg-red-50">
               <LogOut size={16} />Keluar
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL KONFIRMASI LOGOUT ── */}
+      {showLogoutModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-xl">
+            <div className="text-center">
+              <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                <span className="text-2xl">⚠️</span>
+              </div>
+              <h3 className="font-semibold text-gray-900 text-lg">Yakin ingin keluar?</h3>
+            </div>
+
+            {/* Warning shift masih open */}
+            {activeShift?.status === 'open' && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                <p className="text-sm font-medium text-amber-800">🕐 Shift masih terbuka</p>
+                <p className="text-xs text-amber-600 mt-0.5">
+                  Lakukan Close Order terlebih dahulu sebelum keluar agar laporan harian tercatat.
+                </p>
+              </div>
+            )}
+
+            {/* Warning pending sync */}
+            {pendingCount > 0 && (
+              <div className="bg-orange-50 border border-orange-200 rounded-xl p-3">
+                <p className="text-sm font-medium text-orange-800">📤 {pendingCount} transaksi belum tersync</p>
+                <p className="text-xs text-orange-600 mt-0.5">
+                  Data transaksi belum terkirim ke server. Tunggu hingga tersync atau pastikan internet aktif.
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button onClick={() => setShowLogoutModal(false)}
+                className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">
+                Batal
+              </button>
+              <button onClick={doLogout}
+                className="flex-1 py-3 rounded-xl bg-red-600 text-white text-sm font-medium">
+                Tetap Keluar
+              </button>
+            </div>
           </div>
         </div>
       )}

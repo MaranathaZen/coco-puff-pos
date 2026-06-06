@@ -269,20 +269,39 @@ export default function CashierPage() {
     }
   }, [STORE_ID])
 
-  // FIX: filter hari ini di query
+  // FIX: filter hari ini di query, owner tampil void_requested semua toko
   const transactions = useLiveQuery(async () => {
     const today = new Date().toLocaleDateString('sv-SE')
-    const txs = await db.transactions.where('store_id').equals(STORE_ID)
+    let txs = await db.transactions.where('store_id').equals(STORE_ID)
       .filter(t => t.created_at.slice(0, 10) === today)
       .reverse().sortBy('created_at')
+    // Owner/manager: tambahkan void_requested dari toko lain
+    if (isOwnerManager) {
+      const voidTxs = await db.transactions
+        .filter(t => (t as any).status === 'void_requested' && t.created_at.slice(0, 10) === today && t.store_id !== STORE_ID)
+        .reverse().sortBy('created_at')
+      const existingIds = new Set(txs.map(t => t.id))
+      for (const vt of voidTxs) {
+        if (!existingIds.has(vt.id)) txs.push(vt)
+      }
+      txs.sort((a, b) => b.created_at.localeCompare(a.created_at))
+    }
     const txItems = await db.transaction_items.toArray()
     return txs.map(t => ({ ...t, items: txItems.filter(i => i.transaction_id === t.id) }))
-  }, [mainTab, STORE_ID])
+  }, [mainTab, STORE_ID, isOwnerManager])
 
   useEffect(() => {
     if (!isOwnerManager || !STORE_ID) return
     const today = new Date().toLocaleDateString('sv-SE')
     async function pullVoidRequests() {
+      // FIX: pull void_requested dari SEMUA toko tanpa filter store_id
+      const { data: voidData } = await supabase.from('transactions')
+        .select('*').eq('status', 'void_requested')
+        .gte('created_at', today + 'T00:00:00+07:00')
+      if (voidData?.length) {
+        await db.transactions.bulkPut(voidData)
+      }
+      // Pull transaksi toko yang dipilih
       const { data } = await supabase.from('transactions')
         .select('*').eq('store_id', STORE_ID)
         .gte('created_at', today + 'T00:00:00+07:00')
@@ -294,7 +313,7 @@ export default function CashierPage() {
       }
     }
     pullVoidRequests()
-    const interval = setInterval(pullVoidRequests, 30000)
+    const interval = setInterval(pullVoidRequests, 15000)
     return () => clearInterval(interval)
   }, [isOwnerManager, STORE_ID, mainTab])
 

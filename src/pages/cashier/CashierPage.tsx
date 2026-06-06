@@ -1218,7 +1218,7 @@ function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () =
     try { return JSON.parse(localStorage.getItem(key)||'{}').autoPrint===true } catch { return false }
   })
   const [serverUrl, setServerUrl] = useState<string>(() => {
-    try { return JSON.parse(localStorage.getItem(key)||'{}').serverUrl||'http://localhost:5000' } catch { return 'http://localhost:5000' }
+    try { return JSON.parse(localStorage.getItem(key)||'{}').serverUrl||'https://localhost:5000' } catch { return 'http://localhost:5000' }
   })
   const [serverStatus, setServerStatus] = useState<'unknown'|'ok'|'error'>('unknown')
   const [saved, setSaved] = useState(false)
@@ -1242,13 +1242,12 @@ function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () =
   }
 
   const MODES = [
-    { v: 'browser', l: '🖥️ Browser Print (USB/LAN)', d: 'Dialog print browser — untuk printer USB di PC' },
-    { v: 'server',  l: '⚡ Print Server (Windows)',   d: 'Print langsung tanpa dialog — install print_server.py' },
-    { v: 'rawbt',   l: '📱 RawBT (Bluetooth)',        d: 'Android + printer thermal Bluetooth' },
+    { v: 'server', l: '🖥️ Desktop / Windows',   d: 'Print langsung ke EPSON TM-U220 — install print_server.py di PC kasir' },
+    { v: 'rawbt',  l: '📱 Android / RawBT',      d: 'Printer Bluetooth — install app RawBT di Android' },
   ]
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/40 flex items-end md:items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl w-full max-w-md shadow-lg">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900">🖨️ Setting Printer</h3>
@@ -1273,7 +1272,7 @@ function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () =
               <div className="flex gap-2">
                 <input className="input flex-1 text-sm" value={serverUrl}
                   onChange={e => setServerUrl(e.target.value)}
-                  placeholder="http://localhost:5000" />
+                  placeholder="https://localhost:5000" />
                 <button onClick={testServer}
                   className="px-3 py-2 text-xs font-medium bg-blue-600 text-white rounded-lg">
                   Test
@@ -1310,7 +1309,7 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
   const serverUrl = (() => {
     try {
       const cfg = JSON.parse(localStorage.getItem(`printer_config_${data.storeName}`) || '{}')
-      return cfg.serverUrl || 'http://localhost:5000'
+      return cfg.serverUrl || 'https://localhost:5000'
     } catch { return 'http://localhost:5000' }
   })()
 

@@ -1,235 +1,174 @@
 """
-Coco Puff POS - Print Server v1.0
-Jalan di background Windows, listen localhost:5000
-Terima data struk dari browser, print RAW ke printer dot matrix
+Coco Puff POS - Print Server v2.0
+- HTTPS dengan self-signed certificate (fix mixed content block)
+- ESC/P commands untuk font dot matrix yang bagus
+- Jalan di background Windows tanpa terminal
 
-Cara pakai:
-  1. Install: pip install flask pywin32
-  2. Jalankan: python print_server.py
-  3. Browser otomatis kirim ke http://localhost:5000/print
+Setup:
+  pip install flask flask-cors pywin32 pyopenssl pystray Pillow
+  python print_server.py
+
+PENTING - pertama kali:
+  Buka https://localhost:5000/health di browser
+  Klik Advanced -> Proceed to localhost (unsafe)
+  Ini hanya sekali untuk accept self-signed cert
 """
 
-import sys
-import os
-import json
-import threading
-import time
+import sys, os, json, threading, time, ssl
 
-# ── Sembunyikan console window di Windows ──────────────────────
 if sys.platform == 'win32':
     import ctypes
-    # Sembunyikan window kalau bukan debug mode
     if '--debug' not in sys.argv:
         ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-app = Flask(__name__)
-CORS(app, origins=['https://coco-puff-pos.vercel.app', 'http://localhost:*', 'http://127.0.0.1:*'])
+app  = Flask(__name__)
+CORS(app, origins=['*'])
 
-# ── Konfigurasi ────────────────────────────────────────────────
-PORT       = 5000
-LOG_FILE   = os.path.join(os.path.dirname(__file__), 'print_server.log')
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'config.json')
+PORT      = 5000
+BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE  = os.path.join(BASE_DIR, 'print_server.log')
+CERT_FILE = os.path.join(BASE_DIR, 'cert.pem')
+KEY_FILE  = os.path.join(BASE_DIR, 'key.pem')
 
-def log(msg: str):
-    ts = time.strftime('%Y-%m-%d %H:%M:%S')
+# ESC/P commands EPSON dot matrix
+ESC          = b'\x1b'
+ESC_INIT     = ESC + b'@'
+ESC_BOLD_ON  = ESC + b'E\x01'
+ESC_BOLD_OFF = ESC + b'E\x00'
+GS_CUT       = b'\x1d' + b'V\x41\x00'
+
+def log(msg):
+    ts   = time.strftime('%Y-%m-%d %H:%M:%S')
     line = f"[{ts}] {msg}"
     print(line)
     try:
         with open(LOG_FILE, 'a', encoding='utf-8') as f:
             f.write(line + '\n')
-    except:
-        pass
+    except: pass
 
-def load_config():
-    default = {
-        "printer_name": "",   # kosong = default printer
-        "paper_width":  38,   # karakter per baris (76mm = 38, 58mm = 32)
-        "cut_paper":    True, # auto cut setelah print
-    }
+def generate_cert():
+    if os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE):
+        return True
     try:
-        if os.path.exists(CONFIG_FILE):
-            with open(CONFIG_FILE, 'r') as f:
-                return {**default, **json.load(f)}
-    except:
-        pass
-    return default
+        from OpenSSL import crypto
+        k = crypto.PKey()
+        k.generate_key(crypto.TYPE_RSA, 2048)
+        c = crypto.X509()
+        c.get_subject().CN = "localhost"
+        c.set_serial_number(1000)
+        c.gmtime_adj_notBefore(0)
+        c.gmtime_adj_notAfter(10*365*24*3600)
+        c.set_issuer(c.get_subject())
+        c.set_pubkey(k)
+        c.sign(k, 'sha256')
+        open(CERT_FILE,'wb').write(crypto.dump_certificate(crypto.FILETYPE_PEM, c))
+        open(KEY_FILE,'wb').write(crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
+        log("SSL cert dibuat")
+        return True
+    except Exception as e:
+        log(f"Gagal buat cert: {e} — fallback HTTP")
+        return False
 
-# ── Print RAW ke printer dot matrix ───────────────────────────
-def print_raw(text: str, printer_name: str = "") -> tuple[bool, str]:
+def build_escpos(text: str) -> bytes:
+    """Format teks ke ESC/P bytes untuk dot matrix"""
+    data = bytearray(ESC_INIT)
+    for line in text.split('\n'):
+        stripped = line.strip()
+        is_bold  = (all(c in '=-' for c in stripped) and len(stripped) > 3) or stripped == 'TOTAL'
+        if is_bold: data += ESC_BOLD_ON
+        try:    data += line.encode('cp437', errors='replace')
+        except: data += line.encode('latin-1', errors='replace')
+        data += b'\r\n'
+        if is_bold: data += ESC_BOLD_OFF
+    data += b'\n' * 4
+    data += GS_CUT
+    return bytes(data)
+
+def print_raw(text: str, printer_name: str = ""):
     try:
         import win32print
-        import win32con
-
-        # Pilih printer
-        if printer_name:
-            pname = printer_name
-        else:
-            pname = win32print.GetDefaultPrinter()
-
-        log(f"Printing to: {pname}")
-        log(f"Content ({len(text)} chars):\n{text[:200]}...")
-
-        # Encode ke bytes (printer dot matrix pakai CP437 atau UTF-8)
+        pname = printer_name or win32print.GetDefaultPrinter()
+        log(f"Print ke: {pname}")
+        raw   = build_escpos(text)
+        hp    = win32print.OpenPrinter(pname)
         try:
-            raw_bytes = text.encode('cp437', errors='replace')
-        except:
-            raw_bytes = text.encode('utf-8', errors='replace')
-
-        # Buka printer dan kirim RAW
-        hPrinter = win32print.OpenPrinter(pname)
-        try:
-            hJob = win32print.StartDocPrinter(hPrinter, 1, ("Struk Coco Puff", None, "RAW"))
-            try:
-                win32print.StartPagePrinter(hPrinter)
-                win32print.WritePrinter(hPrinter, raw_bytes)
-                win32print.EndPagePrinter(hPrinter)
-            finally:
-                win32print.EndDocPrinter(hPrinter)
+            win32print.StartDocPrinter(hp, 1, ("Struk", None, "RAW"))
+            win32print.StartPagePrinter(hp)
+            win32print.WritePrinter(hp, raw)
+            win32print.EndPagePrinter(hp)
+            win32print.EndDocPrinter(hp)
         finally:
-            win32print.ClosePrinter(hPrinter)
-
-        log("Print berhasil")
+            win32print.ClosePrinter(hp)
+        log("Print OK")
         return True, "OK"
-
     except ImportError:
-        # Fallback: pakai subprocess lp (Linux/Mac) atau notepad (Windows)
-        log("win32print tidak tersedia, coba fallback...")
-        try:
-            import subprocess
-            tmp_file = os.path.join(os.path.dirname(__file__), '_print_tmp.txt')
-            with open(tmp_file, 'w', encoding='utf-8') as f:
-                f.write(text)
-            if sys.platform == 'win32':
-                subprocess.Popen(['notepad', '/p', tmp_file], shell=True)
-            else:
-                subprocess.run(['lp', tmp_file])
-            return True, "Fallback print"
-        except Exception as e:
-            return False, str(e)
-    except Exception as e:
-        log(f"Print error: {e}")
-        return False, str(e)
-
-# ── Endpoints ──────────────────────────────────────────────────
-@app.route('/health', methods=['GET'])
-def health():
-    """Cek apakah print server aktif"""
-    try:
-        import win32print
-        printer = win32print.GetDefaultPrinter()
-        return jsonify({ "status": "ok", "printer": printer, "port": PORT })
-    except ImportError:
-        return jsonify({ "status": "ok", "printer": "unknown (win32print not installed)", "port": PORT })
-    except Exception as e:
-        return jsonify({ "status": "ok", "printer": f"error: {e}", "port": PORT })
-
-@app.route('/printers', methods=['GET'])
-def list_printers():
-    """Daftar printer yang tersedia"""
-    try:
-        import win32print
-        printers = [p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
-        default  = win32print.GetDefaultPrinter()
-        return jsonify({ "printers": printers, "default": default })
-    except Exception as e:
-        return jsonify({ "printers": [], "error": str(e) })
-
-@app.route('/print', methods=['POST', 'OPTIONS'])
-def do_print():
-    """Terima data struk dan print"""
-    if request.method == 'OPTIONS':
-        return '', 204
-
-    try:
-        data = request.get_json(force=True)
-        if not data:
-            return jsonify({"ok": False, "error": "No data"}), 400
-
-        text         = data.get('text', '')
-        printer_name = data.get('printer', '')
-
-        if not text:
-            return jsonify({"ok": False, "error": "Empty text"}), 400
-
-        cfg = load_config()
-        if not printer_name:
-            printer_name = cfg.get('printer_name', '')
-
-        ok, msg = print_raw(text, printer_name)
-        return jsonify({"ok": ok, "message": msg})
-
+        return False, "pywin32 tidak terinstall: pip install pywin32"
     except Exception as e:
         log(f"Error: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return False, str(e)
 
-@app.route('/config', methods=['GET', 'POST'])
-def config():
-    """Baca atau update konfigurasi"""
-    if request.method == 'GET':
-        return jsonify(load_config())
-    else:
-        try:
-            new_cfg = request.get_json(force=True)
-            cfg = {**load_config(), **new_cfg}
-            with open(CONFIG_FILE, 'w') as f:
-                json.dump(cfg, f, indent=2)
-            return jsonify({"ok": True, "config": cfg})
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
+@app.route('/health')
+def health():
+    try:
+        import win32print
+        p = win32print.GetDefaultPrinter()
+        return jsonify({"status":"ok","printer":p,"port":PORT})
+    except Exception as e:
+        return jsonify({"status":"ok","printer":str(e),"port":PORT})
 
-# ── System tray icon (opsional) ────────────────────────────────
+@app.route('/printers')
+def printers():
+    try:
+        import win32print
+        ps = [p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL|win32print.PRINTER_ENUM_CONNECTIONS)]
+        return jsonify({"printers":ps,"default":win32print.GetDefaultPrinter()})
+    except Exception as e:
+        return jsonify({"printers":[],"error":str(e)})
+
+@app.route('/print', methods=['POST','OPTIONS'])
+def do_print():
+    if request.method == 'OPTIONS': return '',204
+    try:
+        d    = request.get_json(force=True)
+        text = d.get('text','')
+        if not text: return jsonify({"ok":False,"error":"Empty"}),400
+        ok, msg = print_raw(text, d.get('printer',''))
+        return jsonify({"ok":ok,"message":msg})
+    except Exception as e:
+        return jsonify({"ok":False,"error":str(e)}),500
+
 def run_tray():
-    """Jalankan icon di system tray Windows"""
     try:
         import pystray
         from PIL import Image, ImageDraw
-
-        # Buat icon sederhana (kotak hitam)
-        img = Image.new('RGB', (64, 64), color=(30, 30, 30))
-        draw = ImageDraw.Draw(img)
-        draw.rectangle([16, 16, 48, 48], fill=(255, 255, 255))
-        draw.text((20, 22), "CP", fill=(30, 30, 30))
-
-        def on_quit(icon, item):
-            icon.stop()
-            os._exit(0)
-
-        def on_status(icon, item):
-            pass  # bisa tambah popup status
-
+        img  = Image.new('RGB',(64,64),(30,30,30))
+        d    = ImageDraw.Draw(img)
+        d.rectangle([8,8,56,56],(255,255,255))
+        d.text((18,22),"CP",(30,30,30))
         menu = pystray.Menu(
-            pystray.MenuItem("Coco Puff Print Server", on_status, enabled=False),
-            pystray.MenuItem(f"Port: {PORT}", on_status, enabled=False),
+            pystray.MenuItem("Coco Puff Print Server",None,enabled=False),
+            pystray.MenuItem(f"port:{PORT}",None,enabled=False),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Keluar", on_quit),
+            pystray.MenuItem("Keluar",lambda i,item:(i.stop(),os._exit(0))),
         )
-        icon = pystray.Icon("CocoPuffPrint", img, "Coco Puff Print Server", menu)
-        icon.run()
-    except ImportError:
-        # pystray tidak tersedia — jalan tanpa tray icon
-        log("pystray tidak tersedia, jalan tanpa tray icon")
-        # Keep process alive
-        while True:
-            time.sleep(60)
+        pystray.Icon("CP",img,f"CP Print :{PORT}",menu).run()
+    except: 
+        while True: time.sleep(60)
 
-# ── Main ───────────────────────────────────────────────────────
 if __name__ == '__main__':
-    log(f"=== Coco Puff Print Server v1.0 ===")
-    log(f"Port: {PORT}")
-    log(f"Config: {CONFIG_FILE}")
-
-    # Jalankan tray icon di thread terpisah
-    if sys.platform == 'win32' and '--no-tray' not in sys.argv:
-        tray_thread = threading.Thread(target=run_tray, daemon=True)
-        tray_thread.start()
-
-    # Jalankan Flask server
-    app.run(
-        host='127.0.0.1',
-        port=PORT,
-        debug='--debug' in sys.argv,
-        use_reloader=False,
-    )
+    log("=== Coco Puff Print Server v2.0 ===")
+    if sys.platform=='win32' and '--no-tray' not in sys.argv:
+        threading.Thread(target=run_tray,daemon=True).start()
+    use_https = generate_cert()
+    if use_https:
+        log("HTTPS mode: https://localhost:5000")
+        log("Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost")
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(CERT_FILE, KEY_FILE)
+        app.run(host='0.0.0.0',port=PORT,ssl_context=ctx,debug='--debug' in sys.argv,use_reloader=False)
+    else:
+        log("HTTP mode: http://localhost:5000")
+        app.run(host='0.0.0.0',port=PORT,debug='--debug' in sys.argv,use_reloader=False)

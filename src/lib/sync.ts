@@ -258,7 +258,9 @@ export async function pushToSupabase() {
         if (item.operation === 'delete') {
           await supabase.from(item.table_name).delete().eq('id', item.record_id)
         } else {
-          await supabase.from(item.table_name).upsert(payload)
+          // onConflict='id' → UPDATE jika sudah ada, INSERT jika belum
+          const { error } = await supabase.from(item.table_name).upsert(payload, { onConflict: 'id' })
+          if (error && error.code !== '23505') throw error // ignore unique violation
         }
         await db.sync_queue.update(item.id, { status: 'done', synced_at: now(), error_msg: undefined })
       } catch (e: any) {
@@ -284,13 +286,7 @@ export function startSyncWorker(storeId: string) {
   pushInterval = setInterval(() => { pushToSupabase() }, 30_000)
   pullInterval = setInterval(() => { pullFromSupabase(storeId) }, 60_000)
 
-  // FIX: push immediately when back online (jangan tunggu 30s)
-  const onOnline = () => {
-    console.log('[SYNC] Kembali online — push pending segera')
-    pushToSupabase()
-    pullFromSupabase(storeId)
-  }
-  window.addEventListener('online', onOnline)
+  // FIX: satu listener online saja, hapus duplikat
   document.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('online', handleOnline)
 
@@ -311,8 +307,12 @@ function handleVisibilityChange() {
   if (document.visibilityState === 'visible') pullFromSupabase()
 }
 function handleOnline() {
-  pullFromSupabase()
-  pushToSupabase()
+  console.log('[SYNC] Kembali online — push pending segera')
+  // Delay sedikit agar koneksi stabil dulu
+  setTimeout(() => {
+    pullFromSupabase(currentStoreId || undefined)
+    pushToSupabase()
+  }, 500)
 }
 
 export function isOnline(): boolean { return navigator.onLine }

@@ -389,13 +389,13 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
         created_by: userId, created_at: now(),
       }
       await db.purchases.add(purch)
-      await supabase.from('purchases').insert(purch)
+      await supabase.from('purchases').upsert(purch)
 
       for (const item of valid) {
         const uc = getUnitCost(item)
         const pi = { id: generateId(), purchase_id: purchId, material_id: item.material_id, qty: Number(item.qty), unit_cost: uc, subtotal: Number(item.qty) * uc, qty_returned: 0 }
         await db.purchase_items.add(pi)
-        await supabase.from('purchase_items').insert(pi)
+        await supabase.from('purchase_items').upsert(pi)
 
         const ws  = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
         const wsd: WarehouseStock = { id: ws?.id || generateId(), material_id: item.material_id, qty_on_hand: (ws?.qty_on_hand || 0) + Number(item.qty), last_updated: now() }

@@ -637,7 +637,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           } else {
             const newStock: any = { id: generateId(), store_id: destId, ingredient_id: item.material_id, material_id: item.material_id, qty_on_hand: inQty, avg_cost: newAvg, last_updated: now() }
             await db.stock.add(newStock)
-            await supabase.from('stock').insert({ id: newStock.id, store_id: destId, ingredient_id: item.material_id, material_id: item.material_id, qty_on_hand: inQty, avg_cost: newAvg })
+            await supabase.from('stock').upsert({ id: newStock.id, store_id: destId, ingredient_id: item.material_id, material_id: item.material_id, qty_on_hand: inQty, avg_cost: newAvg })
           }
         }
       }

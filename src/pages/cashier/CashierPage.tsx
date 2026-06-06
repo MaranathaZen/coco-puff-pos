@@ -626,6 +626,17 @@ export default function CashierPage() {
               {tab.icon}{tab.label}
             </button>
           ))}
+          {/* Tombol setting printer — selalu tampil di header */}
+          <button onClick={() => setShowPrinterModal(true)}
+            title="Setting Printer"
+            className={`px-3 py-2.5 border-b-2 border-transparent text-gray-400 hover:text-gray-600 flex-shrink-0 relative`}>
+            🖨️
+            {/* Dot indikator mode printer */}
+            <span className={`absolute top-1.5 right-1 w-1.5 h-1.5 rounded-full ${
+              printMode === 'server' ? 'bg-green-500' :
+              printMode === 'rawbt'  ? 'bg-blue-500'  : 'bg-gray-300'
+            }`}/>
+          </button>
         </div>
         {mainTab === 'pos' && (
           <div className="flex gap-1.5 px-3 py-2">

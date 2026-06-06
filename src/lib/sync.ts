@@ -283,6 +283,14 @@ export function startSyncWorker(storeId: string) {
   startRealtime(storeId)
   pushInterval = setInterval(() => { pushToSupabase() }, 30_000)
   pullInterval = setInterval(() => { pullFromSupabase(storeId) }, 60_000)
+
+  // FIX: push immediately when back online (jangan tunggu 30s)
+  const onOnline = () => {
+    console.log('[SYNC] Kembali online — push pending segera')
+    pushToSupabase()
+    pullFromSupabase(storeId)
+  }
+  window.addEventListener('online', onOnline)
   document.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('online', handleOnline)
 

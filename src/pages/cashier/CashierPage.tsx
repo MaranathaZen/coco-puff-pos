@@ -96,6 +96,8 @@ export default function CashierPage() {
   const [cashPaid,      setCashPaid]      = useState('')
   const [isProcessing,  setIsProcessing]  = useState(false)
   const [isOffline,     setIsOffline]     = useState(!navigator.onLine)
+  const [pendingSync,   setPendingSync]   = useState(0)
+  const [printServerOk, setPrintServerOk] = useState<boolean|null>(null)
   const [isSyncing,     setIsSyncing]     = useState(false)
 
   const [onlinePlatform, setOnlinePlatform] = useState<OnlinePlatform>('gofood')
@@ -168,6 +170,39 @@ export default function CashierPage() {
     window.addEventListener('offline', onOffline)
     return () => { window.removeEventListener('online', onOnline); window.removeEventListener('offline', onOffline) }
   }, [])
+
+  // FIX 1: Monitor pending sync queue
+  useEffect(() => {
+    async function checkPending() {
+      try {
+        const count = await db.sync_queue.where('status').anyOf(['pending','failed']).count()
+        setPendingSync(count)
+      } catch {}
+    }
+    checkPending()
+    const interval = setInterval(checkPending, 15000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // FIX 2: Monitor print server health setiap 30 detik
+  useEffect(() => {
+    const cfg = getPrinterConfig(STORE_ID || userStoreId)
+    if (cfg.printMode !== 'server') return
+    const url = cfg.serverUrl || 'https://localhost:5000'
+    async function checkPrintServer() {
+      try {
+        const c = new AbortController()
+        setTimeout(() => c.abort(), 3000)
+        const res = await fetch(`${url}/health`, { signal: c.signal })
+        setPrintServerOk(res.ok)
+      } catch {
+        setPrintServerOk(false)
+      }
+    }
+    checkPrintServer()
+    const interval = setInterval(checkPrintServer, 30000)
+    return () => clearInterval(interval)
+  }, [STORE_ID, userStoreId, printerConfigTs])
 
   const categories = useLiveQuery(() => db.categories.orderBy('sort_order').toArray(), [])
 
@@ -629,6 +664,18 @@ export default function CashierPage() {
       {isOffline && (
         <div className="bg-amber-500 text-white text-xs font-medium px-4 py-2 flex items-center gap-2 flex-shrink-0">
           <WifiOff size={13} />Mode offline — transaksi tersimpan lokal
+        </div>
+      )}
+      {!isOffline && pendingSync > 0 && (
+        <div className="bg-orange-500 text-white text-xs font-medium px-4 py-2 flex items-center gap-2 flex-shrink-0">
+          <RefreshCw size={13} className="animate-spin" />
+          {pendingSync} transaksi belum tersync ke server — jangan tutup browser
+        </div>
+      )}
+      {printServerOk === false && getPrinterConfig(STORE_ID || userStoreId).printMode === 'server' && (
+        <div className="bg-red-500 text-white text-xs font-medium px-4 py-2 flex items-center justify-between gap-2 flex-shrink-0">
+          <span>🖨️ Print server mati — struk tidak bisa tercetak</span>
+          <button onClick={() => setShowPrinterModal(true)} className="underline text-xs">Setting</button>
         </div>
       )}
 

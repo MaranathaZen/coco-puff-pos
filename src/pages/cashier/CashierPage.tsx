@@ -1094,23 +1094,18 @@ export default function CashierPage() {
                   <span>-{formatRupiah(paketDiscount)}</span>
                 </div>
               )}
-              {(totalDiscount() - buy1get1Discount) > 0 && (() => {
-                const promoDisc = totalDiscount() - buy1get1Discount
-                // Determine label based on active promo type
-                const activePromo = items.flatMap(i => {
-                  const p = (i.product as any)
-                  if (p.promo_type === 'percent' && p.promo_value > 0) return [`Diskon ${p.promo_value}%`]
-                  if (p.promo_type === 'fixed' && p.promo_value > 0) return [`Diskon Nominal`]
-                  return []
-                })
-                const promoLabel = activePromo.length > 0 ? [...new Set(activePromo)].join(', ') : 'Diskon Promo'
-                return (
-                  <div className="flex justify-between text-sm text-green-600">
-                    <span>{promoLabel}</span>
-                    <span>-{formatRupiah(promoDisc)}</span>
-                  </div>
-                )
-              })()}
+              {(totalDiscount() - buy1get1Discount) > 0 && (
+                <div className="flex justify-between text-sm text-green-600">
+                  <span>{
+                    items.some(i => (i.product as any).promo_type === 'percent')
+                      ? `Diskon ${(items.find(i => (i.product as any).promo_type === 'percent')?.product as any)?.promo_value || ''}%`
+                      : items.some(i => (i.product as any).promo_type === 'fixed')
+                        ? 'Diskon Nominal'
+                        : 'Diskon Promo'
+                  }</span>
+                  <span>-{formatRupiah(totalDiscount() - buy1get1Discount)}</span>
+                </div>
+              )}
               {ppnAmount>0 && <div className="flex justify-between text-sm text-gray-600"><span>PPN {ppnPct}%</span><span>+{formatRupiah(ppnAmount)}</span></div>}
               <div className="flex justify-between font-bold text-gray-900 border-t border-gray-100 pt-1.5"><span>Total</span><span>{formatRupiah(grandTotal)}</span></div>
             </div>

@@ -543,8 +543,8 @@ export default function CashierPage() {
       const printModeNow = getPrintModeNow()
       if (autoPrintNow) {
         setTimeout(() => {
-          // Format Rupiah ASCII untuk auto print (definisi di atas sebelum dipakai)
-          const fmtA = (n: number) => {
+          // Format Rupiah ASCII — function declaration (bisa hoist, beda dengan const)
+          function fmtA(n: number): string {
             const s = String(Math.round(n))
             let r = ''
             for (let i = 0; i < s.length; i++) {

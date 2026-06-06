@@ -1049,7 +1049,7 @@ export default function CashierPage() {
       )}
 
       {showPrinterModal && (
-        <PrinterMiniModal storeId={STORE_ID} onClose={() => { setShowPrinterModal(false); setPrinterConfigTs(Date.now()) }} />
+        <PrinterMiniModal storeId={STORE_ID || userStoreId} onClose={() => { setShowPrinterModal(false); setPrinterConfigTs(Date.now()) }} />
       )}
       {showReceipt && lastTxData && (
         <ReceiptModal data={lastTxData} printMode={printMode} autoPrint={autoPrint} onClose={() => setShowReceipt(false)} />

@@ -38,3 +38,6 @@
 [2026-06-06 12:05:47] Raw bytes (first 200): b'TEST PRINT\n\n\n\n\n\n\n'
 [2026-06-06 12:05:47] Text sample: 'TEST PRINT'
 [2026-06-06 12:05:47] Print OK
+[2026-06-06 12:12:03] === Coco Puff Print Server v2.0 ===
+[2026-06-06 12:12:03] HTTPS mode: https://localhost:5000
+[2026-06-06 12:12:03] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost

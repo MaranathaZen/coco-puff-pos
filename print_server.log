@@ -128,3 +128,6 @@
 [2026-06-06 21:20:29] Raw bytes (first 200): b'\x1b@\x1bC\x00\x1bN\x00================================\n           Coco Puff            \n         Coco Puff Mog          \n================================\nNo    :             20260606-015\nTgl   :              6 Juni'
 [2026-06-06 21:20:29] Text sample: '================================\n           Coco Puff            \n         Coco Puff Mog          \n='
 [2026-06-06 21:20:29] Print OK
+[2026-06-06 21:28:00] Raw bytes (first 200): b'\x1b@\x1bC\x00\x1bN\x00================================\n           Coco Puff            \n         Coco Puff Mog          \n================================\nNo    :             20260606-016\nTgl   :              6 Juni'
+[2026-06-06 21:28:00] Text sample: '================================\n           Coco Puff            \n         Coco Puff Mog          \n='
+[2026-06-06 21:28:00] Print OK

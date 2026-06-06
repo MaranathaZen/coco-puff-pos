@@ -134,6 +134,8 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
 
   const expenses = useLiveQuery(async () => {
     let list = await db.warehouse_expenses.orderBy('created_at').reverse().toArray()
+  const expenses = useLiveQuery(async () => {
+    let list = await db.warehouse_expenses.orderBy('created_at').reverse().toArray()
     if (role === 'kasir') {
       // FIX: kasir hanya lihat hari ini
       const today = new Date().toLocaleDateString('sv-SE')
@@ -141,7 +143,12 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
         ((e as any).store_id === storeId || e.created_by === userId) &&
         e.created_at.slice(0, 10) === today
       )
+    } else if (role === 'produksi') {
+      list = list.filter(e => e.created_by === userId)
     }
+    // owner/manager/gudang: lihat semua
+    return list
+  }, [role, userId, storeId])
     return list
   }, [role, userId, storeId])
 

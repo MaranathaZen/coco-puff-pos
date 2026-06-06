@@ -1200,18 +1200,42 @@ function TxDetailRow({ txId, total, onReprint }: { txId: string; total: number; 
 // ── PRINTER MINI MODAL ────────────────────────────────────────
 function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () => void }) {
   const key = `printer_config_${storeId}`
-  const [printMode, setPrintMode] = useState<'browser'|'rawbt'>(() => {
+  const [printMode, setPrintMode] = useState<'browser'|'rawbt'|'server'>(() => {
     try { return JSON.parse(localStorage.getItem(key)||'{}').printMode||'browser' } catch { return 'browser' }
   })
   const [autoPrint, setAutoPrint] = useState<boolean>(() => {
     try { return JSON.parse(localStorage.getItem(key)||'{}').autoPrint===true } catch { return false }
   })
+  const [serverUrl, setServerUrl] = useState<string>(() => {
+    try { return JSON.parse(localStorage.getItem(key)||'{}').serverUrl||'http://localhost:5000' } catch { return 'http://localhost:5000' }
+  })
+  const [serverStatus, setServerStatus] = useState<'unknown'|'ok'|'error'>('unknown')
   const [saved, setSaved] = useState(false)
+
+  async function testServer() {
+    try {
+      const res = await fetch(`${serverUrl}/health`, { signal: AbortSignal.timeout(3000) })
+      const data = await res.json()
+      setServerStatus('ok')
+      toast.success(`Terhubung ke printer: ${data.printer}`)
+    } catch {
+      setServerStatus('error')
+      toast.error('Print server tidak ditemukan')
+    }
+  }
+
   function handleSave() {
-    localStorage.setItem(key, JSON.stringify({ printMode, autoPrint }))
+    localStorage.setItem(key, JSON.stringify({ printMode, autoPrint, serverUrl }))
     setSaved(true); setTimeout(() => { setSaved(false); onClose() }, 1000)
     toast.success('Setting printer disimpan')
   }
+
+  const MODES = [
+    { v: 'browser', l: '🖥️ Browser Print (USB/LAN)', d: 'Dialog print browser — untuk printer USB di PC' },
+    { v: 'server',  l: '⚡ Print Server (Windows)',   d: 'Print langsung tanpa dialog — install print_server.py' },
+    { v: 'rawbt',   l: '📱 RawBT (Bluetooth)',        d: 'Android + printer thermal Bluetooth' },
+  ]
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50 p-4">
       <div className="bg-white rounded-2xl w-full max-w-md shadow-lg">
@@ -1221,16 +1245,39 @@ function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () =
         </div>
         <div className="px-5 py-4 space-y-4">
           <div className="space-y-2">
-            {[{v:'browser',l:'🖥️ Browser Print (USB)',d:'Buka dialog print browser'},{v:'rawbt',l:'📱 RawBT (Bluetooth)',d:'Android + printer thermal Bluetooth'}].map(m => (
+            {MODES.map(m => (
               <button key={m.v} onClick={() => setPrintMode(m.v as any)}
-                className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left ${printMode===m.v?m.v==='rawbt'?'border-blue-600 bg-blue-50':'border-gray-900 bg-gray-50':'border-gray-200'}`}>
-                <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${printMode===m.v?m.v==='rawbt'?'border-blue-600':'border-gray-900':'border-gray-300'}`}>
-                  {printMode===m.v && <div className={`w-2 h-2 rounded-full ${m.v==='rawbt'?'bg-blue-600':'bg-gray-900'}`}/>}
+                className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left ${printMode===m.v?'border-gray-900 bg-gray-50':'border-gray-200'}`}>
+                <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${printMode===m.v?'border-gray-900':'border-gray-300'}`}>
+                  {printMode===m.v && <div className="w-2 h-2 rounded-full bg-gray-900"/>}
                 </div>
                 <div><p className="text-sm font-semibold text-gray-900">{m.l}</p><p className="text-xs text-gray-500">{m.d}</p></div>
               </button>
             ))}
           </div>
+
+          {printMode === 'server' && (
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 space-y-2">
+              <p className="text-xs font-medium text-blue-800">URL Print Server</p>
+              <div className="flex gap-2">
+                <input className="input flex-1 text-sm" value={serverUrl}
+                  onChange={e => setServerUrl(e.target.value)}
+                  placeholder="http://localhost:5000" />
+                <button onClick={testServer}
+                  className="px-3 py-2 text-xs font-medium bg-blue-600 text-white rounded-lg">
+                  Test
+                </button>
+              </div>
+              {serverStatus === 'ok' && <p className="text-xs text-green-600">✓ Terhubung</p>}
+              {serverStatus === 'error' && (
+                <div className="text-xs text-red-600 space-y-0.5">
+                  <p>✗ Tidak terhubung</p>
+                  <p className="text-gray-500">Pastikan print_server.py sudah jalan di PC kasir</p>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center justify-between py-2 border-t border-gray-100">
             <div><p className="text-sm font-medium text-gray-900">Print Otomatis</p><p className="text-xs text-gray-400">Langsung print tanpa pop up struk</p></div>
             <button onClick={() => setAutoPrint(!autoPrint)} className={`w-11 h-6 rounded-full transition-colors relative ${autoPrint?'bg-gray-900':'bg-gray-200'}`}>
@@ -1248,6 +1295,13 @@ function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () =
 function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; printMode?: string; autoPrint?: boolean; onClose: () => void }) {
   const orderTypeLabel: Record<string,string> = { dine_in:'Dine In', take_away:'Take Away', online:'Online' }
   const payLabel: Record<string,string> = { cash:'Tunai', qris:'QRIS', transfer:'Transfer', gopay:'GoPay', grab:'GrabPay', shopeefood:'ShopeePay' }
+  // Ambil serverUrl dari localStorage
+  const serverUrl = (() => {
+    try {
+      const cfg = JSON.parse(localStorage.getItem(`printer_config_${data.storeName}`) || '{}')
+      return cfg.serverUrl || 'http://localhost:5000'
+    } catch { return 'http://localhost:5000' }
+  })()
 
   // ── FORMAT STRUK — mengacu sistem lama (38 karakter, kertas 76mm) ──
   const W   = 32  // 32 karakter untuk EPSON TM-U220
@@ -1427,7 +1481,36 @@ pre {
     }, 1000)
   }
 
-  useEffect(() => { if (autoPrint) setTimeout(()=>{ if (printMode==='rawbt') handleRawBT(); else handlePrint() },300) }, [])
+  async function handlePrintServer() {
+    const lines = buildReceiptLines()
+    const txt   = lines.join('\n')
+    try {
+      const res = await fetch(`${serverUrl}/print`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: txt }),
+        signal: AbortSignal.timeout(5000),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        toast.success('Print berhasil!')
+      } else {
+        toast.error('Print gagal: ' + data.error)
+      }
+    } catch (e) {
+      toast.error('Print server tidak merespons. Pastikan print_server.py jalan.')
+      // Fallback ke browser print
+      handlePrint()
+    }
+  }
+
+  useEffect(() => {
+    if (autoPrint) setTimeout(() => {
+      if (printMode === 'rawbt') handleRawBT()
+      else if (printMode === 'server') handlePrintServer()
+      else handlePrint()
+    }, 300)
+  }, [])
 
   const now = new Date()
   return (
@@ -1474,9 +1557,9 @@ pre {
           </div>
         </div>
         <div className="px-4 pb-4 space-y-2 flex-shrink-0">
-          <button onClick={printMode==='rawbt'?handleRawBT:handlePrint}
-            className={`w-full py-3 rounded-xl text-white text-sm font-semibold ${printMode==='rawbt'?'bg-blue-600':'bg-gray-900'}`}>
-            {printMode==='rawbt'?'📱 Print via RawBT':'🖨️ Print Struk'}
+          <button onClick={printMode==='rawbt' ? handleRawBT : printMode==='server' ? handlePrintServer : handlePrint}
+            className={`w-full py-3 rounded-xl text-white text-sm font-semibold ${printMode==='rawbt'?'bg-blue-600':printMode==='server'?'bg-green-700':'bg-gray-900'}`}>
+            {printMode==='rawbt'?'📱 Print via RawBT':printMode==='server'?'⚡ Print via Server':'🖨️ Print Struk'}
           </button>
           <button onClick={onClose} className="w-full py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Tutup</button>
         </div>

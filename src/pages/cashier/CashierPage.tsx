@@ -309,28 +309,46 @@ export default function CashierPage() {
     return s
   }, 0)
 
-  // FIX #7: diskon paket otomatis — kelipatan qty_total puff dapat diskon per pcs
+  // FIX: diskon paket otomatis — hitung TOTAL qty semua produk dalam paket
   // Contoh: paket 5 puff = 60.000, harga satuan 14.000 → diskon 2.000/pcs
-  // Berlaku otomatis, tidak perlu klik tombol Paket
+  // Coklat 2 + Durian 1 + Green Tea 2 = 5 total → 1 paket → diskon Rp 10.000
   const paketDiscount = useMemo(() => {
     if (!pakets.length || !Object.keys(paketProducts).length) return 0
     let total = 0
-    for (const item of items) {
-      // Cari paket yang mengandung produk ini
-      const matchingPaket = pakets.find(pkt =>
-        paketProducts[pkt.id]?.includes(item.product.id)
-      )
-      if (!matchingPaket) continue
-      const qtyPerPaket  = matchingPaket.qty_total
-      const hargaPaket   = matchingPaket.price
-      const hargaSatuan  = item.unit_price
-      const hargaPerPcsDalamPaket = hargaPaket / qtyPerPaket
-      const discPerPcs   = hargaSatuan - hargaPerPcsDalamPaket
-      if (discPerPcs <= 0) continue
-      // Hanya kelipatan penuh yang dapat diskon
-      const qtyPaket     = Math.floor(item.qty / qtyPerPaket) * qtyPerPaket
-      total += qtyPaket * discPerPcs
+
+    for (const pkt of pakets) {
+      const productIds    = paketProducts[pkt.id] || []
+      if (!productIds.length) continue
+
+      // Hitung total qty semua produk yang masuk paket ini
+      const totalQtyInPaket = items
+        .filter(item => productIds.includes(item.product.id))
+        .reduce((s, item) => s + item.qty, 0)
+
+      const fullPakets      = Math.floor(totalQtyInPaket / pkt.qty_total)
+      if (fullPakets <= 0) continue
+
+      const qtyDapat   = fullPakets * pkt.qty_total
+      const hargaNormal = items
+        .filter(item => productIds.includes(item.product.id))
+        .reduce((s, item) => {
+          // Ambil proporsi qty yang dapat diskon
+          const proportion = Math.min(item.qty, qtyDapat) / qtyDapat
+          return s + item.unit_price * item.qty * proportion
+        }, 0)
+
+      // Diskon = harga normal - harga paket
+      const hargaSetelahPaket = fullPakets * pkt.price
+      // Hitung rata-rata harga normal per pcs yang masuk paket
+      const avgHargaNormal = items
+        .filter(item => productIds.includes(item.product.id))
+        .reduce((s, item) => s + item.unit_price, 0) /
+        items.filter(item => productIds.includes(item.product.id)).length || pkt.price / pkt.qty_total
+
+      const discountTotal = qtyDapat * avgHargaNormal - hargaSetelahPaket
+      if (discountTotal > 0) total += discountTotal
     }
+
     return Math.round(total)
   }, [items, pakets, paketProducts])
 
@@ -557,10 +575,18 @@ export default function CashierPage() {
           const isBuy1Get1   = (i.product as any).promo_buy1get1 && i.qty >= 2
           const b1g1Discount = isBuy1Get1 ? Math.floor(i.qty / 2) * i.unit_price : 0
           // Hitung diskon paket per item
-          const matchPaket   = pakets.find(pkt => paketProducts[pkt.id]?.includes(i.product.id))
-          const itemPaketDisc = matchPaket
-            ? Math.floor(i.qty / matchPaket.qty_total) * matchPaket.qty_total * (i.unit_price - matchPaket.price / matchPaket.qty_total)
-            : 0
+          const matchPaket = pakets.find(pkt => paketProducts[pkt.id]?.includes(i.product.id))
+          // Hitung diskon paket proporsional per item
+          let itemPaketDisc = 0
+          if (matchPaket) {
+            const productIds   = paketProducts[matchPaket.id] || []
+            const totalQty     = items.filter(x => productIds.includes(x.product.id)).reduce((s, x) => s + x.qty, 0)
+            const fullPakets   = Math.floor(totalQty / matchPaket.qty_total)
+            const qtyDapat     = fullPakets * matchPaket.qty_total
+            const discPerPaket = qtyDapat * i.unit_price - fullPakets * matchPaket.price
+            const proportion   = (i.qty / totalQty)
+            itemPaketDisc      = Math.round(Math.max(0, discPerPaket * proportion))
+          }
           const totalItemDisc = isBuy1Get1 ? b1g1Discount : (((i.product as any).promo_discount || 0) * i.qty + itemPaketDisc)
           return {
             name: i.product.name, qty: i.qty, price: i.unit_price,

@@ -433,13 +433,13 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
         notes: notes || undefined, created_by: userId, created_at: now(),
       }
       await db.production_logs.add(log)
-      await supabase.from('production_logs').insert(log)
+      await supabase.from('production_logs').upsert(log)
 
       for (const ri of recipeItems) {
         const qtyUsed = ri.qty_per_batch * Number(batchCount)
         const logMat: any = { id: generateId(), log_id: logId, material_id: ri.material_id, qty_used: qtyUsed }
         await db.production_log_materials.add(logMat)
-        await supabase.from('production_log_materials').insert(logMat)
+        await supabase.from('production_log_materials').upsert(logMat)
 
         const ps = await db.production_stock.where('material_id').equals(ri.material_id).first()
         if (ps) {
@@ -489,7 +489,7 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
       if (existing2) {
         await supabase.from('finished_goods_stock').update({ qty_on_hand: newFgsQty, hpp_per_unit: hppPerUnit, last_updated: now() }).eq('id', fgsId)
       } else {
-        const { error } = await supabase.from('finished_goods_stock').insert(fgsData)
+        const { error } = await supabase.from('finished_goods_stock').upsert(fgsData)
         if (error) await supabase.from('finished_goods_stock').upsert(fgsData)
       }
 
@@ -593,12 +593,12 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
       const mutId = generateId()
       const mut: any = { id: mutId, mutation_type: type, destination_id: destId || undefined, destination_name: destName || undefined, notes: notes || undefined, status: 'confirmed', created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId }
       await db.production_mutations.add(mut)
-      await supabase.from('production_mutations').insert(mut)
+      await supabase.from('production_mutations').upsert(mut)
       for (const item of valid) {
         const fg = fgStocks?.find(s => s.product_id === item.product_id)
         const mi: any = { id: generateId(), mutation_id: mutId, product_id: item.product_id, product_name: fg?.product_name || '', qty: Number(item.qty) }
         await db.production_mutation_items.add(mi)
-        await supabase.from('production_mutation_items').insert(mi)
+        await supabase.from('production_mutation_items').upsert(mi)
         if (fg) {
           const isReturn = type === 'return_from_store'
           const newQty   = isReturn ? fg.qty_on_hand + Number(item.qty) : Math.max(0, fg.qty_on_hand - Number(item.qty))
@@ -905,7 +905,7 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
         notes: notes || undefined, created_by: userId, store_id: storeId, created_at: now(),
       }
       await db.production_logs.add(logData)
-      const { error } = await supabase.from('production_logs').insert(logData)
+      const { error } = await supabase.from('production_logs').upsert(logData)
       if (error) console.error('[PTOKO LOG ERROR]', error)
 
       const recipeItems = await db.store_recipe_items.where('recipe_id').equals(recipeId).toArray()
@@ -921,7 +921,7 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
         }
         const lm: any = { id: generateId(), log_id: logId, material_id: ri.material_id, qty_used: used }
         await db.production_log_materials.add(lm)
-        supabase.from('production_log_materials').insert(lm).then(() => {})
+        supabase.from('production_log_materials').upsert(lm).then(() => {})
       }
 
       const productName = (selectedRecipe as any)?.product_name || ''
@@ -938,7 +938,7 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
           } else {
             const newStock: any = { id: generateId(), store_id: storeId, ingredient_id: mat.id, material_id: mat.id, qty_on_hand: newQty, avg_cost: 0, last_updated: now() }
             await db.stock.add(newStock)
-            supabase.from('stock').insert(newStock).then(() => {})
+            supabase.from('stock').upsert(newStock).then(() => {})
           }
         }
       }

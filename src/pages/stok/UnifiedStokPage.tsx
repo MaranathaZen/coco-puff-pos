@@ -403,7 +403,7 @@ function FgsEditForm({ fgs, onClose }: { fgs: any; onClose: () => void }) {
       if (fgs) {
         await supabase.from('finished_goods_stock').update({ qty_on_hand: data.qty_on_hand, hpp_per_unit: data.hpp_per_unit, last_updated: data.last_updated }).eq('id', fgs.id)
       } else {
-        await supabase.from('finished_goods_stock').insert(data)
+        await supabase.from('finished_goods_stock').upsert(data)
       }
       toast.success(fgs ? 'Stok produk jadi diupdate' : 'Produk jadi ditambahkan')
       onClose()
@@ -747,7 +747,7 @@ function StokAwalTokoForm({ storeId, onClose }: { storeId: string; onClose: () =
         if (existing) {
           await supabase.from('stock').update({ qty_on_hand: data.qty_on_hand, avg_cost: data.avg_cost }).eq('id', existing.id)
         } else {
-          await supabase.from('stock').insert(data)
+          await supabase.from('stock').upsert(data)
         }
       }
       toast.success(`${valid.length} item stok toko disimpan`)
@@ -1027,10 +1027,10 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
         const mutId = generateId()
         const mut   = { id: mutId, mutation_type: 'opening_stock', destination_name: 'Saldo Awal', notes: notes || 'Stok awal', status: 'confirmed', created_by: 'system', created_at: `${date}T00:00:00.000Z`, confirmed_at: now(), confirmed_by: 'system' }
         await db.warehouse_mutations.add(mut as any)
-        await supabase.from('warehouse_mutations').insert(mut)
+        await supabase.from('warehouse_mutations').upsert(mut)
         const mi = { id: generateId(), mutation_id: mutId, material_id: item.material_id, qty, unit_cost: cost }
         await db.warehouse_mutation_items.add(mi)
-        await supabase.from('warehouse_mutation_items').insert(mi)
+        await supabase.from('warehouse_mutation_items').upsert(mi)
       }
       toast.success(`${valid.length} item stok awal disimpan`)
       onClose()

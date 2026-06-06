@@ -190,7 +190,7 @@ function ResepProduksiForm({ recipe, isOwner, storeId, onClose }: { recipe: any;
       for (const item of valid) {
         const ri: any = { id:item.id||generateId(), recipe_id:recipeId, material_id:item.material_id, qty_per_batch:Number(item.qty) }
         await db.production_recipe_items.add(ri)
-        await supabase.from('production_recipe_items').insert(ri)
+        await supabase.from('production_recipe_items').upsert(ri)
       }
       toast.success(recipe?'Resep diupdate':'Resep ditambahkan')
       // FIX: pakai storeId dari prop, bukan activeStoreId yang tidak ada di scope ini

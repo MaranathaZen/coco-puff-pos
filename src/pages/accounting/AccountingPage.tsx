@@ -393,7 +393,7 @@ function SetoranForm({ storeId, userId, onClose, onSaved }: {
         created_by:   userId,
         created_at:   now(),
       }
-      const { error } = await supabase.from('cash_deposits').insert(data)
+      const { error } = await supabase.from('cash_deposits').upsert(data)
       if (error) throw error
       toast.success('Setoran dicatat')
       onSaved(); onClose()
@@ -626,7 +626,7 @@ function TutupBulanTab({ userId }: { userId: string }) {
       if (existingPeriod) {
         await supabase.from('accounting_periods').update(periodData).eq('id', existingPeriod.id)
       } else {
-        await supabase.from('accounting_periods').insert(periodData)
+        await supabase.from('accounting_periods').upsert(periodData)
       }
       toast.success(`${store.name} — periode ${month}/${year} ditutup`)
       loadPeriods()

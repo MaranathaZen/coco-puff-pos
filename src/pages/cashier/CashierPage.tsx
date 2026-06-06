@@ -388,8 +388,9 @@ export default function CashierPage() {
       const newStatus  = isOwnerMgr ? 'voided' : 'void_requested'
       const updated: any = { ...voidTx, status: newStatus, void_reason: voidReason.trim(), voided_by: user!.id, voided_at: now() }
       await db.transactions.put(updated)
-      await supabase.from('transactions').update({ status: newStatus, void_reason: voidReason.trim(), voided_by: user!.id, voided_at: updated.voided_at }).eq('id', voidTx.id)
-      // FIX: kembalikan stok kalau owner/manager langsung void
+      // FIX: pakai upsert bukan update — transaksi mungkin belum ada di Supabase
+      const { error } = await supabase.from('transactions').upsert(updated)
+      if (error) console.error('[VOID ERROR]', error)
       if (isOwnerMgr) {
         await restoreStockFromVoid(voidTx.id, STORE_ID)
         toast.success(`Transaksi ${voidTx.receipt_no} di-void & stok dikembalikan`)
@@ -397,7 +398,10 @@ export default function CashierPage() {
         toast.success(`Request void ${voidTx.receipt_no} dikirim ke owner`)
       }
       setShowVoidModal(false); setVoidTx(null); setVoidReason('')
-    } catch { toast.error('Gagal void transaksi') }
+    } catch (e) {
+      console.error('[VOID]', e)
+      toast.error('Gagal void transaksi')
+    }
     finally { setIsVoiding(false) }
   }
 
@@ -816,18 +820,17 @@ export default function CashierPage() {
                         <div className="flex gap-1">
                           <button onClick={async e => {
                             e.stopPropagation()
-                            // FIX: kembalikan stok saat void disetujui
                             await restoreStockFromVoid(tx.id, STORE_ID)
                             const upd: any = { ...tx, status: 'voided' }
                             await db.transactions.put(upd)
-                            await supabase.from('transactions').update({ status: 'voided' }).eq('id', tx.id)
+                            await supabase.from('transactions').upsert(upd)
                             toast.success('Void disetujui & stok dikembalikan')
                           }} className="text-xs text-white bg-red-500 px-2 py-0.5 rounded-lg">✓</button>
                           <button onClick={async e => {
                             e.stopPropagation()
                             const upd: any = { ...tx, status: 'completed' }
                             await db.transactions.put(upd)
-                            await supabase.from('transactions').update({ status: 'completed' }).eq('id', tx.id)
+                            await supabase.from('transactions').upsert(upd)
                             toast.success('Ditolak')
                           }} className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-lg">✗</button>
                         </div>

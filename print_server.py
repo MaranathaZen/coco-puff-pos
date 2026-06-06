@@ -73,11 +73,17 @@ def generate_cert():
         return False
 
 def build_escpos(text: str) -> bytes:
-    """Plain UTF-8 tanpa ESC commands — persis seperti AppSheet"""
-    # AppSheet hanya encode utf-8, tidak ada ESC/P sama sekali
+    """Plain UTF-8 dengan ESC/P untuk fix margin atas"""
     data = bytearray()
+    # Reset printer
+    data += ESC_INIT
+    # Set top margin = 0 (ESC l n — set left margin, tapi untuk top pakai form feed settings)
+    # Skip paper to top of form
+    data += b'\x1b\x43\x00'   # ESC C 0 — set page length to max
+    data += b'\x1b\x4e\x00'   # ESC N 0 — disable skip over perforation
+    # Langsung kirim teks
     data += text.encode('utf-8', errors='replace')
-    data += b'\n' * 7
+    data += b'\n' * 4
     return bytes(data)
 
 def print_raw(text: str, printer_name: str = ""):

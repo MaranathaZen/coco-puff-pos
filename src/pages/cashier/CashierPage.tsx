@@ -1305,12 +1305,14 @@ function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () =
 function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; printMode?: string; autoPrint?: boolean; onClose: () => void }) {
   const orderTypeLabel: Record<string,string> = { dine_in:'Dine In', take_away:'Take Away', online:'Online' }
   const payLabel: Record<string,string> = { cash:'Tunai', qris:'QRIS', transfer:'Transfer', gopay:'GoPay', grab:'GrabPay', shopeefood:'ShopeePay' }
-  // Ambil serverUrl dari localStorage
+  // Ambil serverUrl dari localStorage — key pakai storeId (sama dengan PrinterMiniModal)
   const serverUrl = (() => {
     try {
-      const cfg = JSON.parse(localStorage.getItem(`printer_config_${data.storeName}`) || '{}')
+      const keyById   = `printer_config_${data.storeId}`
+      const keyByName = `printer_config_${data.storeName}`
+      const cfg = JSON.parse(localStorage.getItem(keyById) || localStorage.getItem(keyByName) || '{}')
       return cfg.serverUrl || 'https://localhost:5000'
-    } catch { return 'http://localhost:5000' }
+    } catch { return 'https://localhost:5000' }
   })()
 
   // ── FORMAT STRUK — mengacu sistem lama (38 karakter, kertas 76mm) ──

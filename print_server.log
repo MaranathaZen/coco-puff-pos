@@ -5,3 +5,36 @@
 [2026-06-06 11:42:22] SSL cert dibuat
 [2026-06-06 11:42:22] HTTPS mode: https://localhost:5000
 [2026-06-06 11:42:22] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost
+[2026-06-06 11:43:50] === Coco Puff Print Server v2.0 ===
+[2026-06-06 11:43:50] HTTPS mode: https://localhost:5000
+[2026-06-06 11:43:50] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost
+[2026-06-06 11:48:15] === Coco Puff Print Server v2.0 ===
+[2026-06-06 11:48:15] HTTPS mode: https://localhost:5000
+[2026-06-06 11:48:15] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost
+[2026-06-06 11:53:09] === Coco Puff Print Server v2.0 ===
+[2026-06-06 11:53:09] HTTPS mode: https://localhost:5000
+[2026-06-06 11:53:09] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost
+[2026-06-06 11:55:43] === Coco Puff Print Server v2.0 ===
+[2026-06-06 11:55:43] HTTPS mode: https://localhost:5000
+[2026-06-06 11:55:43] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost
+[2026-06-06 11:56:02] === Coco Puff Print Server v2.0 ===
+[2026-06-06 11:56:02] HTTPS mode: https://localhost:5000
+[2026-06-06 11:56:02] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost
+[2026-06-06 11:56:33] === Coco Puff Print Server v2.0 ===
+[2026-06-06 11:56:33] HTTPS mode: https://localhost:5000
+[2026-06-06 11:56:33] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost
+[2026-06-06 12:01:04] === Coco Puff Print Server v2.0 ===
+[2026-06-06 12:01:04] HTTPS mode: https://localhost:5000
+[2026-06-06 12:01:04] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost
+[2026-06-06 12:02:52] === Coco Puff Print Server v2.0 ===
+[2026-06-06 12:02:52] HTTPS mode: https://localhost:5000
+[2026-06-06 12:02:52] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost
+[2026-06-06 12:04:14] === Coco Puff Print Server v2.0 ===
+[2026-06-06 12:04:14] HTTPS mode: https://localhost:5000
+[2026-06-06 12:04:14] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost
+[2026-06-06 12:05:35] === Coco Puff Print Server v2.0 ===
+[2026-06-06 12:05:35] HTTPS mode: https://localhost:5000
+[2026-06-06 12:05:35] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost
+[2026-06-06 12:05:47] Raw bytes (first 200): b'TEST PRINT\n\n\n\n\n\n\n'
+[2026-06-06 12:05:47] Text sample: 'TEST PRINT'
+[2026-06-06 12:05:47] Print OK

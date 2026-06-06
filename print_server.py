@@ -73,26 +73,23 @@ def generate_cert():
         return False
 
 def build_escpos(text: str) -> bytes:
-    """Format teks ke ESC/P bytes untuk dot matrix"""
-    data = bytearray(ESC_INIT)
-    for line in text.split('\n'):
-        stripped = line.strip()
-        is_bold  = (all(c in '=-' for c in stripped) and len(stripped) > 3) or stripped == 'TOTAL'
-        if is_bold: data += ESC_BOLD_ON
-        try:    data += line.encode('cp437', errors='replace')
-        except: data += line.encode('latin-1', errors='replace')
-        data += b'\r\n'
-        if is_bold: data += ESC_BOLD_OFF
-    data += b'\n' * 4
-    data += GS_CUT
+    """Plain UTF-8 tanpa ESC commands — persis seperti AppSheet"""
+    # AppSheet hanya encode utf-8, tidak ada ESC/P sama sekali
+    data = bytearray()
+    data += text.encode('utf-8', errors='replace')
+    data += b'\n' * 7
     return bytes(data)
 
 def print_raw(text: str, printer_name: str = ""):
     try:
         import win32print
         pname = printer_name or win32print.GetDefaultPrinter()
-        log(f"Print ke: {pname}")
         raw   = build_escpos(text)
+        
+        # Log 200 bytes pertama untuk debug
+        log(f"Raw bytes (first 200): {raw[:200]}")
+        log(f"Text sample: {repr(text[:100])}")
+        
         hp    = win32print.OpenPrinter(pname)
         try:
             win32print.StartDocPrinter(hp, 1, ("Struk", None, "RAW"))

@@ -561,21 +561,48 @@ export default function CashierPage() {
             asep,
           ]
           for (const item of txItems) {
-            const totalFmt = formatRupiah(item.unit_price * ((item.qty_eceran||0)+(item.qty_dus||0)))
+            const totalFmt = fmtA(item.unit_price * ((item.qty_eceran||0)+(item.qty_dus||0)))
             const leftPart = `${(item.qty_eceran||0)+(item.qty_dus||0)}x ${item.product_name}`.substring(0, AW - totalFmt.length - 1)
             aLines.push(leftPart.padEnd(AW - totalFmt.length) + totalFmt)
           }
           aLines.push(asep)
-          if (ppnAmount > 0) aLines.push(arow(`PPN ${ppnPct}%`, '+' + formatRupiah(ppnAmount)))
+          if (ppnAmount > 0) aLines.push(arow(`PPN ${ppnPct}%`, '+' + fmtA(ppnAmount)))
           aLines.push(ASEP)
-          aLines.push(arow('TOTAL', formatRupiah(grandTotal)))
+          aLines.push(arow('TOTAL', fmtA(grandTotal)))
           aLines.push(ASEP)
-          aLines.push(arow(finalPay === 'cash' ? 'Bayar (Cash)' : `Bayar (${finalPay})`, formatRupiah(paidAmt)))
-          if (paidAmt > grandTotal) aLines.push(arow('Kembali', formatRupiah(paidAmt - grandTotal)))
+          aLines.push(arow(finalPay === 'cash' ? 'Bayar (Cash)' : `Bayar (${finalPay})`, fmtA(paidAmt)))
+          if (paidAmt > grandTotal) aLines.push(arow('Kembali', fmtA(paidAmt - grandTotal)))
           aLines.push('', actr('Terima kasih atas kunjungan Anda'), '', '', '', '')
+
+          // Format Rupiah ASCII untuk auto print
+          const fmtA = (n: number) => {
+            const s = String(Math.round(n))
+            let r = ''
+            for (let i = 0; i < s.length; i++) {
+              if (i > 0 && (s.length - i) % 3 === 0) r += '.'
+              r += s[i]
+            }
+            return 'Rp ' + r
+          }
 
           if (printModeNow === 'rawbt') {
             window.location.href = `rawbt:${encodeURIComponent(aLines.join('\n'))}`
+          } else if (printModeNow === 'server') {
+            // Print via server — langsung kirim tanpa popup
+            const url = (() => {
+              try {
+                const sid = STORE_ID || userStoreId
+                const cfg = JSON.parse(localStorage.getItem(`printer_config_${sid}`) || '{}')
+                return cfg.serverUrl || 'https://localhost:5000'
+              } catch { return 'https://localhost:5000' }
+            })()
+            fetch(`${url}/print`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: aLines.join('\n') }),
+            }).then(r => r.json()).then(d => {
+              if (!d.ok) toast.error('Print gagal: ' + d.error)
+            }).catch(() => toast.error('Print server tidak merespons'))
           } else {
             const html2 = `<html><head><style>*{margin:0;padding:0;}html,body{width:76mm;margin:0;padding:0;}pre{font-family:'Courier New',Courier,monospace;font-size:10pt;line-height:1.15;white-space:pre;width:76mm;}@page{margin:0mm;size:76mm auto;}</style></head><body><pre>${aLines.join('\n')}</pre></body></html>`
             const iframe2 = document.createElement('iframe')

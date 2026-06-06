@@ -99,10 +99,13 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
   const isGudang   = role === 'gudang'
   const isOwnerMgr = ['owner','manager'].includes(role)
   const canApprove = isGudang || isOwnerMgr
-  const [showForm, setShowForm] = useState(false)
+  const [showForm,    setShowForm]    = useState(false)
+  const [showFilters, setShowFilters] = useState(false)
 
-  // FIX: default pending untuk approver (gudang/owner), all untuk kasir
-  const [filterStatus, setFilterStatus] = useState<'all'|'pending'|'approved'>(canApprove ? 'pending' : 'all')
+  const [filterStatus,    setFilterStatus]    = useState<'all'|'pending'|'approved'|'rejected'>(canApprove ? 'pending' : 'all')
+  const [filterStore,     setFilterStore]     = useState('semua')
+  const [filterDateFrom,  setFilterDateFrom]  = useState('')
+  const [filterDateTo,    setFilterDateTo]    = useState('')
 
   const stores = useLiveQuery(() =>
     db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray()
@@ -114,8 +117,7 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
   async function loadDeposits() {
     setLoading(true)
     try {
-      // FIX: gudang/owner lihat semua toko, kasir hanya toko sendiri
-      let q = supabase.from('cash_deposits').select('*').order('created_at', { ascending: false }).limit(200)
+      let q = supabase.from('cash_deposits').select('*').order('deposit_date', { ascending: false }).order('created_at', { ascending: false }).limit(300)
       if (!canApprove) q = q.eq('store_id', storeId)
       const { data } = await q
       setDeposits(data || [])
@@ -126,13 +128,35 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
   useEffect(() => { loadDeposits() }, [storeId])
 
   const filtered = useMemo(() => {
-    if (filterStatus === 'all') return deposits
-    return deposits.filter(d => d.status === filterStatus)
-  }, [deposits, filterStatus])
+    return deposits.filter(d => {
+      if (filterStatus !== 'all' && d.status !== filterStatus) return false
+      if (filterStore !== 'semua' && d.store_id !== filterStore) return false
+      if (filterDateFrom && d.deposit_date < filterDateFrom) return false
+      if (filterDateTo   && d.deposit_date > filterDateTo)   return false
+      return true
+    })
+  }, [deposits, filterStatus, filterStore, filterDateFrom, filterDateTo])
+
+  // Group by tanggal untuk tampilan expand/collapse
+  const byDate = useMemo(() => {
+    const map: Record<string, typeof filtered> = {}
+    for (const d of filtered) {
+      if (!map[d.deposit_date]) map[d.deposit_date] = []
+      map[d.deposit_date].push(d)
+    }
+    return Object.entries(map).sort(([a], [b]) => b.localeCompare(a))
+  }, [filtered])
+
+  const [expandedDates, setExpandedDates] = useState<Record<string, boolean>>(() => ({
+    [new Date().toISOString().slice(0,10)]: true
+  }))
 
   const storeMap      = Object.fromEntries((stores||[]).map(s => [s.id, s.name]))
   const totalPending  = deposits.filter(d => d.status === 'pending').reduce((s, d) => s + d.amount, 0)
   const totalApproved = deposits.filter(d => d.status === 'approved').reduce((s, d) => s + d.amount, 0)
+
+  // Hitung total filtered
+  const totalFiltered = filtered.reduce((s, d) => s + d.amount, 0)
 
   async function handleApprove(dep: any) {
     if (!canApprove) return
@@ -153,8 +177,11 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
     loadDeposits()
   }
 
+  const today = new Date().toISOString().slice(0,10)
+
   return (
     <div className="p-4 space-y-3">
+      {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
           <div className="flex items-center gap-1.5 mb-1"><Clock size={13} className="text-amber-500" /><p className="text-xs text-amber-600">Menunggu Approve</p></div>
@@ -175,61 +202,165 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
         </button>
       )}
 
-      {canApprove && (
-        <div className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
-          <p className="text-xs text-blue-700 font-medium">Setoran dari semua toko</p>
-          <p className="text-xs text-blue-500">Klik ✓ untuk approve, ✗ untuk tolak.</p>
-        </div>
-      )}
+      {/* Filter bar */}
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        <button onClick={() => setShowFilters(!showFilters)}
+          className="w-full flex items-center justify-between px-4 py-2.5">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-700">Filter</span>
+            {(filterStatus !== (canApprove ? 'pending' : 'all') || filterStore !== 'semua' || filterDateFrom || filterDateTo) && (
+              <span className="text-[10px] bg-gray-900 text-white px-1.5 py-0.5 rounded-full font-medium">Aktif</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {filtered.length > 0 && (
+              <span className="text-xs text-gray-400">{filtered.length} · {formatRupiah(totalFiltered)}</span>
+            )}
+            <span className="text-gray-400 text-xs">{showFilters ? '▲' : '▼'}</span>
+          </div>
+        </button>
 
-      <div className="flex gap-1.5">
-        {(['all','pending','approved'] as const).map(s => (
-          <button key={s} onClick={() => setFilterStatus(s)}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-medium ${filterStatus===s?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
-            {s === 'all' ? 'Semua' : s === 'pending' ? 'Pending' : 'Disetujui'}
-          </button>
-        ))}
+        {showFilters && (
+          <div className="border-t border-gray-50 px-4 py-3 space-y-3">
+            {/* Filter Status */}
+            <div>
+              <p className="text-xs text-gray-400 mb-1.5">Status</p>
+              <div className="flex gap-1.5 flex-wrap">
+                {(['all','pending','approved','rejected'] as const).map(s => (
+                  <button key={s} onClick={() => setFilterStatus(s)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${filterStatus===s?'bg-gray-900 text-white border-gray-900':'bg-white text-gray-600 border-gray-200'}`}>
+                    {s==='all'?'Semua':s==='pending'?'Pending':s==='approved'?'Disetujui':'Ditolak'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Filter Toko — hanya untuk approver */}
+            {canApprove && stores && stores.length > 0 && (
+              <div>
+                <p className="text-xs text-gray-400 mb-1.5">Toko</p>
+                <div className="flex gap-1.5 flex-wrap">
+                  <button onClick={() => setFilterStore('semua')}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${filterStore==='semua'?'bg-gray-900 text-white border-gray-900':'bg-white text-gray-600 border-gray-200'}`}>
+                    Semua Toko
+                  </button>
+                  {stores.map(s => (
+                    <button key={s.id} onClick={() => setFilterStore(s.id)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${filterStore===s.id?'bg-gray-900 text-white border-gray-900':'bg-white text-gray-600 border-gray-200'}`}>
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Filter Tanggal */}
+            <div>
+              <p className="text-xs text-gray-400 mb-1.5">Tanggal</p>
+              <div className="flex gap-2 items-center">
+                <input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)}
+                  className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-xs" />
+                <span className="text-xs text-gray-400">s/d</span>
+                <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)}
+                  className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-xs" />
+              </div>
+              {/* Quick date buttons */}
+              <div className="flex gap-1.5 mt-1.5">
+                {[
+                  { l: 'Hari ini', f: today,                                        t: today },
+                  { l: '7 Hari',   f: new Date(Date.now()-6*86400000).toISOString().slice(0,10), t: today },
+                  { l: 'Bulan ini',f: today.slice(0,7)+'-01',                       t: today },
+                  { l: 'Semua',    f: '',                                            t: '' },
+                ].map(q => (
+                  <button key={q.l} onClick={() => { setFilterDateFrom(q.f); setFilterDateTo(q.t) }}
+                    className={`flex-1 py-1 text-[10px] rounded-lg border font-medium transition-colors ${
+                      filterDateFrom===q.f && filterDateTo===q.t
+                        ? 'bg-gray-900 text-white border-gray-900'
+                        : 'bg-white text-gray-600 border-gray-200'
+                    }`}>
+                    {q.l}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Reset filter */}
+            <button onClick={() => { setFilterStatus(canApprove?'pending':'all'); setFilterStore('semua'); setFilterDateFrom(''); setFilterDateTo('') }}
+              className="text-xs text-gray-400 underline">Reset filter</button>
+          </div>
+        )}
       </div>
 
+      {/* List setoran — grouped by tanggal */}
       {loading ? (
         <div className="bg-white rounded-xl border border-gray-100 py-8 text-center text-sm text-gray-400">Memuat...</div>
+      ) : byDate.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-100 py-10 text-center text-sm text-gray-400">
+          {filterStatus === 'pending' ? 'Tidak ada setoran pending' : 'Belum ada setoran'}
+        </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-          {filtered.map((d, idx) => (
-            <div key={d.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                    <p className="text-sm font-semibold text-gray-900">{formatRupiah(d.amount)}</p>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-                      d.status==='approved' ? 'bg-green-100 text-green-700' :
-                      d.status==='rejected' ? 'bg-red-100 text-red-600' :
-                      'bg-amber-100 text-amber-700'}`}>
-                      {d.status==='approved'?'✓ Disetujui':d.status==='rejected'?'✗ Ditolak':'⏳ Pending'}
+        <div className="space-y-2">
+          {byDate.map(([date, items]) => {
+            const isExpanded = expandedDates[date] !== undefined ? expandedDates[date] : date === today
+            const dateTotal  = items.reduce((s, d) => s + d.amount, 0)
+            const datePending = items.filter(d => d.status === 'pending').length
+            return (
+              <div key={date} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                {/* Date header */}
+                <button onClick={() => setExpandedDates(prev => ({ ...prev, [date]: !isExpanded }))}
+                  className="w-full flex items-center justify-between px-4 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-gray-700">
+                      {new Date(date + 'T00:00:00').toLocaleDateString('id-ID', { weekday:'short', day:'numeric', month:'short', year:'numeric' })}
                     </span>
+                    {datePending > 0 && (
+                      <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">
+                        {datePending} pending
+                      </span>
+                    )}
                   </div>
-                  <p className="text-xs text-gray-400">
-                    {canApprove && storeMap[d.store_id] ? `${storeMap[d.store_id]} · ` : ''}
-                    {new Date(d.deposit_date).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})}
-                  </p>
-                  {d.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {d.notes}</p>}
-                </div>
-                {canApprove && d.status === 'pending' && (
-                  <div className="flex gap-1.5 ml-2 flex-shrink-0">
-                    <button onClick={() => handleApprove(d)}
-                      className="px-2.5 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg">✓</button>
-                    <button onClick={() => handleReject(d)}
-                      className="px-2.5 py-1.5 bg-red-100 text-red-600 text-xs font-medium rounded-lg">✗</button>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-gray-500">{formatRupiah(dateTotal)}</span>
+                    <span className="text-gray-300 text-xs">{isExpanded ? '▲' : '▼'}</span>
+                  </div>
+                </button>
+
+                {isExpanded && (
+                  <div className="border-t border-gray-50">
+                    {items.map((d, idx) => (
+                      <div key={d.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                              <p className="text-sm font-semibold text-gray-900">{formatRupiah(d.amount)}</p>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                d.status==='approved' ? 'bg-green-100 text-green-700' :
+                                d.status==='rejected' ? 'bg-red-100 text-red-600' :
+                                'bg-amber-100 text-amber-700'}`}>
+                                {d.status==='approved'?'✓ Disetujui':d.status==='rejected'?'✗ Ditolak':'⏳ Pending'}
+                              </span>
+                            </div>
+                            {canApprove && storeMap[d.store_id] && (
+                              <p className="text-xs font-medium text-gray-600">{storeMap[d.store_id]}</p>
+                            )}
+                            {d.notes && <p className="text-xs text-gray-400 italic mt-0.5">📝 {d.notes}</p>}
+                          </div>
+                          {canApprove && d.status === 'pending' && (
+                            <div className="flex gap-1.5 ml-2 flex-shrink-0">
+                              <button onClick={() => handleApprove(d)}
+                                className="px-2.5 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg">✓</button>
+                              <button onClick={() => handleReject(d)}
+                                className="px-2.5 py-1.5 bg-red-100 text-red-600 text-xs font-medium rounded-lg">✗</button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
-            </div>
-          ))}
-          {filtered.length === 0 && (
-            <div className="py-10 text-center text-sm text-gray-400">
-              {filterStatus === 'pending' ? 'Tidak ada setoran pending' : 'Belum ada setoran'}
-            </div>
-          )}
+            )
+          })}
         </div>
       )}
 

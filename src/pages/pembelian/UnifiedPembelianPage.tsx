@@ -70,6 +70,7 @@ export default function UnifiedPembelianPage() {
   const { user } = useAuthStore()
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
   const [syncing, setSyncing] = useState(false)
+  useEffect(() => { syncData() }, [])
 
   if (user?.role === 'produksi') {
     return (

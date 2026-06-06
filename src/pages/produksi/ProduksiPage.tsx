@@ -102,6 +102,7 @@ export default function ProduksiPage() {
   const [activeTab,      setActiveTab]      = useState<ProduksiTab>(defaultTab)
   const [isSyncing,      setIsSyncing]      = useState(false)
   const [isInitialLoad,  setIsInitialLoad]  = useState(true)
+  useEffect(() => { syncData() }, [])
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
 
   const hasLocalData = useLiveQuery(async () => {

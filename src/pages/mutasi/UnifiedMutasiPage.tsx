@@ -79,6 +79,7 @@ export default function UnifiedMutasiPage() {
   const { user } = useAuthStore()
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
   const [syncing, setSyncing] = useState(false)
+  useEffect(() => { syncData() }, [])
 
   async function syncData() {
     setSyncing(true)

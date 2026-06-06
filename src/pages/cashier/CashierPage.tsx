@@ -590,7 +590,8 @@ export default function CashierPage() {
           }
 
           // Build struk pakai format sama (38 karakter, 76mm)
-          const AW   = 35
+          // RawBT: lebar 28 char (58mm), server: 32 char (76mm)
+          const AW   = printModeNow === 'rawbt' ? 28 : 32
           const ASEP = '='.repeat(AW)
           const asep = '-'.repeat(AW)
           const actr = (s: string) => s.padStart(Math.floor((AW + Math.min(s.length,AW)) / 2)).padEnd(AW)
@@ -621,7 +622,7 @@ export default function CashierPage() {
           aLines.push('', actr('Terima kasih atas kunjungan Anda'), '', '', '', '')
 
           if (printModeNow === 'rawbt') {
-            window.location.href = `rawbt:${encodeURIComponent(aLines.join('\n'))}`
+            window.location.href = `rawbt://${encodeURIComponent(aLines.join('\n'))}`
           } else if (printModeNow === 'server') {
             // Print via server — langsung kirim tanpa popup
             const url = (() => {
@@ -1390,7 +1391,7 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
   })()
 
   // ── FORMAT STRUK — mengacu sistem lama (38 karakter, kertas 76mm) ──
-  const W   = 35  // 35 karakter untuk EPSON TM-U220 76mm
+  const W   = overrideW ?? 32  // 32 default; RawBT pakai 28, server pakai 32
   const SEP = '='.repeat(W)
   const sep = '-'.repeat(W)
 
@@ -1416,7 +1417,7 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
     return l + (sp > 0 ? ' '.repeat(sp) : ' ') + r
   }
 
-  function buildReceiptLines(): string[] {
+  function buildReceiptLines(overrideW?: number): string[] {
     const lines: string[] = []
     const now2 = new Date()
     const tgl  = now2.toLocaleDateString('id-ID', { day:'numeric', month:'long', year:'numeric' })
@@ -1571,14 +1572,17 @@ pre {
   }
 
   function handleRawBT() {
-    const lines = buildReceiptLines()
-    const txt   = lines.join('\n')
-    window.location.href = `rawbt:${encodeURIComponent(txt)}`
+    const lines = buildReceiptLines(28)  // 58mm printer = 28-30 char
+    // RawBT: gunakan \n bukan \r\n, tidak ada emoji, pure ASCII
+    const txt = lines.join('\n')
+    // Coba rawbt:// protocol dulu (app RawBT)
+    window.location.href = `rawbt://${encodeURIComponent(txt)}`
+    // Fallback: copy ke clipboard setelah 1.5s
     setTimeout(() => {
       navigator.clipboard.writeText(txt)
-        .then(() => toast.success('Teks struk disalin'))
+        .then(() => toast.success('Struk disalin ke clipboard'))
         .catch(() => {})
-    }, 1000)
+    }, 1500)
   }
 
   async function handlePrintServer() {

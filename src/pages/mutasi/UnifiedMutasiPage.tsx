@@ -1,7 +1,8 @@
 // src/pages/mutasi/UnifiedMutasiPage.tsx
-// CHANGELOG v5:
-// - FIX #1/#4: kasir tidak ada dropdown per hari/bulan, tidak ada collapse group
-// - FIX: kasir tampil list flat (tanpa group header) karena sudah filter hari ini
+// CHANGELOG v6:
+// - FIX: produksi lihat mutasi yang diterima (destination_id === storeId)
+// - FIX: owner/manager default ke gudang saat buka form mutasi
+// - FIX: template mutasi tampil pengirim → penerima setelah ID
 
 import { useState, useMemo, useEffect, useContext, createContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -154,7 +155,6 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
   useEffect(() => {
     setToolbar(
       <div className="flex items-center gap-2">
-        {/* FIX #1: kasir tidak perlu dropdown per hari/bulan */}
         {!isKasir && (
           <select value={groupMode} onChange={e => setGroupMode(e.target.value as Period)}
             className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600">
@@ -183,7 +183,12 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
         )
       )
     } else if (role === 'produksi') {
-      m = m.filter(x => x.created_by === userId)
+      // FIX: produksi lihat yang dibuat sendiri DAN yang diterima
+      m = m.filter(x =>
+        x.created_by === userId ||
+        x.destination_id === storeId ||
+        (x as any).acting_store_id === storeId
+      )
     } else if (role === 'gudang') {
       m = m.filter(x => x.created_by === userId || x.destination_id === storeId)
     }
@@ -248,22 +253,27 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
     }
   }, [mutations, isKasir])
 
-  // Render item mutasi (dipakai di flat list dan grouped list)
   function MutasiItem({ m, idx }: { m: any; idx: number }) {
     const tc         = TYPE_CONFIG[m.mutation_type] || { label: m.mutation_type, color: 'text-gray-600 bg-gray-100' }
     const totalNilai = m.items.reduce((s: number, i: any) => s + i.qty * i.unit_cost, 0)
     const mutNo      = (m as any).mutation_number
+    const pengirim   = storeMap[(m as any).acting_store_id || ''] || (m as any).acting_store_id || ''
+    const penerima   = m.destination_name || storeMap[m.destination_id || ''] || TYPE_CONFIG[m.mutation_type]?.label || ''
     return (
       <div className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
-            {mutNo && <p className="text-xs font-mono text-blue-600 mb-1">{mutNo}<CopyBtn text={mutNo} /></p>}
+            {mutNo && <p className="text-xs font-mono text-blue-600 mb-0.5">{mutNo}<CopyBtn text={mutNo} /></p>}
+            {/* FIX: baris pengirim → penerima */}
+            {(pengirim || penerima) && (
+              <div className="flex items-center gap-1 text-xs mb-0.5">
+                <span className="font-medium text-gray-700">{pengirim || '—'}</span>
+                <span className="text-gray-400">→</span>
+                <span className="font-medium text-gray-700">{penerima || '—'}</span>
+              </div>
+            )}
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tc.color}`}>{tc.label}</span>
-              {m.destination_name && <span className="text-xs font-semibold text-gray-800">{m.destination_name}</span>}
-              {isOwnerManager && storeMap[m.destination_id || ''] && (
-                <span className="text-xs text-gray-400">{storeMap[m.destination_id || '']}</span>
-              )}
             </div>
             <p className="text-xs text-gray-400 mt-0.5">
               {new Date(m.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })},{' '}
@@ -305,9 +315,7 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
           {isKasir ? 'Total Nilai Mutasi Hari Ini' : 'Total Nilai Mutasi Bulan Ini'}
         </p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalNilaiMutasi)}</p>
-        <p className="text-xs text-gray-400 mt-0.5">
-          {isKasir ? `${totalCountCard} transaksi` : `${totalCountCard} transaksi`}
-        </p>
+        <p className="text-xs text-gray-400 mt-0.5">{totalCountCard} transaksi</p>
       </div>
 
       {isOwnerManager && stores && stores.length > 1 && (
@@ -342,7 +350,6 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
         ))}
       </div>
 
-      {/* FIX #4: kasir tampil flat (tanpa group/collapse), owner pakai grouped */}
       {isKasir ? (
         <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
           {filtered.length === 0
@@ -355,8 +362,8 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
           {grouped.map(({ key, items: grpItems }) => {
             const total    = grpItems.reduce((s, m) => s + m.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0)
             const today    = new Date().toLocaleDateString('sv-SE')
-            const isFirst  = grouped.indexOf(grouped.find(g => g.key === key)!) === 0
-            const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : (key === today || key.slice(0,10) === today || isFirst)
+            const isFirst  = grouped[0]?.key === key
+            const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : (key === today || isFirst)
             return (
               <div key={key}>
                 <button onClick={() => setExpandedGroups(prev => ({ ...prev, [key]: !expanded }))}
@@ -392,11 +399,25 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
 // ── FORM MUTASI ───────────────────────────────────────────────
 function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: string; storeId: string; onClose: () => void }) {
   const isOwnerManager = ['owner','manager'].includes(role)
-  const allStores  = useLiveQuery(() =>
+  const allStores = useLiveQuery(() =>
     isOwnerManager ? db.stores.filter(s => s.is_active).toArray() : Promise.resolve([])
   , [isOwnerManager])
+
   const [inputAsRole,  setInputAsRole]  = useState(role)
   const [inputAsStore, setInputAsStore] = useState(storeId)
+
+  // FIX: owner/manager default ke gudang saat allStores tersedia
+  useEffect(() => {
+    if (!isOwnerManager || !allStores || allStores.length === 0) return
+    if (inputAsStore === storeId || !inputAsStore) {
+      const gudang = (allStores as any[]).find((s: any) => s.id.includes('gudang'))
+      if (gudang) {
+        setInputAsStore(gudang.id)
+        setInputAsRole('gudang')
+      }
+    }
+  }, [allStores])
+
   const effectiveRole    = isOwnerManager ? inputAsRole  : role
   const effectiveStoreId = isOwnerManager ? inputAsStore : storeId
 
@@ -434,7 +455,6 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
     return await db.finished_goods_stock.filter(f => f.qty_on_hand > 0).toArray()
   }, [effectiveRole])
 
-  // FIX #3: kasir hanya lihat stok tokonya sendiri (bukan master materials)
   const storeStocks = useLiveQuery(async () => {
     if (effectiveRole !== 'kasir') return []
     const stocks = await db.stock.where('store_id').equals(effectiveStoreId).toArray()
@@ -446,7 +466,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
       if (qty <= 0) continue
       const id  = (s as any).material_id || s.ingredient_id || ''
       const mat = mMap[id]
-      if (!mat) continue  // FIX: hanya tampil yang ada di materials (ada nama)
+      if (!mat) continue
       result.push({ id, name: mat.name, unit: mat.unit || 'pcs', qty })
     }
     return result

@@ -1480,7 +1480,8 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
     lines.push('')
     lines.push('')
 
-    return lines
+    // Bersihkan karakter non-ASCII untuk kompatibilitas printer dot matrix & RawBT
+    return lines.map(l => l.replace(/[^\x00-\x7F]/g, ''))
   }
 
   function handlePrint() {

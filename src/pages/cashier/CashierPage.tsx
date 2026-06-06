@@ -1503,22 +1503,30 @@ pre {
   async function handlePrintServer() {
     const lines = buildReceiptLines()
     const txt   = lines.join('\n')
+    // Baca serverUrl fresh dari localStorage (fix autoPrint timing issue)
+    const url = (() => {
+      try {
+        const keyById   = `printer_config_${data.storeId}`
+        const keyByName = `printer_config_${data.storeName}`
+        const cfg = JSON.parse(localStorage.getItem(keyById) || localStorage.getItem(keyByName) || '{}')
+        return cfg.serverUrl || 'https://localhost:5000'
+      } catch { return 'https://localhost:5000' }
+    })()
     try {
-      const res = await fetch(`${serverUrl}/print`, {
+      const res = await fetch(`${url}/print`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: txt }),
         signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 5000); return c.signal })(),
       })
-      const data = await res.json()
-      if (data.ok) {
+      const d = await res.json()
+      if (d.ok) {
         toast.success('Print berhasil!')
       } else {
-        toast.error('Print gagal: ' + data.error)
+        toast.error('Print gagal: ' + d.error)
       }
     } catch (e) {
-      toast.error('Print server tidak merespons. Pastikan print_server.py jalan.')
-      // Fallback ke browser print
+      toast.error('Print server tidak merespons.')
       handlePrint()
     }
   }

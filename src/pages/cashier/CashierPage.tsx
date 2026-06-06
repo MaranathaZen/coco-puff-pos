@@ -543,6 +543,17 @@ export default function CashierPage() {
       const printModeNow = getPrintModeNow()
       if (autoPrintNow) {
         setTimeout(() => {
+          // Format Rupiah ASCII untuk auto print (definisi di atas sebelum dipakai)
+          const fmtA = (n: number) => {
+            const s = String(Math.round(n))
+            let r = ''
+            for (let i = 0; i < s.length; i++) {
+              if (i > 0 && (s.length - i) % 3 === 0) r += '.'
+              r += s[i]
+            }
+            return 'Rp ' + r
+          }
+
           // Build struk pakai format sama (38 karakter, 76mm)
           const AW   = 32
           const ASEP = '='.repeat(AW)
@@ -573,17 +584,6 @@ export default function CashierPage() {
           aLines.push(arow(finalPay === 'cash' ? 'Bayar (Cash)' : `Bayar (${finalPay})`, fmtA(paidAmt)))
           if (paidAmt > grandTotal) aLines.push(arow('Kembali', fmtA(paidAmt - grandTotal)))
           aLines.push('', actr('Terima kasih atas kunjungan Anda'), '', '', '', '')
-
-          // Format Rupiah ASCII untuk auto print
-          const fmtA = (n: number) => {
-            const s = String(Math.round(n))
-            let r = ''
-            for (let i = 0; i < s.length; i++) {
-              if (i > 0 && (s.length - i) % 3 === 0) r += '.'
-              r += s[i]
-            }
-            return 'Rp ' + r
-          }
 
           if (printModeNow === 'rawbt') {
             window.location.href = `rawbt:${encodeURIComponent(aLines.join('\n'))}`

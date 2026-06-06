@@ -23,15 +23,24 @@ export function formatDateOnly(dateStr: string): string {
   }).format(new Date(dateStr))
 }
 
-// FIX #7: ID transaksi simple — format YYYYMMDD-NNN (nomor urut harian)
-export async function generateReceiptNo(_storeId: string): Promise<string> {
-  const date = new Date()
-  const ymd  = date.toISOString().slice(0, 10).replace(/-/g, '')
-  const key  = `receipt_counter_${ymd}`
+// FIX: receipt_no dengan store prefix agar unik antar toko & device
+// Format: MOG-20260606-001 (store prefix + tanggal + nomor urut)
+export async function generateReceiptNo(storeId: string): Promise<string> {
+  const date   = new Date()
+  const ymd    = date.toISOString().slice(0, 10).replace(/-/g, '')
+  // Ambil prefix dari storeId: store-mog-01 → MOG
+  const prefix = storeId
+    .replace('store-', '')
+    .split('-')
+    .filter(p => isNaN(Number(p)))
+    .join('')
+    .toUpperCase()
+    .slice(0, 4) || 'POS'
+  const key  = `receipt_counter_${prefix}_${ymd}`
   const cur  = parseInt(localStorage.getItem(key) || '0', 10)
   const next = cur + 1
   localStorage.setItem(key, String(next))
-  return `${ymd}-${String(next).padStart(3, '0')}`
+  return `${prefix}-${ymd}-${String(next).padStart(3, '0')}`
 }
 
 /** Hitung packaging otomatis: qty eceran → dus + sisa eceran */

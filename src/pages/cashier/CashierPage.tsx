@@ -503,10 +503,10 @@ export default function CashierPage() {
         subtotal: (cp.paket.price / cp.paket.qty_total) * p.qty,
         item_type: 'package', package_id: cp.paket.id,
       })))
-      await db.transactions.add(tx)
-      await db.transaction_items.bulkAdd([...txItems, ...txPakets])
-      await addToSyncQueue('transactions', txId, 'insert', tx, STORE_ID)
-      for (const item of [...txItems, ...txPakets]) await addToSyncQueue('transaction_items', item.id, 'insert', item, STORE_ID)
+      await db.transactions.put(tx)
+      await db.transaction_items.bulkPut([...txItems, ...txPakets])
+      await addToSyncQueue('transactions', txId, 'upsert', tx, STORE_ID)
+      for (const item of [...txItems, ...txPakets]) await addToSyncQueue('transaction_items', item.id, 'upsert', item, STORE_ID)
       await deductStockFromRecipes([...txItems, ...txPakets], STORE_ID)
 
       const storeRec  = await db.stores.get(STORE_ID)

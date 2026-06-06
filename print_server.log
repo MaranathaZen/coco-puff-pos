@@ -74,3 +74,9 @@
 [2026-06-06 12:53:27] Raw bytes (first 200): b'================================\n           Coco Puff            \n         Coco Puff Mog          \n================================\nNo    : CP-MOG-01-20260606-6226222\nTgl   :              6 Juni 2026\n'
 [2026-06-06 12:53:27] Text sample: '================================\n           Coco Puff            \n         Coco Puff Mog          \n='
 [2026-06-06 12:53:27] Print OK
+[2026-06-06 12:57:21] === Coco Puff Print Server v2.0 ===
+[2026-06-06 12:57:21] HTTPS mode: https://localhost:5000
+[2026-06-06 12:57:21] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost
+[2026-06-06 12:57:33] Raw bytes (first 200): b'\x1b@\x1bC\x00\x1bN\x00================================\n           Coco Puff            \n         Coco Puff Mog          \n================================\nNo    : CP-MOG-01-20260606-2665955\nTgl   :              6 Ju'
+[2026-06-06 12:57:33] Text sample: '================================\n           Coco Puff            \n         Coco Puff Mog          \n='
+[2026-06-06 12:57:33] Print OK

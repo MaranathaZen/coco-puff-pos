@@ -255,28 +255,7 @@ export default function EndOfDayPage() {
   function shareWhatsApp(report: any) {
     window.open(`https://wa.me/?text=${encodeURIComponent(generateWAText(report))}`, '_blank')
   }
-*',
-      `Saldo Awal      : ${formatRupiah(report.saldo_awal)}`,
-      `Saldo Tambahan  : ${formatRupiah(report.saldo_tambahan)}`,
-      `Penjualan Tunai : ${formatRupiah(report.total_cash)}`,
-      `Total Setor     : -${formatRupiah(report.total_setor)}`,
-      report.total_biaya > 0 ? `Total Biaya     : -${formatRupiah(report.total_biaya)}` : '',
-      `*Saldo Akhir    : ${formatRupiah(report.saldo_akhir)}*`,
-      `Uang Fisik      : ${formatRupiah(report.uang_fisik)}`,
-      `*Selisih        : ${report.selisih >= 0 ? '+' : ''}${formatRupiah(report.selisih)}*`,
-    ].filter(Boolean)
-    if (stokSisa?.length) {
-      lines.push('', '*Sisa Stok*')
-      stokSisa.forEach(s => lines.push(`${s.name}: ${s.qty} ${s.unit}`))
-    }
-    if (report.notes) lines.push('', `Catatan: ${report.notes}`)
-    lines.push('', '_Dikirim via Coco Puff POS_')
-    return lines.join('\n')
-  }
 
-  function shareWhatsApp(report: any) {
-    window.open(`https://wa.me/?text=${encodeURIComponent(generateWAText(report))}`, '_blank')
-  }
 
   async function handleSave() {
     try {

@@ -1214,7 +1214,7 @@ function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () =
 
   async function testServer() {
     try {
-      const res = await fetch(`${serverUrl}/health`, { signal: AbortSignal.timeout(3000) })
+      const res = await fetch(`${serverUrl}/health`, { signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 3000); return c.signal })() })
       const data = await res.json()
       setServerStatus('ok')
       toast.success(`Terhubung ke printer: ${data.printer}`)
@@ -1489,7 +1489,7 @@ pre {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: txt }),
-        signal: AbortSignal.timeout(5000),
+        signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 5000); return c.signal })(),
       })
       const data = await res.json()
       if (data.ok) {

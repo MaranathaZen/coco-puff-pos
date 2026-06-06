@@ -16,7 +16,7 @@ import { X, ChevronRight, Plus, Check, Trash2, Tag, Store, Download, AlertTriang
 import toast from 'react-hot-toast'
 import type { User, Role } from '@/types'
 
-type Tab = 'users' | 'supplier' | 'mitra' | 'toko' | 'password' | 'ppn' | 'promo' | 'printer' | 'reset' | 'tutup_tahun'
+type Tab = 'users' | 'supplier' | 'mitra' | 'toko' | 'password' | 'ppn' | 'promo' | 'reset' | 'tutup_tahun'
 
 const ALL_MENUS = [
   { path: '/kasir',          label: 'Kasir'       },
@@ -49,7 +49,6 @@ export default function SettingsPage() {
     { id: 'password',    label: 'Password'    },
     { id: 'ppn',         label: 'PPN',         ownerOnly: true },
     { id: 'promo',       label: 'Promo',       ownerOnly: true },
-    { id: 'printer',     label: 'Printer'      },
     { id: 'tutup_tahun', label: 'Tutup Tahun', ownerOnly: true },
     { id: 'reset',       label: 'Reset',       ownerOnly: true },
   ].filter(t => !t.ownerOnly || isOwnerManager)
@@ -77,7 +76,6 @@ export default function SettingsPage() {
         {tab === 'ppn'         && <PPNTab currentUser={user!} />}
         {tab === 'promo'       && <PromoTab currentUser={user!} />}
         {tab === 'tutup_tahun' && <TutupTahunTab currentUser={user!} />}
-        {tab === 'printer'     && <PrinterTab storeId={user?.store_id || ''} />}
         {tab === 'reset'       && <ResetDataTab />}
       </div>
     </div>
@@ -1595,3 +1593,4 @@ function MitraForm({ partner, onClose }: { partner: Partner|null; onClose: () =>
     </Modal>
   )
 }
+

@@ -122,3 +122,6 @@
 [2026-06-06 19:55:24] Raw bytes (first 200): b'\x1b@\x1bC\x00\x1bN\x00================================\n           Coco Puff            \n         Coco Puff Mog          \n================================\nNo    : CP-MOG-01-20260606-3703575\nTgl   :              6 Ju'
 [2026-06-06 19:55:24] Text sample: '================================\n           Coco Puff            \n         Coco Puff Mog          \n='
 [2026-06-06 19:55:24] Print OK
+[2026-06-06 21:14:53] Raw bytes (first 200): b'\x1b@\x1bC\x00\x1bN\x00================================\n           Coco Puff            \n         Coco Puff Mog          \n================================\nNo    :             20260606-014\nTgl   :              6 Juni'
+[2026-06-06 21:14:53] Text sample: '================================\n           Coco Puff            \n         Coco Puff Mog          \n='
+[2026-06-06 21:14:53] Print OK

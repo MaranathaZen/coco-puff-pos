@@ -427,24 +427,57 @@ function FgsEditForm({ fgs, onClose }: { fgs: any; onClose: () => void }) {
 }
 
 // ── FORM: Edit Stok Bahan Produksi ────────────────────────────
+// ── FORM: Edit Stok Bahan Produksi (FULL - sama dengan gudang) ────────────────────────
+// ── FORM: Edit Stok Bahan Produksi (FULL - sama dengan gudang) ────────────────────────
 function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
-  const [matId,  setMatId]  = useState(ps?.material_id || '')
-  const [qty,    setQty]    = useState(String(ps?.qty_on_hand || ''))
-  const [avg,    setAvg]    = useState(String((ps as any)?.avg_cost || ''))
-  const [saving, setSaving] = useState(false)
+  const mat = materials?.find(m => m.id === ps?.material_id)
+
+  const [matId,      setMatId]    = useState(ps?.material_id || '')
+  const [name,       setName]     = useState('')
+  const [category,   setCategory] = useState('bahan_baku')
+  const [unit,       setUnit]     = useState('')
+  const [unitCost,   setUnitCost] = useState('0')
+  const [minStock,   setMinStock] = useState('0')
+  const [customUnit, setCustom]   = useState(false)
+  const [qty,        setQty]      = useState(String(ps?.qty_on_hand || ''))
+  const [avg,        setAvg]      = useState(String((ps as any)?.avg_cost || ''))
+  const [saving,     setSaving]   = useState(false)
+
+  // Load material data when mat changes
+  useEffect(() => {
+    if (!mat) return
+    setName(mat.name)
+    setCategory(mat.category || 'bahan_baku')
+    setUnit(mat.unit || '')
+    setUnitCost(String(mat.unit_cost || 0))
+    setMinStock(String(mat.min_stock || 0))
+    setCustom(!SATUAN.map(s => s.toLowerCase()).includes((mat.unit || '').toLowerCase()))
+  }, [mat?.id])
 
   async function handleSave() {
     if (!matId) return toast.error('Pilih bahan')
+    if (!name.trim()) return toast.error('Nama wajib diisi')
+    if (!unit) return toast.error('Satuan wajib diisi')
     if (Number(qty) < 0) return toast.error('Qty tidak boleh negatif')
     setSaving(true)
     try {
+      // Update material data
+      const matData: any = {
+        id: matId, name: name.trim(), category, unit,
+        unit_cost: Number(unitCost), min_stock: Number(minStock),
+        is_active: true, updated_at: now(),
+      }
+      await db.materials.update(matId, matData)
+      await supabase.from('materials').update({ name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock) }).eq('id', matId)
+
+      // Update production stock
       const existing = ps || await db.production_stock.where('material_id').equals(matId).first()
       const data: any = {
         id:           existing?.id || generateId(),
         material_id:  matId,
         qty_on_hand:  Number(qty),
-        avg_cost:     Number(avg) || 0,
+        avg_cost:     Number(avg) || Number(unitCost) || 0,
         last_updated: now(),
       }
       await db.production_stock.put(data)
@@ -456,16 +489,46 @@ function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
   }
 
   return (
-    <Modal title={ps ? 'Edit Stok Bahan Produksi' : 'Tambah Stok Awal Bahan'} onClose={onClose}>
-      <div><Label required>Bahan</Label>
-        <select className="input" value={matId} onChange={e => setMatId(e.target.value)} disabled={!!ps}>
-          <option value="">Pilih bahan</option>
-          {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
-        </select>
+    <Modal title={ps ? `Edit: ${mat?.name || 'Bahan'}` : 'Tambah Stok Bahan'} onClose={onClose}>
+      {!ps && (
+        <div><Label required>Bahan</Label>
+          <select className="input" value={matId} onChange={e => setMatId(e.target.value)}>
+            <option value="">Pilih bahan</option>
+            {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
+          </select>
+        </div>
+      )}
+      <div><Label required>Nama Bahan</Label>
+        <input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus={!!ps} />
+      </div>
+      <div><Label required>Kategori</Label>
+        <div className="grid grid-cols-2 gap-2">
+          {KATEGORI.map(k => (
+            <button key={k.value} onClick={() => setCategory(k.value)}
+              className={`px-3 py-2.5 rounded-xl text-xs font-medium border text-left transition-colors ${category === k.value ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
+              {k.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div><Label required>Satuan</Label>
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {SATUAN.map(s => (
+            <button key={s} onClick={() => { setUnit(s); setCustom(false) }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${unit === s && !customUnit ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600 bg-white'}`}>{s}</button>
+          ))}
+          <button onClick={() => setCustom(true)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${customUnit ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-500 bg-white'}`}>Lainnya</button>
+        </div>
+        {customUnit && <input className="input" value={unit} onChange={e => setUnit(e.target.value)} placeholder="Ketik satuan..." />}
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <div><Label required>Qty</Label><input className="input" type="number" value={qty} onChange={e => setQty(e.target.value)} /></div>
+        <div><Label required>Qty Stok</Label><input className="input" type="number" value={qty} onChange={e => setQty(e.target.value)} /></div>
         <div><Label>Avg Cost (Rp)</Label><input className="input" type="number" value={avg} onChange={e => setAvg(e.target.value)} /></div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label>Harga Default/Satuan (Rp)</Label><input className="input" type="number" value={unitCost} onChange={e => setUnitCost(e.target.value)} /></div>
+        <div><Label>Min. Stok (alert)</Label><input className="input" type="number" value={minStock} onChange={e => setMinStock(e.target.value)} /></div>
       </div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
@@ -475,7 +538,6 @@ function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
   )
 }
 
-// ── STOK TOKO ─────────────────────────────────────────────────
 function StokTokoView({ storeId, role, isOwnerManager, setHeaderActions }: {
   storeId: string; role: string; isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void
 }) {
@@ -734,14 +796,43 @@ function StokAwalTokoForm({ storeId, onClose }: { storeId: string; onClose: () =
 }
 
 // ── FORM: Edit Stok Toko ──────────────────────────────────────
+// ── FORM: Edit Stok Toko (FULL - sama dengan gudang) ──────────────────────────────────
+// ── FORM: Edit Stok Toko (FULL - sama dengan gudang) ──────────────────────────────────
 function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void }) {
-  const [qty,    setQty]    = useState(String(stock.qty_on_hand || 0))
-  const [avg,    setAvg]    = useState(String(stock.avg_cost || 0))
-  const [saving, setSaving] = useState(false)
+  const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
+  const mat = materials?.find(m => m.id === stock.ingredient_id)
+
+  const [name,       setName]     = useState(stock.displayName || '')
+  const [category,   setCategory] = useState('')
+  const [unit,       setUnit]     = useState(stock.displayUnit || '')
+  const [unitCost,   setUnitCost] = useState('0')
+  const [minStock,   setMinStock] = useState('0')
+  const [customUnit, setCustom]   = useState(false)
+  const [qty,        setQty]      = useState(String(stock.qty_on_hand || 0))
+  const [avg,        setAvg]      = useState(String(stock.avg_cost || 0))
+  const [saving,     setSaving]   = useState(false)
+
+  useEffect(() => {
+    if (!mat) return
+    setName(mat.name)
+    setCategory(mat.category || 'bahan_baku')
+    setUnit(mat.unit || stock.displayUnit || '')
+    setUnitCost(String(mat.unit_cost || 0))
+    setMinStock(String(mat.min_stock || 0))
+    setCustom(!SATUAN.map(s => s.toLowerCase()).includes((mat.unit || '').toLowerCase()))
+  }, [mat?.id])
 
   async function handleSave() {
+    if (!name.trim()) return toast.error('Nama wajib diisi')
+    if (!unit) return toast.error('Satuan wajib diisi')
     setSaving(true)
     try {
+      // Update material data kalau ada
+      if (mat) {
+        await db.materials.update(mat.id, { name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock), updated_at: now() } as any)
+        await supabase.from('materials').update({ name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock) }).eq('id', mat.id)
+      }
+      // Update stock toko
       await db.stock.update(stock.stockId, { qty_on_hand: Number(qty), avg_cost: Number(avg), last_updated: now() } as any)
       await supabase.from('stock').update({ qty_on_hand: Number(qty), avg_cost: Number(avg) }).eq('id', stock.stockId)
       toast.success('Stok diupdate')
@@ -752,8 +843,40 @@ function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void 
 
   return (
     <Modal title={`Edit: ${stock.displayName}`} onClose={onClose}>
+      {!stock.isProduk && (
+        <>
+          <div><Label required>Nama Bahan</Label>
+            <input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus />
+          </div>
+          <div><Label required>Kategori</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {KATEGORI.map(k => (
+                <button key={k.value} onClick={() => setCategory(k.value)}
+                  className={`px-3 py-2.5 rounded-xl text-xs font-medium border text-left transition-colors ${category === k.value ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
+                  {k.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div><Label required>Satuan</Label>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {SATUAN.map(s => (
+                <button key={s} onClick={() => { setUnit(s); setCustom(false) }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${unit === s && !customUnit ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600 bg-white'}`}>{s}</button>
+              ))}
+              <button onClick={() => setCustom(true)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${customUnit ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-500 bg-white'}`}>Lainnya</button>
+            </div>
+            {customUnit && <input className="input" value={unit} onChange={e => setUnit(e.target.value)} placeholder="Ketik satuan..." />}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Harga Default (Rp)</Label><input className="input" type="number" value={unitCost} onChange={e => setUnitCost(e.target.value)} /></div>
+            <div><Label>Min. Stok</Label><input className="input" type="number" value={minStock} onChange={e => setMinStock(e.target.value)} /></div>
+          </div>
+        </>
+      )}
       <div className="grid grid-cols-2 gap-3">
-        <div><Label required>Qty ({stock.displayUnit})</Label><input className="input" type="number" value={qty} onChange={e => setQty(e.target.value)} autoFocus /></div>
+        <div><Label required>Qty ({unit || stock.displayUnit})</Label><input className="input" type="number" value={qty} onChange={e => setQty(e.target.value)} autoFocus={stock.isProduk} /></div>
         <div><Label>Avg Cost (Rp)</Label><input className="input" type="number" value={avg} onChange={e => setAvg(e.target.value)} /></div>
       </div>
       <div className="flex gap-3">
@@ -764,7 +887,6 @@ function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void 
   )
 }
 
-// ── FORM: Tambah/Edit Bahan ───────────────────────────────────
 function MaterialForm({ material, isOwner, onClose }: { material: Material | null; isOwner: boolean; onClose: () => void }) {
   const [name,       setName]     = useState(material?.name || '')
   const [category,   setCategory] = useState(material?.category || 'bahan_baku')

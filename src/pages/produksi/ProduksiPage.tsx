@@ -824,6 +824,8 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
                   )}
                   <p className="text-sm font-medium text-gray-900">{(l.recipe as any)?.product_name || 'Produksi'}</p>
                   <p className="text-xs text-gray-400">
+                    {new Date(l.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })}
+                    {', '}
                     {new Date(l.created_at).toLocaleTimeString('id-ID', {hour:'2-digit',minute:'2-digit',hour12:false})}
                     {' · '}{l.batch_count} batch
                   </p>

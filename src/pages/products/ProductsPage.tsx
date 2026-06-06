@@ -1,6 +1,12 @@
+// src/pages/produk/ProductsPage.tsx (atau ProdukPage.tsx)
+// CHANGELOG v2:
+// - FIX #5: tambah supabase direct upsert agar produk langsung sync ke cloud
+// - FIX #5: hapus referensi packaging yang menyebabkan blank screen
+
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now, addToSyncQueue } from '@/lib/db'
+import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
 import { Plus, Search, Edit2, ToggleLeft, ToggleRight } from 'lucide-react'
@@ -27,7 +33,9 @@ export default function ProductsPage() {
   async function toggleActive(product: Product) {
     const updated = { ...product, is_active: !product.is_active, updated_at: now() }
     await db.products.put(updated)
-    await addToSyncQueue('products', product.id, 'update', updated, STORE_ID)
+    // FIX: strip join fields before upsert
+    const { category: _cat, ...toUpsert } = updated as any
+    await supabase.from('products').upsert(toUpsert)
     toast.success(updated.is_active ? 'Produk diaktifkan' : 'Produk dinonaktifkan')
   }
 
@@ -54,7 +62,7 @@ export default function ProductsPage() {
             <div className="flex-1 min-w-0">
               <p className="font-medium text-gray-800 truncate">{prod.name}</p>
               <p className="text-sm text-gray-500">
-                {prod.category?.name} · {formatRupiah(prod.base_price)}/{prod.unit}
+                {(prod as any).category?.name} · {formatRupiah(prod.base_price)}/{prod.unit}
               </p>
               {prod.auto_package && (
                 <p className="text-xs text-brand-600">
@@ -79,7 +87,7 @@ export default function ProductsPage() {
       </div>
 
       {showForm && (
-        <ProductForm storeId={STORE_ID} product={editProduct} onClose={() => setShowForm(false)} />
+        <ProductForm storeId={STORE_ID} product={editProduct} onClose={() => { setShowForm(false); setEdit(null) }} />
       )}
     </div>
   )
@@ -92,20 +100,21 @@ function ProductForm({ product, onClose, storeId }: {
 }) {
   const categories = useLiveQuery(() => db.categories.orderBy('sort_order').toArray(), [])
 
-  const [name, setName]        = useState(product?.name || '')
-  const [categoryId, setCatId] = useState(product?.category_id || '')
-  const [basePrice, setPrice]  = useState(String(product?.base_price || ''))
-  const [unit, setUnit]        = useState(product?.unit || 'pcs')
-  const [pkgQty, setPkgQty]    = useState(String(product?.pkg_qty || '1'))
-  const [pkgUnit, setPkgUnit]  = useState(product?.pkg_unit || 'dus')
-  const [autoPkg, setAutoPkg]  = useState(product?.auto_package || false)
-  const [saving, setSaving]    = useState(false)
+  const [name,       setName]    = useState(product?.name || '')
+  const [categoryId, setCatId]   = useState(product?.category_id || '')
+  const [basePrice,  setPrice]   = useState(String(product?.base_price || ''))
+  const [unit,       setUnit]    = useState(product?.unit || 'pcs')
+  const [pkgQty,     setPkgQty]  = useState(String(product?.pkg_qty || '1'))
+  const [pkgUnit,    setPkgUnit] = useState(product?.pkg_unit || 'dus')
+  const [autoPkg,    setAutoPkg] = useState(product?.auto_package || false)
+  const [saving,     setSaving]  = useState(false)
 
   async function handleSave() {
     if (!name.trim() || !basePrice) return toast.error('Nama dan harga wajib diisi')
     setSaving(true)
     try {
       const isNew = !product
+      // FIX: jangan sertakan field yang tidak ada di schema Supabase
       const data: Product = {
         id:           product?.id || generateId(),
         category_id:  categoryId || undefined,
@@ -120,9 +129,20 @@ function ProductForm({ product, onClose, storeId }: {
         updated_at:   now(),
       }
       await db.products.put(data)
-      await addToSyncQueue('products', data.id, isNew ? 'insert' : 'update', data, storeId)
-      toast.success(isNew ? 'Produk ditambahkan' : 'Produk diupdate')
+      // FIX: langsung upsert ke Supabase, jangan hanya sync_queue
+      const { error } = await supabase.from('products').upsert(data)
+      if (error) {
+        console.error('[PRODUK SAVE]', error)
+        // Fallback ke sync queue
+        await addToSyncQueue('products', data.id, isNew ? 'insert' : 'update', data, storeId)
+        toast.success(isNew ? 'Produk ditambahkan (pending sync)' : 'Produk diupdate (pending sync)')
+      } else {
+        toast.success(isNew ? 'Produk ditambahkan' : 'Produk diupdate')
+      }
       onClose()
+    } catch (e) {
+      console.error('[PRODUK]', e)
+      toast.error('Gagal menyimpan')
     } finally {
       setSaving(false)
     }
@@ -135,7 +155,7 @@ function ProductForm({ product, onClose, storeId }: {
         <div className="space-y-3">
           <div>
             <label className="text-sm font-medium text-gray-700 mb-1 block">Nama Produk</label>
-            <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Puff Original" />
+            <input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus placeholder="Puff Original" />
           </div>
           <div>
             <label className="text-sm font-medium text-gray-700 mb-1 block">Kategori</label>

@@ -542,7 +542,7 @@ export default function CashierPage() {
     setIsProcessing(true)
     try {
       const txId      = generateId()
-      const receiptNo = generateReceiptNo(STORE_ID)
+      const receiptNo = await generateReceiptNo(STORE_ID)
       const finalPay: PaymentMethod = isOnlineOrder ? PLATFORM_PAYMENT[onlinePlatform] : payMethod
       const paidAmt   = finalPay === 'cash' ? Number(cashPaid) : grandTotal
       const tx: any = {

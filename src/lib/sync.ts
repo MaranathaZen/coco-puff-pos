@@ -1,6 +1,9 @@
 /**
- * Sync offline-first — v5
- * FIX: tambah pull transactions, transaction_items, shifts semua toko
+ * Sync offline-first — v6
+ * FIX: push order priority (shifts → transactions → transaction_items)
+ * FIX: FK violation (23503) tidak increment retry_count, skip dan retry run berikutnya
+ * FIX: unique violation (23505) langsung mark done
+ * FIX: 409 HTTP response juga di-handle
  */
 
 import { supabase } from '@/lib/supabase'
@@ -17,6 +20,13 @@ let currentStoreId = ''
 export function setCurrentStoreId(storeId: string) {
   currentStoreId = storeId
 }
+
+// Urutan push: parent table harus sebelum child table (FK dependency)
+const TABLE_PUSH_ORDER = [
+  'shifts',             // 1. shift dulu — transactions FK ke shifts
+  'transactions',       // 2. transaction — transaction_items FK ke transactions
+  'transaction_items',  // 3. items terakhir
+]
 
 const TABLE_MAP: Record<string, keyof typeof db> = {
   materials:                 'materials',
@@ -199,8 +209,7 @@ export async function pullFromSupabase(storeId?: string) {
     if (prodLogs.data?.length)   await db.production_logs.bulkPut(prodLogs.data)
     if (prodLogMats.data?.length) await db.production_log_materials.bulkPut((prodLogMats.data || []).filter((i: any) => logIds.has(i.log_id)))
 
-    // ── FIX: Pull transaksi semua toko ─────────────────────────
-    // Tanpa filter store_id supaya login gudang/owner bisa lihat semua toko
+    // ── Pull transaksi semua toko ─────────────────────────────
     const today = new Date().toLocaleDateString('sv-SE')
     const [txs, shifts] = await Promise.all([
       supabase.from('transactions').select('*')
@@ -211,11 +220,10 @@ export async function pullFromSupabase(storeId?: string) {
     ])
     const txIds = new Set((txs.data || []).map((t: any) => t.id))
 
-    // Pull transaction_items hanya untuk transaksi hari ini
+    // Pull transaction_items batch per 100
     let txItemsData: any[] = []
     if (txIds.size > 0) {
       const txIdArr = Array.from(txIds) as string[]
-      // Supabase in() max 100 items per query — batch jika perlu
       for (let i = 0; i < txIdArr.length; i += 100) {
         const batch = txIdArr.slice(i, i + 100)
         const { data } = await supabase.from('transaction_items')
@@ -224,9 +232,9 @@ export async function pullFromSupabase(storeId?: string) {
       }
     }
 
+    if (shifts.data?.length)   await db.shifts.bulkPut(shifts.data)
     if (txs.data?.length)      await db.transactions.bulkPut(txs.data)
     if (txItemsData.length)    await db.transaction_items.bulkPut(txItemsData)
-    if (shifts.data?.length)   await db.shifts.bulkPut(shifts.data)
 
     console.log(`[SYNC] Pull selesai — toko: ${sid}`)
   } catch (e) {
@@ -252,22 +260,57 @@ export async function pushToSupabase() {
       .limit(50)
       .toArray()
     if (!pending.length) return
+
+    // Sort by table priority — shifts dulu, baru transactions, baru transaction_items
+    pending.sort((a, b) => {
+      const ai = TABLE_PUSH_ORDER.indexOf(a.table_name)
+      const bi = TABLE_PUSH_ORDER.indexOf(b.table_name)
+      const aOrder = ai === -1 ? 999 : ai
+      const bOrder = bi === -1 ? 999 : bi
+      if (aOrder !== bOrder) return aOrder - bOrder
+      // Sama prioritas — sort by created_at (FIFO)
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    })
+
     for (const item of pending) {
       try {
         const payload = JSON.parse(item.payload)
+
         if (item.operation === 'delete') {
-          await supabase.from(item.table_name).delete().eq('id', item.record_id)
+          const { error } = await supabase.from(item.table_name).delete().eq('id', item.record_id)
+          if (error) throw error
         } else {
-          // onConflict='id' → UPDATE jika sudah ada, INSERT jika belum
-          const { error } = await supabase.from(item.table_name).upsert(payload, { onConflict: 'id' })
-          if (error && error.code !== '23505') throw error // ignore unique violation
+          const { error } = await supabase
+            .from(item.table_name)
+            .upsert(payload, { onConflict: 'id' })
+
+          if (error) {
+            // 23505 = unique violation → data sudah ada, anggap selesai
+            if (error.code === '23505') {
+              console.log(`[SYNC] Unique conflict ${item.table_name} ${item.record_id} — mark done`)
+              await db.sync_queue.update(item.id, { status: 'done', synced_at: now(), error_msg: undefined })
+              continue
+            }
+
+            // 23503 = FK violation → parent belum ada, skip (jangan increment retry)
+            // Akan di-retry di run berikutnya setelah parent berhasil di-push
+            if (error.code === '23503') {
+              console.warn(`[SYNC] FK violation ${item.table_name} ${item.record_id} — skip, retry nanti`)
+              continue
+            }
+
+            throw error
+          }
         }
+
         await db.sync_queue.update(item.id, { status: 'done', synced_at: now(), error_msg: undefined })
       } catch (e: any) {
+        const msg = String(e?.message || e?.code || e).slice(0, 300)
+        console.warn(`[SYNC] Push gagal ${item.table_name}:`, msg)
         await db.sync_queue.update(item.id, {
           status: 'failed',
           retry_count: item.retry_count + 1,
-          error_msg: String(e?.message || e).slice(0, 300),
+          error_msg: msg,
         })
       }
     }
@@ -286,7 +329,7 @@ export function startSyncWorker(storeId: string) {
   pushInterval = setInterval(() => { pushToSupabase() }, 30_000)
   pullInterval = setInterval(() => { pullFromSupabase(storeId) }, 60_000)
 
-  // FIX: satu listener online saja, hapus duplikat
+  // Satu listener online saja
   document.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('online', handleOnline)
 
@@ -306,9 +349,9 @@ export function stopSyncWorker() {
 function handleVisibilityChange() {
   if (document.visibilityState === 'visible') pullFromSupabase()
 }
+
 function handleOnline() {
   console.log('[SYNC] Kembali online — push pending segera')
-  // Delay sedikit agar koneksi stabil dulu
   setTimeout(() => {
     pullFromSupabase(currentStoreId || undefined)
     pushToSupabase()

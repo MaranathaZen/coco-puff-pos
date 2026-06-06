@@ -1,6 +1,8 @@
 // src/pages/biaya/UnifiedBiayaPage.tsx
-// CHANGELOG v3:
-// - FIX: kasir hanya tampil biaya hari ini
+// CHANGELOG v4:
+// - FIX: tambah expense_date saat simpan (was null → tidak tampil di filter)
+// - FIX: filter kasir pakai created_at (bukan expense_date) agar konsisten
+// - FIX: filter tampil juga cek expense_date sebagai fallback
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -135,16 +137,18 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
   const expenses = useLiveQuery(async () => {
     let list = await db.warehouse_expenses.orderBy('created_at').reverse().toArray()
     if (role === 'kasir') {
-      // FIX: kasir hanya lihat hari ini
       const today = new Date().toLocaleDateString('sv-SE')
-      list = list.filter(e =>
-        ((e as any).store_id === storeId || e.created_by === userId) &&
-        e.created_at.slice(0, 10) === today
-      )
+      list = list.filter(e => {
+        const belongsToStore = (e as any).store_id === storeId || e.created_by === userId
+        // FIX: cek created_at (primary) atau expense_date (fallback)
+        const dateStr = e.created_at
+          ? e.created_at.slice(0, 10)
+          : ((e as any).expense_date || '').slice(0, 10)
+        return belongsToStore && dateStr === today
+      })
     } else if (role === 'produksi') {
       list = list.filter(e => e.created_by === userId)
     }
-    // owner/manager/gudang: lihat semua
     return list
   }, [role, userId, storeId])
 
@@ -157,7 +161,11 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
     if (filterKat !== 'semua') list = list.filter(e => (e as any).category === filterKat)
     if (search) {
       const q = search.toLowerCase()
-      list = list.filter(e => e.description?.toLowerCase().includes(q) || (e as any).category?.toLowerCase().includes(q))
+      list = list.filter(e =>
+        e.description?.toLowerCase().includes(q) ||
+        (e as any).category?.toLowerCase().includes(q) ||
+        (e as any).name?.toLowerCase().includes(q)
+      )
     }
     return list
   }, [expenses, filterStore, filterKat, search, isOwnerManager])
@@ -167,11 +175,13 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
 
   function BiayaRow({ e, idx }: { e: any; idx: number }) {
     const katLabel = KATEGORI_BIAYA.find(k => k.value === e.category)?.label || e.category || 'Lainnya'
+    // FIX: tampilkan description atau name (fallback untuk data lama)
+    const displayName = e.description || e.name || 'Biaya'
     return (
       <div className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900">{e.description || 'Biaya'}</p>
+            <p className="text-sm font-medium text-gray-900">{displayName}</p>
             <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
               <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full">{katLabel}</span>
               <span className="text-xs text-gray-400">
@@ -293,17 +303,23 @@ function BiayaForm({ userId, storeId, role, onClose }: {
     if (!amount || Number(amount) <= 0) return toast.error('Jumlah wajib diisi')
     setSaving(true)
     try {
-      // FIX: hanya kirim field yang ada di schema, hapus undefined
+      const nowStr     = now()
+      // FIX: expense_date diisi dari tanggal sekarang (format YYYY-MM-DD)
+      const todayDate  = new Date().toLocaleDateString('sv-SE')
+
       const data: any = {
-        id:          generateId(),
-        store_id:    activeStoreId,
-        description: description.trim(),
-        amount:      Number(amount),
-        category:    category,
-        created_by:  userId,
-        created_at:  now(),
+        id:           generateId(),
+        store_id:     activeStoreId,
+        description:  description.trim(),
+        name:         description.trim(),   // FIX: isi name juga (NOT NULL dulu, sekarang nullable tapi aman)
+        amount:       Number(amount),
+        category:     category,
+        expense_date: todayDate,            // FIX: wajib diisi agar filter date bekerja
+        created_by:   userId,
+        created_at:   nowStr,
       }
       if (notes?.trim()) data.notes = notes.trim()
+
       await db.warehouse_expenses.put(data)
       const { error } = await supabase.from('warehouse_expenses').upsert(data)
       if (error) {

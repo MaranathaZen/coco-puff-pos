@@ -577,7 +577,7 @@ export default function CashierPage() {
           if (printModeNow === 'rawbt') {
             window.location.href = `rawbt:${encodeURIComponent(aLines.join('\n'))}`
           } else {
-            const html2 = `<html><head><style>*{margin:0;padding:0;}body{margin:0;padding:1mm 0;}pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;white-space:pre;letter-spacing:0;}@page{margin:0mm;size:58mm auto;}@media print{pre{width:56mm;}}</style></head><body><pre>${aLines.join('\n')}</pre></body></html>`
+            const html2 = `<html><head><style>*{margin:0;padding:0;}html,body{width:76mm;margin:0;padding:0;}pre{font-family:'Courier New',Courier,monospace;font-size:10pt;line-height:1.15;white-space:pre;width:76mm;}@page{margin:0mm;size:76mm auto;}</style></head><body><pre>${aLines.join('\n')}</pre></body></html>`
             const iframe2 = document.createElement('iframe')
             iframe2.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;'
             document.body.appendChild(iframe2)
@@ -1250,7 +1250,7 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
   const payLabel: Record<string,string> = { cash:'Tunai', qris:'QRIS', transfer:'Transfer', gopay:'GoPay', grab:'GrabPay', shopeefood:'ShopeePay' }
 
   // ── FORMAT STRUK — mengacu sistem lama (38 karakter, kertas 76mm) ──
-  const W   = 32  // Kertas 58mm = 32 karakter
+  const W   = 32  // 32 karakter untuk EPSON TM-U220
   const SEP = '='.repeat(W)
   const sep = '-'.repeat(W)
 
@@ -1394,7 +1394,7 @@ pre {
 }
 @page {
   margin: 0mm;
-  size: 58mm auto;
+  size: 76mm auto;
 }
 @media print {
   pre { width: 56mm; }

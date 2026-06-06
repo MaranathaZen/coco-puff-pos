@@ -1,11 +1,6 @@
 // src/pages/pembelian/UnifiedPembelianPage.tsx
-// CHANGELOG v3:
-// - FIX: label card "Total Pembelian Bulan Ini" → "Total Pembelian Hari Ini" untuk kasir
-// - FIX: subtitle card kasir tampilkan jumlah transaksi (bukan "Data toko ini saja")
-// - FIX: totalBulanIni untuk kasir hitung hari ini saja
-// - FIX: kasir tidak perlu filter hari ini di useLiveQuery — sudah ditangani di card hitung
-//   (kasir tetap lihat history, tapi card total hanya hari ini)
-// - Semua fix v2 tetap berlaku
+// CHANGELOG v4:
+// - FIX: kasir hanya tampil pembelian hari ini (bukan semua history)
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -133,11 +128,10 @@ export default function UnifiedPembelianPage() {
 }
 
 function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: string; role: string; storeId: string; setToolbarActions: (n: React.ReactNode) => void }) {
-  const setToolbar = setToolbarActions
   const [showForm,     setShowForm]     = useState(false)
   const [groupMode,    setGroupMode]    = useState<Period>('hari')
   const [search,       setSearch]       = useState('')
-  const [filterStore,  setFilterStore]  = useState(() => role === 'gudang' ? storeId : '')
+  const [filterStore,  setFilterStore]  = useState('')
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
     [new Date().toISOString().slice(0, 10)]: true
   }))
@@ -152,15 +146,12 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   , [isOwnerManager])
 
   useEffect(() => {
-    if (stores && stores.length > 0 && !filterStore) {
-      setFilterStore(stores[0].id)
-    }
+    if (stores && stores.length > 0 && !filterStore) setFilterStore(stores[0].id)
   }, [stores])
 
   useEffect(() => {
-    setToolbar(
+    setToolbarActions(
       <div className="flex items-center gap-2">
-        {/* FIX #1: kasir tidak perlu dropdown per hari/bulan */}
         {!isKasir && (
           <select value={groupMode} onChange={e => setGroupMode(e.target.value as Period)}
             className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600">
@@ -174,15 +165,18 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
         </button>
       </div>
     )
-    return () => setToolbar(null)
+    return () => setToolbarActions(null)
   }, [groupMode, isKasir])
 
   const purchases = useLiveQuery(async () => {
     let p = await db.purchases.orderBy('created_at').reverse().toArray()
-    // FIX: kasir lihat semua pembelian toko (tidak dibatasi hari ini di query)
-    // filter hari ini hanya untuk card total, history tetap tampil semua
     if (role === 'kasir') {
-      p = p.filter(x => (x as any).store_id === storeId || x.created_by === userId)
+      // FIX: kasir hanya lihat hari ini
+      const today = new Date().toLocaleDateString('sv-SE')
+      p = p.filter(x =>
+        ((x as any).store_id === storeId || x.created_by === userId) &&
+        x.created_at.slice(0, 10) === today
+      )
     }
     const pi   = await db.purchase_items.toArray()
     const mats = await db.materials.toArray()
@@ -202,9 +196,7 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   const filtered = useMemo(() => {
     if (!purchases) return []
     let list = purchases
-    if (isOwnerManager && filterStore) {
-      list = list.filter(p => (p as any).storeId === filterStore)
-    }
+    if (isOwnerManager && filterStore) list = list.filter(p => (p as any).storeId === filterStore)
     if (!search) return list
     const q = search.toLowerCase()
     return list.filter(p =>
@@ -217,39 +209,51 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
 
   const grouped = useMemo(() => groupBy(filtered, p => groupKey(p.created_at, groupMode)), [filtered, groupMode])
 
-  // FIX: kasir hitung total hari ini, owner/manager hitung bulan ini
   const { totalCardAmount, totalCardCount } = useMemo(() => {
-    const now2 = new Date()
-    const todayStr = now2.toLocaleDateString('sv-SE')
-    const baseList = filtered || []
-    if (isKasir) {
-      const todayList = baseList.filter(p => {
-        const d = new Date(p.created_at)
-        return d.toLocaleDateString('sv-SE') === todayStr
-      })
-      return { totalCardAmount: todayList.reduce((s, p) => s + p.total_amount, 0), totalCardCount: todayList.length }
-    } else {
-      const monthList = baseList.filter(p => {
-        const d = new Date(p.created_at)
-        return d.getMonth() === now2.getMonth() && d.getFullYear() === now2.getFullYear()
-      })
-      return { totalCardAmount: monthList.reduce((s, p) => s + p.total_amount, 0), totalCardCount: monthList.length }
-    }
-  }, [filtered, isKasir])
+    return { totalCardAmount: filtered.reduce((s, p) => s + p.total_amount, 0), totalCardCount: filtered.length }
+  }, [filtered])
+
+  function PurchaseRow({ p, idx }: { p: any; idx: number }) {
+    return (
+      <div className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
+        <div className="flex items-start justify-between mb-1">
+          <div className="flex-1 min-w-0">
+            {(p as any).po_number && (
+              <p className="text-xs font-mono text-blue-600 mb-0.5">{(p as any).po_number}<CopyBtn text={(p as any).po_number} /></p>
+            )}
+            <p className="text-sm font-medium text-gray-900">{p.supplier?.name || 'Tanpa Supplier'}</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {new Date(p.created_at).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})},{' '}
+              {new Date(p.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}
+              {(p as any).payment_method ? ` · ${(p as any).payment_method}` : ''}
+              {isOwnerManager && storeMap[(p as any).storeId] && (
+                <span className="ml-1 text-gray-300">· {storeMap[(p as any).storeId]}</span>
+              )}
+            </p>
+            {p.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {p.notes}</p>}
+          </div>
+          <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(p.total_amount)}</p>
+        </div>
+        {p.items.length > 0 && (
+          <div className="mt-1.5 border-t border-gray-50 pt-1.5 space-y-0.5">
+            {p.items.map((i: any) => (
+              <div key={i.id} className="flex justify-between text-xs text-gray-400">
+                <span>{i.material?.name} × {i.qty} {i.material?.unit}{i.unit_cost > 0 ? ` @ ${formatRupiah(i.unit_cost)}` : ''}</span>
+                <span>{formatRupiah(i.subtotal)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="p-4 space-y-3">
-      {/* FIX: label dan subtitle card */}
       <div className="bg-white rounded-xl border border-gray-100 p-4">
-        <p className="text-xs text-gray-400 mb-1">
-          {isKasir ? 'Total Pembelian Hari Ini' : 'Total Pembelian Bulan Ini'}
-        </p>
+        <p className="text-xs text-gray-400 mb-1">{isKasir ? 'Total Pembelian Hari Ini' : 'Total Pembelian Bulan Ini'}</p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalCardAmount)}</p>
-        <p className="text-xs text-gray-400 mt-0.5">
-          {isKasir
-            ? `${totalCardCount} transaksi`
-            : `${totalCardCount} transaksi`}
-        </p>
+        <p className="text-xs text-gray-400 mt-0.5">{totalCardCount} transaksi</p>
       </div>
 
       {isOwnerManager && stores && stores.length > 0 && (
@@ -267,40 +271,11 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
         className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
         placeholder="Cari supplier, PO, bahan..." />
 
-      {/* FIX #4: kasir tampil flat tanpa group/collapse */}
       {isKasir ? (
         <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
           {filtered.length === 0
             ? <div className="py-12 text-center text-sm text-gray-400">Belum ada pembelian hari ini</div>
-            : filtered.map((p, idx) => (
-              <div key={p.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
-                <div className="flex items-start justify-between mb-1">
-                  <div className="flex-1 min-w-0">
-                    {(p as any).po_number && (
-                      <p className="text-xs font-mono text-blue-600 mb-0.5">{(p as any).po_number}<CopyBtn text={(p as any).po_number} /></p>
-                    )}
-                    <p className="text-sm font-medium text-gray-900">{p.supplier?.name || 'Tanpa Supplier'}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {new Date(p.created_at).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})},{' '}
-                      {new Date(p.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}
-                      {(p as any).payment_method ? ` · ${(p as any).payment_method}` : ''}
-                    </p>
-                    {p.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {p.notes}</p>}
-                  </div>
-                  <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(p.total_amount)}</p>
-                </div>
-                {p.items.length > 0 && (
-                  <div className="mt-1.5 border-t border-gray-50 pt-1.5 space-y-0.5">
-                    {p.items.map(i => (
-                      <div key={i.id} className="flex justify-between text-xs text-gray-400">
-                        <span>{i.material?.name} × {i.qty} {i.material?.unit}{i.unit_cost > 0 ? ` @ ${formatRupiah(i.unit_cost)}` : ''}</span>
-                        <span>{formatRupiah(i.subtotal)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))
+            : filtered.map((p, idx) => <PurchaseRow key={p.id} p={p} idx={idx} />)
           }
         </div>
       ) : (
@@ -308,7 +283,7 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
           {grouped.map(({ key, items: grpItems }) => {
             const total    = grpItems.reduce((s, p) => s + p.total_amount, 0)
             const today    = new Date().toLocaleDateString('sv-SE')
-            const isFirst  = grouped.indexOf(grouped.find(g => g.key === key)!) === 0
+            const isFirst  = grouped[0]?.key === key
             const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : (key === today || isFirst)
             return (
               <div key={key}>
@@ -326,41 +301,7 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
                   </div>
                 </button>
                 <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{ display: expanded ? undefined : 'none' }}>
-                  {grpItems.map((p, idx) => (
-                    <div key={p.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
-                      <div className="flex items-start justify-between mb-1">
-                        <div className="flex-1 min-w-0">
-                          {(p as any).po_number && (
-                            <p className="text-xs font-mono text-blue-600 mb-0.5">{(p as any).po_number}<CopyBtn text={(p as any).po_number} /></p>
-                          )}
-                          <p className="text-sm font-medium text-gray-900">{p.supplier?.name || 'Tanpa Supplier'}</p>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            {new Date(p.created_at).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})},{' '}
-                            {new Date(p.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}
-                            {(p as any).payment_method ? ` · ${(p as any).payment_method}` : ''}
-                            {isOwnerManager && storeMap[(p as any).storeId] && (
-                              <span className="ml-1 text-gray-300">· {storeMap[(p as any).storeId]}</span>
-                            )}
-                          </p>
-                          {p.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {p.notes}</p>}
-                        </div>
-                        <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(p.total_amount)}</p>
-                      </div>
-                      {p.items.length > 0 && (
-                        <div className="mt-1.5 border-t border-gray-50 pt-1.5 space-y-0.5">
-                          {p.items.map(i => (
-                            <div key={i.id} className="flex justify-between text-xs text-gray-400">
-                              <span>{i.material?.name} × {i.qty} {i.material?.unit}{i.unit_cost > 0 ? ` @ ${formatRupiah(i.unit_cost)}` : ''}</span>
-                              <span>{formatRupiah(i.subtotal)}</span>
-                            </div>
-                          ))}
-                          <div className="flex justify-between text-xs font-medium text-gray-600 pt-1 border-t border-gray-50 mt-1">
-                            <span>Total</span><span>{formatRupiah(p.items.reduce((s,i)=>s+i.subtotal,0))}</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                  {grpItems.map((p, idx) => <PurchaseRow key={p.id} p={p} idx={idx} />)}
                 </div>
               </div>
             )
@@ -384,9 +325,8 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
   const activeStoreId = isOwnerManager ? inputAsStore : storeId
 
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
-  const suppliers = useLiveQuery(() => db.suppliers.filter(s => s.is_active !== false).toArray(), [])
+  const suppliers  = useLiveQuery(() => db.suppliers.filter(s => s.is_active !== false).toArray(), [])
 
-  // FIX #3: untuk kasir, ambil stok toko sebagai pilihan bahan
   const storeStockMats = useLiveQuery(async () => {
     if (role !== 'kasir') return []
     const stocks = await db.stock.where('store_id').equals(activeStoreId).toArray()
@@ -481,6 +421,8 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
     finally { setSaving(false) }
   }
 
+  const matOptions = role === 'kasir' ? (storeStockMats || []) : (materials || [])
+
   return (
     <Modal title="Pembelian Baru" onClose={onClose}>
       {isOwnerManager && allStores && allStores.length > 0 && (
@@ -517,10 +459,6 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
       <div><Label required>Item</Label>
         <div className="space-y-2">
           {items.map((item, i) => {
-            // FIX #3: kasir hanya pilih dari stok toko, bukan master materials
-            const matOptions = role === 'kasir'
-              ? (storeStockMats || [])
-              : (materials || [])
             const mat = matOptions?.find((m: any) => m.id === item.material_id) as any
             const uc  = getUnitCost(item)
             return (
@@ -547,7 +485,7 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-2">
-                    <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit||''})`} value={item.qty} onChange={e => updateItem(i,'qty',e.target.value)} />
+                    <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit||''} )`} value={item.qty} onChange={e => updateItem(i,'qty',e.target.value)} />
                     <input className="input text-sm" type="number" placeholder={`Harga/${mat?.unit||'unit'}`} value={item.unit_cost} onChange={e => updateItem(i,'unit_cost',e.target.value)} />
                   </div>
                 )}

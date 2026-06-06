@@ -388,8 +388,9 @@ export default function CashierPage() {
       const newStatus  = isOwnerMgr ? 'voided' : 'void_requested'
       const updated: any = { ...voidTx, status: newStatus, void_reason: voidReason.trim(), voided_by: user!.id, voided_at: now() }
       await db.transactions.put(updated)
-      // FIX: pakai upsert bukan update — transaksi mungkin belum ada di Supabase
-      const { error } = await supabase.from('transactions').upsert(updated)
+      // FIX: pakai upsert, strip 'items' (field join Dexie, bukan kolom Supabase)
+      const { items: _items, ...updatedForSupabase } = updated
+      const { error } = await supabase.from('transactions').upsert(updatedForSupabase)
       if (error) console.error('[VOID ERROR]', error)
       if (isOwnerMgr) {
         await restoreStockFromVoid(voidTx.id, STORE_ID)
@@ -821,16 +822,18 @@ export default function CashierPage() {
                           <button onClick={async e => {
                             e.stopPropagation()
                             await restoreStockFromVoid(tx.id, STORE_ID)
+                            const { items: _i1, ...updForSupa1 } = { ...tx, status: 'voided' } as any
                             const upd: any = { ...tx, status: 'voided' }
                             await db.transactions.put(upd)
-                            await supabase.from('transactions').upsert(upd)
+                            await supabase.from('transactions').upsert(updForSupa1)
                             toast.success('Void disetujui & stok dikembalikan')
                           }} className="text-xs text-white bg-red-500 px-2 py-0.5 rounded-lg">✓</button>
                           <button onClick={async e => {
                             e.stopPropagation()
+                            const { items: _i2, ...updForSupa2 } = { ...tx, status: 'completed' } as any
                             const upd: any = { ...tx, status: 'completed' }
                             await db.transactions.put(upd)
-                            await supabase.from('transactions').upsert(upd)
+                            await supabase.from('transactions').upsert(updForSupa2)
                             toast.success('Ditolak')
                           }} className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-lg">✗</button>
                         </div>

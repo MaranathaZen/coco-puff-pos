@@ -1323,8 +1323,14 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
   // Format Rupiah plain ASCII untuk dot matrix (hindari Unicode)
   function fmtRp(n: number): string {
     const num = Math.round(n)
-    const str = num.toLocaleString('id-ID')
-    return 'Rp ' + str
+    // Format manual tanpa toLocaleString — pure ASCII
+    const s = String(num)
+    let result = ''
+    for (let i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 === 0) result += '.'
+      result += s[i]
+    }
+    return 'Rp ' + result
   }
 
   function center38(s: string): string {

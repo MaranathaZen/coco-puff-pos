@@ -1320,6 +1320,13 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
   const SEP = '='.repeat(W)
   const sep = '-'.repeat(W)
 
+  // Format Rupiah plain ASCII untuk dot matrix (hindari Unicode)
+  function fmtRp(n: number): string {
+    const num = Math.round(n)
+    const str = num.toLocaleString('id-ID')
+    return 'Rp ' + str
+  }
+
   function center38(s: string): string {
     const str = s.substring(0, W)
     return str.padStart(Math.floor((W + str.length) / 2)).padEnd(W)
@@ -1389,13 +1396,13 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
       }
 
       // Item line
-      const totalFmt = formatRupiah(item.subtotal)
+      const totalFmt = fmtRp(item.subtotal)
       const leftPart = `${item.qty}x ${item.name}`.substring(0, W - totalFmt.length - 1)
       lines.push(leftPart.padEnd(W - totalFmt.length) + totalFmt)
 
       // Diskon item
       if (item.promoDiscount > 0) {
-        const discFmt   = '-' + formatRupiah(item.promoDiscount)
+        const discFmt   = '-' + fmtRp(item.promoDiscount)
         const discLabel = '  Diskon'
         lines.push(discLabel.padEnd(W - discFmt.length) + discFmt)
       }
@@ -1403,7 +1410,7 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
 
     // Paket di cart
     for (const p of (data.pakets || [])) {
-      const totalFmt = formatRupiah(p.subtotal)
+      const totalFmt = fmtRp(p.subtotal)
       const leftPart = `1x ${p.name}`.substring(0, W - totalFmt.length - 1)
       lines.push(leftPart.padEnd(W - totalFmt.length) + totalFmt)
     }
@@ -1411,21 +1418,21 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
     lines.push(sep)
 
     // SUBTOTAL & DISKON & PPN
-    lines.push(row38('Subtotal', formatRupiah(data.rawSubtotal)))
-    if ((data.buy1get1Discount || 0) > 0) lines.push(row38('Diskon B1G1', '-' + formatRupiah(data.buy1get1Discount)))
-    if ((data.paketDiscount    || 0) > 0) lines.push(row38('Diskon Paket', '-' + formatRupiah(data.paketDiscount)))
+    lines.push(row38('Subtotal', fmtRp(data.rawSubtotal)))
+    if ((data.buy1get1Discount || 0) > 0) lines.push(row38('Diskon B1G1', '-' + fmtRp(data.buy1get1Discount)))
+    if ((data.paketDiscount    || 0) > 0) lines.push(row38('Diskon Paket', '-' + fmtRp(data.paketDiscount)))
     const promoOnlyDisc = (data.rawDiscount||0) - (data.buy1get1Discount||0) - (data.paketDiscount||0)
-    if (promoOnlyDisc > 0) lines.push(row38('Diskon Promo', '-' + formatRupiah(promoOnlyDisc)))
-    if (data.ppnAmount   > 0) lines.push(row38(`PPN ${data.ppnPct}%`, '+' + formatRupiah(data.ppnAmount)))
+    if (promoOnlyDisc > 0) lines.push(row38('Diskon Promo', '-' + fmtRp(promoOnlyDisc)))
+    if (data.ppnAmount   > 0) lines.push(row38(`PPN ${data.ppnPct}%`, '+' + fmtRp(data.ppnAmount)))
 
     lines.push(SEP)
-    lines.push(row38('TOTAL', formatRupiah(data.grandTotal)))
+    lines.push(row38('TOTAL', fmtRp(data.grandTotal)))
     lines.push(SEP)
 
     // PEMBAYARAN
     const metode    = payLabel2[data.payMethod] || data.payMethod
-    const bayarFmt  = formatRupiah(data.cashPaid)
-    const kembFmt   = formatRupiah(data.change)
+    const bayarFmt  = fmtRp(data.cashPaid)
+    const kembFmt   = fmtRp(data.change)
     if (data.payMethod === 'cash') {
       lines.push(row38(`Bayar (Cash)`, bayarFmt))
       if (data.change > 0) lines.push(row38('Kembali', kembFmt))

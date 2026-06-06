@@ -41,3 +41,9 @@
 [2026-06-06 12:12:03] === Coco Puff Print Server v2.0 ===
 [2026-06-06 12:12:03] HTTPS mode: https://localhost:5000
 [2026-06-06 12:12:03] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost
+[2026-06-06 12:15:43] === Coco Puff Print Server v2.0 ===
+[2026-06-06 12:15:43] HTTPS mode: https://localhost:5000
+[2026-06-06 12:15:43] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost
+[2026-06-06 12:20:05] Raw bytes (first 200): b'================================\n           Coco Puff            \n         Coco Puff Mog          \n================================\nNo    : CP-MOG-01-20260606-2780170\nTgl   :              6 Juni 2026\n'
+[2026-06-06 12:20:05] Text sample: '================================\n           Coco Puff            \n         Coco Puff Mog          \n='
+[2026-06-06 12:20:05] Print OK

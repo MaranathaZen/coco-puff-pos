@@ -293,21 +293,30 @@ function BiayaForm({ userId, storeId, role, onClose }: {
     if (!amount || Number(amount) <= 0) return toast.error('Jumlah wajib diisi')
     setSaving(true)
     try {
+      // FIX: hanya kirim field yang ada di schema, hapus undefined
       const data: any = {
         id:          generateId(),
         store_id:    activeStoreId,
         description: description.trim(),
         amount:      Number(amount),
         category:    category,
-        notes:       notes || undefined,
         created_by:  userId,
         created_at:  now(),
       }
-      await db.warehouse_expenses.add(data)
-      await supabase.from('warehouse_expenses').insert(data)
-      toast.success('Biaya dicatat')
+      if (notes?.trim()) data.notes = notes.trim()
+      await db.warehouse_expenses.put(data)
+      const { error } = await supabase.from('warehouse_expenses').upsert(data)
+      if (error) {
+        console.error('[BIAYA ERROR]', error)
+        toast.error('Tersimpan lokal, gagal sync: ' + error.message)
+      } else {
+        toast.success('Biaya dicatat')
+      }
       onClose()
-    } catch (e) { toast.error('Gagal menyimpan') }
+    } catch (e) {
+      console.error('[BIAYA]', e)
+      toast.error('Gagal menyimpan')
+    }
     finally { setSaving(false) }
   }
 

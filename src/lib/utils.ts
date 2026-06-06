@@ -22,15 +22,18 @@ export function formatDateOnly(dateStr: string): string {
     day: '2-digit', month: 'short', year: 'numeric',
   }).format(new Date(dateStr))
 }
-export function generateReceiptNo(storeId: string): string {
-  const date  = new Date()
-  const ymd   = date.toISOString().slice(0, 10).replace(/-/g, '')
-  // Pakai timestamp ms + random untuk pastikan unik
-  const ms    = date.getTime().toString().slice(-4)
-  const rand  = Math.floor(Math.random() * 900 + 100)
-  const store = storeId.replace('store-', '').replace('toko-', '').toUpperCase()
-  return `CP-${store}-${ymd}-${ms}${rand}`
+
+// FIX #7: ID transaksi simple — format YYYYMMDD-NNN (nomor urut harian)
+export async function generateReceiptNo(_storeId: string): Promise<string> {
+  const date = new Date()
+  const ymd  = date.toISOString().slice(0, 10).replace(/-/g, '')
+  const key  = `receipt_counter_${ymd}`
+  const cur  = parseInt(localStorage.getItem(key) || '0', 10)
+  const next = cur + 1
+  localStorage.setItem(key, String(next))
+  return `${ymd}-${String(next).padStart(3, '0')}`
 }
+
 /** Hitung packaging otomatis: qty eceran → dus + sisa eceran */
 export function calcPackaging(qtyEceran: number, pkgQty: number) {
   if (pkgQty <= 1) return { dus: 0, eceran: qtyEceran }
@@ -38,6 +41,7 @@ export function calcPackaging(qtyEceran: number, pkgQty: number) {
   const eceran = qtyEceran % pkgQty
   return { dus, eceran }
 }
+
 /** Hash password sederhana (SHA-256) */
 export async function hashPassword(password: string): Promise<string> {
   const encoder = new TextEncoder()

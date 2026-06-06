@@ -555,7 +555,7 @@ export default function CashierPage() {
           }
 
           // Build struk pakai format sama (38 karakter, 76mm)
-          const AW   = 38
+          const AW   = 35
           const ASEP = '='.repeat(AW)
           const asep = '-'.repeat(AW)
           const actr = (s: string) => s.padStart(Math.floor((AW + Math.min(s.length,AW)) / 2)).padEnd(AW)
@@ -1343,7 +1343,7 @@ function ReceiptModal({ data, printMode, autoPrint, onClose }: { data: any; prin
   })()
 
   // ── FORMAT STRUK — mengacu sistem lama (38 karakter, kertas 76mm) ──
-  const W   = 38  // 38 karakter untuk EPSON TM-U220 76mm
+  const W   = 35  // 35 karakter untuk EPSON TM-U220 76mm
   const SEP = '='.repeat(W)
   const sep = '-'.repeat(W)
 

@@ -1,8 +1,8 @@
 // src/pages/biaya/UnifiedBiayaPage.tsx
-// CHANGELOG v4:
-// - FIX: tambah expense_date saat simpan (was null → tidak tampil di filter)
-// - FIX: filter kasir pakai created_at (bukan expense_date) agar konsisten
-// - FIX: filter tampil juga cek expense_date sebagai fallback
+// CHANGELOG v5:
+// - FIX: auto-sync saat mount (data tampil tanpa perlu klik refresh)
+// - FIX: expense_date & name diisi saat simpan
+// - FIX: filter kasir pakai created_at
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -66,7 +66,28 @@ export default function UnifiedBiayaPage() {
       const { data } = isOwnerManager
         ? await supabase.from('warehouse_expenses').select('*').order('created_at', { ascending: false }).limit(500)
         : await supabase.from('warehouse_expenses').select('*').eq('store_id', user?.store_id).order('created_at', { ascending: false }).limit(200)
-      if (data !== null) { await db.warehouse_expenses.clear(); if (data.length) await db.warehouse_expenses.bulkPut(data) }
+      if (data !== null) {
+        await db.warehouse_expenses.clear()
+        if (data.length) await db.warehouse_expenses.bulkPut(data)
+      }
+    } catch { /* silent on mount */ }
+    finally { setSyncing(false) }
+  }
+
+  // FIX: auto-sync saat mount
+  useEffect(() => { syncData() }, [])
+
+  async function syncDataWithToast() {
+    setSyncing(true)
+    try {
+      const isOwnerManager = ['owner','manager','gudang'].includes(user?.role || '')
+      const { data } = isOwnerManager
+        ? await supabase.from('warehouse_expenses').select('*').order('created_at', { ascending: false }).limit(500)
+        : await supabase.from('warehouse_expenses').select('*').eq('store_id', user?.store_id).order('created_at', { ascending: false }).limit(200)
+      if (data !== null) {
+        await db.warehouse_expenses.clear()
+        if (data.length) await db.warehouse_expenses.bulkPut(data)
+      }
       toast.success('Data diperbarui')
     } catch { toast.error('Gagal sync') }
     finally { setSyncing(false) }
@@ -78,7 +99,7 @@ export default function UnifiedBiayaPage() {
         <h1 className="text-lg font-semibold text-gray-900">Biaya</h1>
         <div className="flex items-center gap-2">
           {toolbarActions}
-          <button onClick={syncData} disabled={syncing} className="p-2 text-gray-400 rounded-full">
+          <button onClick={syncDataWithToast} disabled={syncing} className="p-2 text-gray-400 rounded-full">
             <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
           </button>
         </div>
@@ -93,11 +114,11 @@ export default function UnifiedBiayaPage() {
 function BiayaList({ userId, role, storeId, setToolbarActions }: {
   userId: string; role: string; storeId: string; setToolbarActions: (n: React.ReactNode) => void
 }) {
-  const [showForm,   setShowForm]   = useState(false)
-  const [groupMode,  setGroupMode]  = useState<Period>('hari')
-  const [search,     setSearch]     = useState('')
+  const [showForm,    setShowForm]    = useState(false)
+  const [groupMode,   setGroupMode]   = useState<Period>('hari')
+  const [search,      setSearch]      = useState('')
   const [filterStore, setFilterStore] = useState('')
-  const [filterKat,  setFilterKat]  = useState('semua')
+  const [filterKat,   setFilterKat]   = useState('semua')
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
     [new Date().toLocaleDateString('sv-SE')]: true
   }))
@@ -140,7 +161,6 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
       const today = new Date().toLocaleDateString('sv-SE')
       list = list.filter(e => {
         const belongsToStore = (e as any).store_id === storeId || e.created_by === userId
-        // FIX: cek created_at (primary) atau expense_date (fallback)
         const dateStr = e.created_at
           ? e.created_at.slice(0, 10)
           : ((e as any).expense_date || '').slice(0, 10)
@@ -163,8 +183,8 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
       const q = search.toLowerCase()
       list = list.filter(e =>
         e.description?.toLowerCase().includes(q) ||
-        (e as any).category?.toLowerCase().includes(q) ||
-        (e as any).name?.toLowerCase().includes(q)
+        (e as any).name?.toLowerCase().includes(q) ||
+        (e as any).category?.toLowerCase().includes(q)
       )
     }
     return list
@@ -175,7 +195,6 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
 
   function BiayaRow({ e, idx }: { e: any; idx: number }) {
     const katLabel = KATEGORI_BIAYA.find(k => k.value === e.category)?.label || e.category || 'Lainnya'
-    // FIX: tampilkan description atau name (fallback untuk data lama)
     const displayName = e.description || e.name || 'Biaya'
     return (
       <div className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
@@ -303,23 +322,20 @@ function BiayaForm({ userId, storeId, role, onClose }: {
     if (!amount || Number(amount) <= 0) return toast.error('Jumlah wajib diisi')
     setSaving(true)
     try {
-      const nowStr     = now()
-      // FIX: expense_date diisi dari tanggal sekarang (format YYYY-MM-DD)
-      const todayDate  = new Date().toLocaleDateString('sv-SE')
-
+      const nowStr    = now()
+      const todayDate = new Date().toLocaleDateString('sv-SE')
       const data: any = {
         id:           generateId(),
         store_id:     activeStoreId,
         description:  description.trim(),
-        name:         description.trim(),   // FIX: isi name juga (NOT NULL dulu, sekarang nullable tapi aman)
+        name:         description.trim(),
         amount:       Number(amount),
         category:     category,
-        expense_date: todayDate,            // FIX: wajib diisi agar filter date bekerja
+        expense_date: todayDate,
         created_by:   userId,
         created_at:   nowStr,
       }
       if (notes?.trim()) data.notes = notes.trim()
-
       await db.warehouse_expenses.put(data)
       const { error } = await supabase.from('warehouse_expenses').upsert(data)
       if (error) {
@@ -332,8 +348,7 @@ function BiayaForm({ userId, storeId, role, onClose }: {
     } catch (e) {
       console.error('[BIAYA]', e)
       toast.error('Gagal menyimpan')
-    }
-    finally { setSaving(false) }
+    } finally { setSaving(false) }
   }
 
   return (

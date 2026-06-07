@@ -1,6 +1,7 @@
 // src/pages/pembelian/UnifiedPembelianPage.tsx
-// CHANGELOG v4:
-// - FIX: kasir hanya tampil pembelian hari ini (bukan semua history)
+// CHANGELOG v5:
+// - FIX: auto-sync saat mount
+// - FIX: kasir hanya tampil pembelian hari ini
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -13,7 +14,6 @@ import { Plus, RefreshCw, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 type Period = 'hari' | 'bulan'
-
 function groupKey(d: string, m: Period) { return m === 'hari' ? d.slice(0,10) : d.slice(0,7) }
 function groupLabel(d: string, m: Period) {
   const dt = new Date(d)
@@ -26,20 +26,17 @@ function groupBy<T>(arr: T[], fn: (i: T) => string) {
   for (const item of arr) { const k = fn(item); if (!map.has(k)) map.set(k,[]); map.get(k)!.push(item) }
   return Array.from(map.entries()).map(([key, items]) => ({ key, items }))
 }
-
 const METODE_BAYAR = [
   { value: 'tunai',    label: 'Tunai'    },
   { value: 'transfer', label: 'Transfer' },
   { value: 'kredit',   label: 'Kredit'   },
 ]
-
 async function generatePONumber() {
   const ds = new Date().toISOString().slice(0,10).replace(/-/g,'')
   const prefix = `PO-${ds}-`
   const existing = await db.purchases.filter(p => (p as any).po_number?.startsWith(prefix)).toArray()
   return `${prefix}${String(existing.length + 1).padStart(3,'0')}`
 }
-
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -70,7 +67,6 @@ export default function UnifiedPembelianPage() {
   const { user } = useAuthStore()
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
   const [syncing, setSyncing] = useState(false)
-  useEffect(() => { syncData() }, [])
 
   if (user?.role === 'produksi') {
     return (
@@ -89,7 +85,7 @@ export default function UnifiedPembelianPage() {
     )
   }
 
-  async function syncData() {
+  async function doSync(showToast = false) {
     setSyncing(true)
     try {
       const isOwnerManager = ['owner','manager','gudang'].includes(user?.role || '')
@@ -105,10 +101,13 @@ export default function UnifiedPembelianPage() {
       if (pi.data?.length) { await db.purchase_items.clear(); await db.purchase_items.bulkPut(pi.data) }
       if (m.data?.length)  await db.materials.bulkPut(m.data)
       if (s.data?.length)  await db.suppliers.bulkPut(s.data)
-      toast.success('Data diperbarui')
-    } catch { toast.error('Gagal sync') }
+      if (showToast) toast.success('Data diperbarui')
+    } catch { if (showToast) toast.error('Gagal sync') }
     finally { setSyncing(false) }
   }
+
+  // FIX: auto-sync saat mount
+  useEffect(() => { doSync(false) }, [])
 
   return (
     <div className="flex flex-col h-full">
@@ -116,7 +115,7 @@ export default function UnifiedPembelianPage() {
         <h1 className="text-lg font-semibold text-gray-900">Pembelian</h1>
         <div className="flex items-center gap-2">
           {toolbarActions}
-          <button onClick={syncData} disabled={syncing} className="p-2 text-gray-400 rounded-full">
+          <button onClick={() => doSync(true)} disabled={syncing} className="p-2 text-gray-400 rounded-full">
             <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
           </button>
         </div>
@@ -172,7 +171,6 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   const purchases = useLiveQuery(async () => {
     let p = await db.purchases.orderBy('created_at').reverse().toArray()
     if (role === 'kasir') {
-      // FIX: kasir hanya lihat hari ini
       const today = new Date().toLocaleDateString('sv-SE')
       p = p.filter(x =>
         ((x as any).store_id === storeId || x.created_by === userId) &&
@@ -210,9 +208,10 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
 
   const grouped = useMemo(() => groupBy(filtered, p => groupKey(p.created_at, groupMode)), [filtered, groupMode])
 
-  const { totalCardAmount, totalCardCount } = useMemo(() => {
-    return { totalCardAmount: filtered.reduce((s, p) => s + p.total_amount, 0), totalCardCount: filtered.length }
-  }, [filtered])
+  const { totalCardAmount, totalCardCount } = useMemo(() => ({
+    totalCardAmount: filtered.reduce((s, p) => s + p.total_amount, 0),
+    totalCardCount: filtered.length,
+  }), [filtered])
 
   function PurchaseRow({ p, idx }: { p: any; idx: number }) {
     return (
@@ -252,7 +251,7 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   return (
     <div className="p-4 space-y-3">
       <div className="bg-white rounded-xl border border-gray-100 p-4">
-        <p className="text-xs text-gray-400 mb-1">{isKasir ? 'Total Pembelian Hari Ini' : 'Total Pembelian Bulan Ini'}</p>
+        <p className="text-xs text-gray-400 mb-1">{isKasir ? 'Total Pembelian Hari Ini' : 'Total Pembelian'}</p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalCardAmount)}</p>
         <p className="text-xs text-gray-400 mt-0.5">{totalCardCount} transaksi</p>
       </div>
@@ -327,22 +326,6 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
 
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const suppliers  = useLiveQuery(() => db.suppliers.filter(s => s.is_active !== false).toArray(), [])
-
-  const storeStockMats = useLiveQuery(async () => {
-    if (role !== 'kasir') return []
-    const stocks = await db.stock.where('store_id').equals(activeStoreId).toArray()
-    const mats   = await db.materials.toArray()
-    const mMap   = Object.fromEntries(mats.map(m => [m.id, m]))
-    return stocks
-      .filter(s => (s.qty_on_hand || 0) > 0)
-      .map(s => {
-        const id  = (s as any).material_id || s.ingredient_id || ''
-        const mat = mMap[id]
-        if (!mat) return null
-        return { id, name: mat.name, unit: mat.unit || 'pcs', unit_cost: mat.unit_cost || 0 }
-      })
-      .filter(Boolean) as { id: string; name: string; unit: string; unit_cost: number }[]
-  }, [activeStoreId, role])
 
   const [supplierId, setSupp]       = useState('')
   const [invoiceNo,  setInv]        = useState('')
@@ -422,8 +405,6 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
     finally { setSaving(false) }
   }
 
-  const matOptions = role === 'kasir' ? (storeStockMats || []) : (materials || [])
-
   return (
     <Modal title="Pembelian Baru" onClose={onClose}>
       {isOwnerManager && allStores && allStores.length > 0 && (
@@ -460,13 +441,13 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
       <div><Label required>Item</Label>
         <div className="space-y-2">
           {items.map((item, i) => {
-            const mat = matOptions?.find((m: any) => m.id === item.material_id) as any
+            const mat = materials?.find((m: any) => m.id === item.material_id) as any
             const uc  = getUnitCost(item)
             return (
               <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
                 <select className="input text-sm" value={item.material_id} onChange={e => updateItem(i,'material_id',e.target.value)}>
                   <option value="">Pilih bahan</option>
-                  {matOptions?.map((m: any) => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
+                  {materials?.map((m: any) => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
                 </select>
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-gray-500">Input per pack?</span>
@@ -486,7 +467,7 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-2">
-                    <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit||''} )`} value={item.qty} onChange={e => updateItem(i,'qty',e.target.value)} />
+                    <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit||''})`} value={item.qty} onChange={e => updateItem(i,'qty',e.target.value)} />
                     <input className="input text-sm" type="number" placeholder={`Harga/${mat?.unit||'unit'}`} value={item.unit_cost} onChange={e => updateItem(i,'unit_cost',e.target.value)} />
                   </div>
                 )}

@@ -1,5 +1,7 @@
 // src/pages/settings/SettingsPage.tsx
-// CHANGELOG v2:
+// CHANGELOG v3:
+// - FIX: resetToko + resetSemua hapus close_order_reports
+// - FIX: resetSemua hapus saldo_awal dari localStorage
 // - Tambah tab "Tutup Tahun" — backup + reset transaksi tahunan
 // - Sistem multi-region: owner Malang hanya lihat toko Malang, owner Bali hanya lihat toko Bali
 // - TokoTab: owner bisa tambah toko baru (tidak hanya edit)
@@ -38,13 +40,12 @@ export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('users')
   const isOwner        = user?.role === 'owner'
   const isOwnerManager = user?.role === 'owner' || user?.role === 'manager'
-  if (!user) return null  // Guard: jangan render sebelum user tersedia
+  if (!user) return null
 
   const tabs: { id: Tab; label: string; ownerOnly?: boolean }[] = [
     { id: 'users',       label: 'User'        },
     { id: 'supplier',    label: 'Supplier'    },
     { id: 'mitra',       label: 'Franchise'   },
-    // { id: 'menu', label: 'Menu' }, // Dihapus - menu diatur per role otomatis
     { id: 'toko',        label: 'Toko',        ownerOnly: true },
     { id: 'password',    label: 'Password'    },
     { id: 'ppn',         label: 'PPN',         ownerOnly: true },
@@ -70,7 +71,6 @@ export default function SettingsPage() {
         {tab === 'users'       && <UsersTab currentUser={user!} />}
         {tab === 'supplier'    && <SupplierTab />}
         {tab === 'mitra'       && <MitraTab />}
-        {/* tab menu dihapus */}
         {tab === 'toko'        && <TokoTab currentUser={user!} />}
         {tab === 'password'    && <ChangePasswordTab userId={user!.id} storeId={user!.store_id} />}
         {tab === 'ppn'         && <PPNTab currentUser={user!} />}
@@ -89,9 +89,7 @@ function UsersTab({ currentUser }: { currentUser: User }) {
   const [editUser,    setEdit]        = useState<User | null>(null)
   const [filterStore, setFilterStore] = useState('semua')
 
-  const stores = useLiveQuery(() =>
-    db.stores.filter(s => s.is_active).toArray()
-  , [])
+  const stores = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
 
   const users = useLiveQuery(async () => {
     if (isOwner) {
@@ -103,10 +101,7 @@ function UsersTab({ currentUser }: { currentUser: User }) {
   }, [isOwner, currentUser.store_id, stores])
 
   const storeMap = Object.fromEntries((stores||[]).map(s => [s.id, s.name]))
-
-  const filtered = users?.filter(u =>
-    filterStore === 'semua' || u.store_id === filterStore
-  ) ?? []
+  const filtered = users?.filter(u => filterStore === 'semua' || u.store_id === filterStore) ?? []
 
   async function handleDelete(u: User) {
     if (u.id === currentUser.id) return toast.error('Tidak bisa hapus akun sendiri')
@@ -129,21 +124,18 @@ function UsersTab({ currentUser }: { currentUser: User }) {
           </button>
         )}
       </div>
-
       {isOwner && stores && stores.length > 1 && (
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
           <button onClick={() => setFilterStore('semua')}
             className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore==='semua' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
             Semua
           </button>
-          {/* Gudang & Produksi dulu */}
           {(stores || []).filter(s => s.id.includes('gudang') || s.id.includes('produksi')).map(s => (
             <button key={s.id} onClick={() => setFilterStore(s.id)}
               className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore===s.id ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
               {s.name.replace(' Malang','').replace(' Bali','')}
             </button>
           ))}
-          {/* Toko real */}
           {(stores || []).filter(s => !s.id.includes('gudang') && !s.id.includes('produksi')).map(s => (
             <button key={s.id} onClick={() => setFilterStore(s.id)}
               className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${filterStore===s.id ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
@@ -152,7 +144,6 @@ function UsersTab({ currentUser }: { currentUser: User }) {
           ))}
         </div>
       )}
-
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {filtered.map((u, idx) => (
           <div key={u.id} className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
@@ -171,17 +162,14 @@ function UsersTab({ currentUser }: { currentUser: User }) {
             {!u.is_active && <span className="text-xs text-gray-400 mr-2">nonaktif</span>}
             {isOwner && u.id !== currentUser.id && (
               <div className="flex items-center gap-1.5 flex-shrink-0">
-                <button onClick={() => { setEdit(u); setShowForm(true) }}
-                  className="p-1.5 text-gray-400 rounded-lg"><ChevronRight size={14} /></button>
-                <button onClick={() => handleDelete(u)}
-                  className="p-1.5 text-red-400 rounded-lg"><Trash2 size={14} /></button>
+                <button onClick={() => { setEdit(u); setShowForm(true) }} className="p-1.5 text-gray-400 rounded-lg"><ChevronRight size={14} /></button>
+                <button onClick={() => handleDelete(u)} className="p-1.5 text-red-400 rounded-lg"><Trash2 size={14} /></button>
               </div>
             )}
           </div>
         ))}
         {filtered.length === 0 && <div className="py-8 text-center text-sm text-gray-400">Belum ada user</div>}
       </div>
-
       {showForm && (
         <UserForm user={editUser} currentUser={currentUser} stores={stores || []}
           onClose={() => { setShowForm(false); setEdit(null) }} />
@@ -351,21 +339,20 @@ function MenuConfigTab() {
   )
 }
 
-// ── TOKO TAB — owner bisa tambah toko baru ────────────────────
+// ── TOKO TAB ──────────────────────────────────────────────────
 function TokoTab({ currentUser }: { currentUser: User }) {
   const [stores,    setStores]  = useState<any[]>([])
   const [editStore, setEdit]    = useState<any|null>(null)
   const [showForm,  setForm]    = useState(false)
   const [isNew,     setIsNew]   = useState(false)
   const [loading,   setLoading] = useState(true)
-  const region = 'malang'  // default region untuk sistem ini
+  const region = 'malang'
 
   useEffect(() => {
     async function load() {
       const { data } = await supabase.from('stores').select('*').order('created_at')
       if (data) {
-        const realStores = data.filter((s: any) => !s.is_virtual)
-        setStores(realStores)
+        setStores(data.filter((s: any) => !s.is_virtual))
         await db.stores.bulkPut(data)
       }
       setLoading(false)
@@ -398,17 +385,13 @@ function TokoTab({ currentUser }: { currentUser: User }) {
         {!loading && stores.length === 0 && <div className="py-8 text-center text-sm text-gray-400">Belum ada toko</div>}
       </div>
       {showForm && (
-        <TokoForm
-          store={editStore}
-          isNew={isNew}
-          region={region}
+        <TokoForm store={editStore} isNew={isNew} region={region}
           onClose={() => { setForm(false); setEdit(null) }}
           onSaved={updated => {
             if (isNew) setStores(prev => [...prev, updated])
             else setStores(prev => prev.map(s => s.id === updated.id ? updated : s))
             setForm(false)
-          }}
-        />
+          }} />
       )}
     </div>
   )
@@ -430,14 +413,8 @@ function TokoForm({ store, isNew, region, onClose, onSaved }: {
     setSaving(true)
     try {
       if (isNew) {
-        // Buat ID dari nama toko
         const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-        const newStore = {
-          id: `store-${slug}-${Date.now().toString(36)}`,
-          name: name.trim(), city, phone: phone||null,
-          address: address||null, is_active: isActive,
-          region, created_at: now(),
-        }
+        const newStore = { id: `store-${slug}-${Date.now().toString(36)}`, name: name.trim(), city, phone: phone||null, address: address||null, is_active: isActive, region, created_at: now() }
         await db.stores.add(newStore)
         const { error } = await supabase.from('stores').insert(newStore)
         if (error) throw error
@@ -450,8 +427,7 @@ function TokoForm({ store, isNew, region, onClose, onSaved }: {
         toast.success('Toko diupdate')
         onSaved(updated)
       }
-    } catch (e) {
-      toast.error('Gagal menyimpan: ' + String((e as any)?.message || e))
+    } catch (e) { toast.error('Gagal menyimpan: ' + String((e as any)?.message || e))
     } finally { setSaving(false) }
   }
 
@@ -524,9 +500,7 @@ function ChangePasswordTab({ userId, storeId }: { userId: string; storeId: strin
 // ── PPN TAB ───────────────────────────────────────────────────
 function PPNTab({ currentUser }: { currentUser: User }) {
   const isOwner  = currentUser.role === 'owner'
-  const stores   = useLiveQuery(() =>
-    db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
-  , [])
+  const stores   = useLiveQuery(() => db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray(), [])
   const [selectedStoreId, setSelectedStoreId] = useState(currentUser.store_id)
   const [enabled, setEnabled] = useState(false)
   const [rate,    setRate]    = useState('11')
@@ -536,22 +510,13 @@ function PPNTab({ currentUser }: { currentUser: User }) {
 
   useEffect(() => {
     setLoaded(false)
-    // Load dari Supabase dulu, fallback ke localStorage
     supabase.from('stores').select('ppn_enabled, ppn_rate, ppn_mode').eq('id', selectedStoreId).single()
       .then(({ data }) => {
         if (data && data.ppn_rate > 0) {
-          setEnabled(data.ppn_enabled ?? false)
-          setRate(String(data.ppn_rate ?? 11))
-          setMode(data.ppn_mode ?? 'include')
+          setEnabled(data.ppn_enabled ?? false); setRate(String(data.ppn_rate ?? 11)); setMode(data.ppn_mode ?? 'include')
         } else {
-          // fallback localStorage
           const saved = localStorage.getItem(`ppn_config_${selectedStoreId}`)
-          if (saved) {
-            try {
-              const cfg = JSON.parse(saved)
-              setEnabled(cfg.enabled ?? false); setRate(String(cfg.rate ?? 11)); setMode(cfg.mode ?? 'include')
-            } catch {}
-          }
+          if (saved) { try { const cfg = JSON.parse(saved); setEnabled(cfg.enabled??false); setRate(String(cfg.rate??11)); setMode(cfg.mode??'include') } catch {} }
         }
         setLoaded(true)
       })
@@ -639,9 +604,7 @@ interface PromoItem {
 
 function PromoTab({ currentUser }: { currentUser: User }) {
   const isOwner  = currentUser.role === 'owner'
-  const stores   = useLiveQuery(() =>
-    db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray()
-  , [])
+  const stores   = useLiveQuery(() => db.stores.filter(s => s.is_active && !(s as any).is_virtual).toArray(), [])
   const [selectedStoreId, setSelectedStoreId] = useState(currentUser.store_id)
   const [promos,   setPromos]   = useState<PromoItem[]>([])
   const [loading,  setLoading]  = useState(true)
@@ -842,10 +805,7 @@ function PromoForm({ storeId, promo, onClose, onSaved }: { storeId: string; prom
 // ── TUTUP TAHUN TAB ───────────────────────────────────────────
 function TutupTahunTab({ currentUser }: { currentUser: User }) {
   const region = 'malang'
-  const stores = useLiveQuery(() =>
-    db.stores.filter(s => s.is_active).toArray()
-  , [])
-
+  const stores = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
   const currentYear = new Date().getFullYear()
   const [selectedYear, setSelectedYear] = useState(currentYear - 1)
   const [step,         setStep]         = useState<'preview'|'backup'|'done'>('preview')
@@ -859,7 +819,6 @@ function TutupTahunTab({ currentUser }: { currentUser: User }) {
     try {
       const from = `${selectedYear}-01-01`
       const to   = `${selectedYear}-12-31`
-
       const [trx, purchases, mutations, expenses, logs] = await Promise.all([
         supabase.from('transactions').select('id, total', { count: 'exact' }).gte('created_at', from).lte('created_at', to),
         supabase.from('purchases').select('id, total_amount', { count: 'exact' }).gte('created_at', from).lte('created_at', to),
@@ -867,43 +826,21 @@ function TutupTahunTab({ currentUser }: { currentUser: User }) {
         supabase.from('warehouse_expenses').select('id, amount', { count: 'exact' }).gte('created_at', from).lte('created_at', to),
         supabase.from('production_logs').select('id', { count: 'exact' }).gte('created_at', from).lte('created_at', to),
       ])
-
       const totalPenjualan = (trx.data || []).reduce((s: number, t: any) => s + (t.total || 0), 0)
       const totalPembelian = (purchases.data || []).reduce((s: number, p: any) => s + (p.total_amount || 0), 0)
       const totalBiaya     = (expenses.data || []).reduce((s: number, e: any) => s + (e.amount || 0), 0)
-
-      setStats({
-        tahun:           selectedYear,
-        jumlahTransaksi: trx.count || 0,
-        totalPenjualan,
-        jumlahPembelian: purchases.count || 0,
-        totalPembelian,
-        jumlahMutasi:    mutations.count || 0,
-        jumlahBiaya:     expenses.count || 0,
-        totalBiaya,
-        jumlahProduksi:  logs.count || 0,
-      })
-    } catch (e) {
-      toast.error('Gagal load statistik')
-    } finally {
-      setLoadingStats(false)
-    }
+      setStats({ tahun: selectedYear, jumlahTransaksi: trx.count||0, totalPenjualan, jumlahPembelian: purchases.count||0, totalPembelian, jumlahMutasi: mutations.count||0, jumlahBiaya: expenses.count||0, totalBiaya, jumlahProduksi: logs.count||0 })
+    } catch { toast.error('Gagal load statistik') }
+    finally { setLoadingStats(false) }
   }
 
   async function handleBackupDanReset() {
     if (!confirm(`PERHATIAN!\n\nIni akan:\n1. Download backup data tahun ${selectedYear}\n2. Hapus semua transaksi tahun ${selectedYear} dari database\n3. Stok akhir menjadi stok awal periode baru\n\nLanjutkan?`)) return
-
-    setProcessing(true)
-    setStep('backup')
-    setLog([])
-
+    setProcessing(true); setStep('backup'); setLog([])
     try {
       const from = `${selectedYear}-01-01T00:00:00Z`
       const to   = `${selectedYear}-12-31T23:59:59Z`
-
-      // ── Step 1: Backup ke JSON ────────────────────────────
       setLog(p => [...p, `📦 Mengambil data tahun ${selectedYear}...`])
-
       const [trx, trxItems, purchases, purchItems, mutations, mutItems, expenses, prodLogs, prodLogMats, prodMuts, prodMutItems] = await Promise.all([
         supabase.from('transactions').select('*').gte('created_at', from).lte('created_at', to),
         supabase.from('transaction_items').select('*'),
@@ -917,153 +854,72 @@ function TutupTahunTab({ currentUser }: { currentUser: User }) {
         supabase.from('production_mutations').select('*').gte('created_at', from).lte('created_at', to),
         supabase.from('production_mutation_items').select('*'),
       ])
-
-      // Filter transaction_items dan purchase_items berdasarkan parent IDs
-      const trxIds      = new Set((trx.data || []).map((t: any) => t.id))
-      const purchIds    = new Set((purchases.data || []).map((p: any) => p.id))
-      const mutIds      = new Set((mutations.data || []).map((m: any) => m.id))
-      const prodLogIds  = new Set((prodLogs.data || []).map((l: any) => l.id))
-      const prodMutIds  = new Set((prodMuts.data || []).map((m: any) => m.id))
-
+      const trxIds     = new Set((trx.data || []).map((t: any) => t.id))
+      const purchIds   = new Set((purchases.data || []).map((p: any) => p.id))
+      const mutIds     = new Set((mutations.data || []).map((m: any) => m.id))
+      const prodLogIds = new Set((prodLogs.data || []).map((l: any) => l.id))
+      const prodMutIds = new Set((prodMuts.data || []).map((m: any) => m.id))
       const backup = {
-        meta: {
-          tahun: selectedYear,
-          region,
-          exported_at: new Date().toISOString(),
-          exported_by: currentUser.name,
-        },
-        transactions:           trx.data || [],
-        transaction_items:      (trxItems.data || []).filter((i: any) => trxIds.has(i.transaction_id)),
-        purchases:              purchases.data || [],
-        purchase_items:         (purchItems.data || []).filter((i: any) => purchIds.has(i.purchase_id)),
-        warehouse_mutations:    mutations.data || [],
-        warehouse_mutation_items: (mutItems.data || []).filter((i: any) => mutIds.has(i.mutation_id)),
-        warehouse_expenses:     expenses.data || [],
-        production_logs:        prodLogs.data || [],
-        production_log_materials: (prodLogMats.data || []).filter((i: any) => prodLogIds.has(i.log_id)),
-        production_mutations:   prodMuts.data || [],
-        production_mutation_items: (prodMutItems.data || []).filter((i: any) => prodMutIds.has(i.mutation_id)),
+        meta: { tahun: selectedYear, region, exported_at: new Date().toISOString(), exported_by: currentUser.name },
+        transactions: trx.data||[], transaction_items: (trxItems.data||[]).filter((i: any) => trxIds.has(i.transaction_id)),
+        purchases: purchases.data||[], purchase_items: (purchItems.data||[]).filter((i: any) => purchIds.has(i.purchase_id)),
+        warehouse_mutations: mutations.data||[], warehouse_mutation_items: (mutItems.data||[]).filter((i: any) => mutIds.has(i.mutation_id)),
+        warehouse_expenses: expenses.data||[], production_logs: prodLogs.data||[],
+        production_log_materials: (prodLogMats.data||[]).filter((i: any) => prodLogIds.has(i.log_id)),
+        production_mutations: prodMuts.data||[], production_mutation_items: (prodMutItems.data||[]).filter((i: any) => prodMutIds.has(i.mutation_id)),
       }
-
-      // ── Step 2: Download file backup ─────────────────────
       setLog(p => [...p, `💾 Membuat file backup...`])
-      const blob     = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
-      const url      = URL.createObjectURL(blob)
-      const a        = document.createElement('a')
-      a.href         = url
-      a.download     = `backup-coco-puff-${region}-${selectedYear}.json`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      setLog(p => [...p, `✅ File backup didownload: backup-coco-puff-${region}-${selectedYear}.json`])
-
-      // ── Step 3: Ambil stok akhir sebelum hapus ────────────
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href = url; a.download = `backup-coco-puff-${region}-${selectedYear}.json`
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
+      setLog(p => [...p, `✅ File backup didownload`])
       setLog(p => [...p, `📊 Menyimpan stok akhir...`])
-      const [wStock, pStock, fgStock, stockToko] = await Promise.all([
-        supabase.from('warehouse_stock').select('*'),
-        supabase.from('production_stock').select('*'),
-        supabase.from('finished_goods_stock').select('*'),
-        supabase.from('stock').select('*'),
-      ])
-
-      // ── Step 4: Hapus data transaksi tahun lalu ───────────
+      const [wStock] = await Promise.all([supabase.from('warehouse_stock').select('*')])
       setLog(p => [...p, `🗑️ Menghapus transaksi tahun ${selectedYear}...`])
-
-      // Hapus transaction items dulu
       if (trxIds.size > 0) {
-        const trxIdArr = Array.from(trxIds) as string[]
-        await supabase.from('transaction_items').delete().in('transaction_id', trxIdArr)
+        await supabase.from('transaction_items').delete().in('transaction_id', Array.from(trxIds) as string[])
         await supabase.from('transactions').delete().gte('created_at', from).lte('created_at', to)
       }
-
-      // Hapus purchase items
       if (purchIds.size > 0) {
-        const purchIdArr = Array.from(purchIds) as string[]
-        await supabase.from('purchase_items').delete().in('purchase_id', purchIdArr)
+        await supabase.from('purchase_items').delete().in('purchase_id', Array.from(purchIds) as string[])
         await supabase.from('purchases').delete().gte('created_at', from).lte('created_at', to)
       }
-
-      // Hapus warehouse mutations
       if (mutIds.size > 0) {
-        const mutIdArr = Array.from(mutIds) as string[]
-        await supabase.from('warehouse_mutation_items').delete().in('mutation_id', mutIdArr)
+        await supabase.from('warehouse_mutation_items').delete().in('mutation_id', Array.from(mutIds) as string[])
         await supabase.from('warehouse_mutations').delete().gte('created_at', from).lte('created_at', to)
       }
-
-      // Hapus expenses
       await supabase.from('warehouse_expenses').delete().gte('created_at', from).lte('created_at', to)
-
-      // Hapus production logs
       if (prodLogIds.size > 0) {
-        const logIdArr = Array.from(prodLogIds) as string[]
-        await supabase.from('production_log_materials').delete().in('log_id', logIdArr)
+        await supabase.from('production_log_materials').delete().in('log_id', Array.from(prodLogIds) as string[])
         await supabase.from('production_logs').delete().gte('created_at', from).lte('created_at', to)
       }
-
-      // Hapus production mutations
       if (prodMutIds.size > 0) {
-        const mutIdArr = Array.from(prodMutIds) as string[]
-        await supabase.from('production_mutation_items').delete().in('mutation_id', mutIdArr)
+        await supabase.from('production_mutation_items').delete().in('mutation_id', Array.from(prodMutIds) as string[])
         await supabase.from('production_mutations').delete().gte('created_at', from).lte('created_at', to)
       }
-
       setLog(p => [...p, `✅ Data transaksi tahun ${selectedYear} dihapus`])
-
-      // ── Step 5: Catat stok saat ini sebagai stok awal ─────
       setLog(p => [...p, `📝 Mencatat stok akhir sebagai stok awal ${selectedYear + 1}...`])
-
-      const newYear    = selectedYear + 1
+      const newYear = selectedYear + 1
       const openingDate = `${newYear}-01-01T00:00:00.000Z`
-      const mutId      = generateId()
-      const mut        = {
-        id: mutId,
-        mutation_type: 'opening_stock',
-        mutation_number: `OPEN-${newYear}`,
-        destination_name: `Saldo Awal ${newYear}`,
-        notes: `Tutup tahun ${selectedYear} — stok akhir jadi stok awal`,
-        status: 'confirmed',
-        created_by: currentUser.id,
-        created_at: openingDate,
-        confirmed_at: openingDate,
-        confirmed_by: currentUser.id,
-      }
-      await supabase.from('warehouse_mutations').insert(mut)
-
-      // Catat setiap item stok gudang sebagai mutation item
+      const mutId = generateId()
+      await supabase.from('warehouse_mutations').insert({ id: mutId, mutation_type: 'opening_stock', mutation_number: `OPEN-${newYear}`, destination_name: `Saldo Awal ${newYear}`, notes: `Tutup tahun ${selectedYear}`, status: 'confirmed', created_by: currentUser.id, created_at: openingDate, confirmed_at: openingDate, confirmed_by: currentUser.id })
       for (const ws of (wStock.data || [])) {
-        if (ws.qty_on_hand > 0) {
-          const mi = { id: generateId(), mutation_id: mutId, material_id: ws.material_id, qty: ws.qty_on_hand, unit_cost: 0 }
-          await supabase.from('warehouse_mutation_items').insert(mi)
-        }
+        if (ws.qty_on_hand > 0) await supabase.from('warehouse_mutation_items').insert({ id: generateId(), mutation_id: mutId, material_id: ws.material_id, qty: ws.qty_on_hand, unit_cost: 0 })
       }
-
       setLog(p => [...p, `✅ Stok awal ${newYear} dicatat`])
-
-      // ── Step 6: Update Dexie lokal ────────────────────────
       setLog(p => [...p, `🔄 Sync data lokal...`])
-      await db.transactions.clear()
-      await db.purchases.clear()
-      await db.purchase_items.clear()
-      await db.warehouse_mutations.clear()
-      await db.warehouse_mutation_items.clear()
-      await db.warehouse_expenses.clear()
-      await db.production_logs.clear()
-      await db.production_log_materials.clear()
-      await db.production_mutations.clear()
-      await db.production_mutation_items.clear()
-
+      await db.transactions.clear(); await db.purchases.clear(); await db.purchase_items.clear()
+      await db.warehouse_mutations.clear(); await db.warehouse_mutation_items.clear(); await db.warehouse_expenses.clear()
+      await db.production_logs.clear(); await db.production_log_materials.clear()
+      await db.production_mutations.clear(); await db.production_mutation_items.clear()
       setLog(p => [...p, `✅ Selesai! Data lokal dibersihkan`])
-      setStep('done')
-      toast.success(`Tutup tahun ${selectedYear} berhasil!`)
-
+      setStep('done'); toast.success(`Tutup tahun ${selectedYear} berhasil!`)
     } catch (e) {
-      console.error('[TutupTahun]', e)
-      toast.error('Gagal: ' + String((e as any)?.message || e))
+      console.error('[TutupTahun]', e); toast.error('Gagal: ' + String((e as any)?.message || e))
       setLog(p => [...p, `❌ Error: ${String((e as any)?.message || e)}`])
-    } finally {
-      setProcessing(false)
-    }
+    } finally { setProcessing(false) }
   }
 
   return (
@@ -1077,43 +933,31 @@ function TutupTahunTab({ currentUser }: { currentUser: User }) {
           </div>
         </div>
       </div>
-
       {step === 'done' ? (
         <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center">
           <p className="text-lg font-bold text-green-700">✓ Tutup Tahun Selesai</p>
           <p className="text-sm text-green-600 mt-1">Data tahun {selectedYear} sudah dibackup dan dihapus</p>
-          <button onClick={() => { setStep('preview'); setStats(null); setLog([]) }}
-            className="mt-3 px-4 py-2 bg-green-700 text-white rounded-xl text-sm font-medium">
-            Tutup Tahun Lain
-          </button>
+          <button onClick={() => { setStep('preview'); setStats(null); setLog([]) }} className="mt-3 px-4 py-2 bg-green-700 text-white rounded-xl text-sm font-medium">Tutup Tahun Lain</button>
         </div>
       ) : (
         <>
-          {/* Pilih tahun */}
           <div className="bg-white rounded-xl border border-gray-100 p-4">
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Pilih Tahun yang Akan Ditutup</p>
             <div className="flex gap-2">
               {[currentYear - 2, currentYear - 1].map(y => (
                 <button key={y} onClick={() => { setSelectedYear(y); setStats(null) }}
-                  className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-colors ${selectedYear === y ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
-                  {y}
-                </button>
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-colors ${selectedYear === y ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>{y}</button>
               ))}
             </div>
             <p className="text-xs text-gray-400 mt-2 text-center">Region: {region}</p>
           </div>
-
-          {/* Preview statistik */}
           {!stats ? (
-            <button onClick={loadStats} disabled={loadingStats}
-              className="w-full py-3 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 disabled:opacity-50">
+            <button onClick={loadStats} disabled={loadingStats} className="w-full py-3 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 disabled:opacity-50">
               {loadingStats ? 'Mengecek data...' : `Preview Data Tahun ${selectedYear}`}
             </button>
           ) : (
             <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-50">
-                <p className="text-sm font-semibold text-gray-900">Ringkasan Data Tahun {selectedYear}</p>
-              </div>
+              <div className="px-4 py-3 border-b border-gray-50"><p className="text-sm font-semibold text-gray-900">Ringkasan Data Tahun {selectedYear}</p></div>
               <div className="divide-y divide-gray-50">
                 {[
                   { label: 'Transaksi Penjualan', value: `${stats.jumlahTransaksi} transaksi · ${formatRupiah(stats.totalPenjualan)}` },
@@ -1130,15 +974,11 @@ function TutupTahunTab({ currentUser }: { currentUser: User }) {
               </div>
             </div>
           )}
-
-          {/* Progress log */}
           {log.length > 0 && (
             <div className="bg-gray-900 rounded-xl p-3 space-y-1">
               {log.map((l, i) => <p key={i} className="text-xs text-gray-300 font-mono">{l}</p>)}
             </div>
           )}
-
-          {/* Tombol eksekusi */}
           {stats && step !== 'backup' && (
             <button onClick={handleBackupDanReset} disabled={processing}
               className="w-full py-3 bg-red-600 text-white rounded-xl text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2">
@@ -1153,138 +993,24 @@ function TutupTahunTab({ currentUser }: { currentUser: User }) {
 }
 
 // ── RESET TAB ─────────────────────────────────────────────────
-// ── PRINTER TAB ──────────────────────────────────────────────
-function PrinterTab({ storeId }: { storeId: string }) {
-  const { user } = useAuthStore()
-  const isOwnerManager = ['owner','manager'].includes(user?.role || '')
-
-  // Owner/manager bisa set untuk semua toko
-  const stores = useLiveQuery(() =>
-    isOwnerManager
-      ? db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray()
-      : Promise.resolve([])
-  , [isOwnerManager])
-
-  const [selectedStore, setSelectedStore] = useState(storeId)
-
-  // Setting printer disimpan per toko di localStorage
-  const key = `printer_config_${selectedStore}`
-  const [printMode, setPrintMode] = useState<'browser'|'rawbt'>('browser')
-  const [autoPrint, setAutoPrint] = useState<boolean>(false)
-  const [saved, setSaved] = useState(false)
-
-  // Load config saat selectedStore berubah
-  useEffect(() => {
-    try {
-      const cfg = JSON.parse(localStorage.getItem(`printer_config_${selectedStore}`) || '{}')
-      setPrintMode(cfg.printMode || 'browser')
-      setAutoPrint(cfg.autoPrint || false)
-    } catch {
-      setPrintMode('browser')
-      setAutoPrint(false)
-    }
-  }, [selectedStore])
-
-  function handleSave() {
-    localStorage.setItem(key, JSON.stringify({ printMode, autoPrint }))
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-    const storeName = stores?.find(s => s.id === selectedStore)?.name || selectedStore
-    toast.success(`Setting printer ${isOwnerManager ? storeName : ''} disimpan`)
-  }
-
-  const selectedStoreName = stores?.find(s => s.id === selectedStore)?.name || ''
-
-  return (
-    <div className="p-4 space-y-4">
-      <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
-        <p className="text-xs font-semibold text-blue-700">Setting Printer per Toko</p>
-        <p className="text-xs text-blue-600 mt-0.5">Setting disimpan di device ini. Kasir di device lain perlu setting sendiri.</p>
-      </div>
-
-      {/* Store selector untuk owner/manager */}
-      {isOwnerManager && stores && stores.length > 0 && (
-        <div>
-          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Pilih Toko</label>
-          <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-            {stores.map(s => (
-              <button key={s.id} onClick={() => setSelectedStore(s.id)}
-                className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${selectedStore===s.id?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
-                {s.name}
-              </button>
-            ))}
-          </div>
-          {selectedStoreName && (
-            <p className="text-xs text-gray-400 mt-2">Setting untuk: <span className="font-medium text-gray-700">{selectedStoreName}</span></p>
-          )}
-        </div>
-      )}
-
-      {/* Mode printer */}
-      <div>
-        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Jenis Printer</label>
-        <div className="space-y-2">
-          <button onClick={() => setPrintMode('browser')}
-            className={`w-full flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-colors ${printMode==='browser'?'border-gray-900 bg-gray-50':'border-gray-200'}`}>
-            <div className="mt-0.5">
-              <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${printMode==='browser'?'border-gray-900':'border-gray-300'}`}>
-                {printMode==='browser' && <div className="w-2 h-2 bg-gray-900 rounded-full" />}
-              </div>
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-900">🖥️ Browser Print (Desktop/USB)</p>
-              <p className="text-xs text-gray-500 mt-0.5">Buka dialog print browser. Support semua OS. Cocok untuk printer USB/WiFi di desktop.</p>
-            </div>
-          </button>
-
-          <button onClick={() => setPrintMode('rawbt')}
-            className={`w-full flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-colors ${printMode==='rawbt'?'border-blue-600 bg-blue-50':'border-gray-200'}`}>
-            <div className="mt-0.5">
-              <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${printMode==='rawbt'?'border-blue-600':'border-gray-300'}`}>
-                {printMode==='rawbt' && <div className="w-2 h-2 bg-blue-600 rounded-full" />}
-              </div>
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-900">📱 RawBT (Android Bluetooth)</p>
-              <p className="text-xs text-gray-500 mt-0.5">Kirim langsung ke printer thermal via RawBT app. Cocok untuk Android + printer Bluetooth.</p>
-              <p className="text-xs text-blue-600 mt-1">Pastikan RawBT sudah terinstall dan printer sudah dipilih di RawBT.</p>
-            </div>
-          </button>
-        </div>
-      </div>
-
-      {/* Auto print */}
-      <div className="bg-white border border-gray-100 rounded-xl p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-gray-900">Print Otomatis</p>
-            <p className="text-xs text-gray-400 mt-0.5">Langsung print setelah transaksi berhasil tanpa tombol konfirmasi</p>
-          </div>
-          <button onClick={() => setAutoPrint(!autoPrint)}
-            className={`w-11 h-6 rounded-full transition-colors relative flex-shrink-0 ${autoPrint?'bg-gray-900':'bg-gray-200'}`}>
-            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${autoPrint?'left-[22px]':'left-0.5'}`} />
-          </button>
-        </div>
-        {autoPrint && (
-          <div className="mt-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-            <p className="text-xs text-amber-700">Mode auto-print: struk langsung terkirim ke printer tanpa preview. Pastikan printer sudah siap.</p>
-          </div>
-        )}
-      </div>
-
-      <button onClick={handleSave}
-        className="w-full py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold">
-        {saved ? '✓ Tersimpan' : 'Simpan Setting Printer'}
-      </button>
-    </div>
-  )
-}
-
 function ResetDataTab() {
   const [resetting, setResetting] = useState(false)
   const [log,       setLog]       = useState<string[]>([])
 
   function addLog(msg: string) { setLog(prev => [...prev, msg]) }
+
+  // ── Helper: hapus saldo awal dari localStorage ─────────────
+  function clearLocalStorageSaldo() {
+    Object.keys(localStorage)
+      .filter(k =>
+        k.startsWith('saldo_awal_') ||
+        k.startsWith('saldo_tambahan_') ||
+        k.startsWith('close_order_') ||
+        k.startsWith('coco_shift_') ||
+        k === 'shift_active'
+      )
+      .forEach(k => localStorage.removeItem(k))
+  }
 
   async function resetGudang() {
     if (!confirm('Reset data gudang? Pembelian, mutasi, biaya, stok gudang akan dihapus.')) return
@@ -1326,19 +1052,24 @@ function ResetDataTab() {
     finally { setResetting(false) }
   }
 
+  // ✅ FIX v3: tambah close_order_reports + hapus saldo localStorage
   async function resetToko() {
-    if (!confirm('Reset data toko? Transaksi kasir, shift, stok toko akan dihapus.')) return
+    if (!confirm('Reset data toko? Transaksi kasir, shift, close order, dan stok toko akan dihapus.')) return
     setResetting(true); setLog([])
     try {
-      addLog('Menghapus dari server...')
+      addLog('🗑️ Menghapus transaksi dari server...')
       await supabase.from('transaction_items').delete().neq('id', 'x')
       await supabase.from('transactions').delete().neq('id', 'x')
       await supabase.from('shifts').delete().neq('id', 'x')
       await supabase.from('stock').delete().neq('id', 'x')
-      addLog('Membersihkan lokal...')
+      addLog('🗑️ Menghapus close order reports...')
+      await supabase.from('close_order_reports').delete().neq('id', 'x')
+      addLog('🧹 Membersihkan lokal...')
       await db.transaction_items.clear(); await db.transactions.clear()
       await db.shifts.clear(); await db.stock.clear()
       await db.sync_queue.clear()
+      if ((db as any).close_order_reports) await (db as any).close_order_reports.clear()
+      clearLocalStorageSaldo()
       addLog('✅ Selesai'); toast.success('Data toko direset')
     } catch (e) { toast.error('Gagal: ' + String(e)); addLog('❌ ' + String(e)) }
     finally { setResetting(false) }
@@ -1356,8 +1087,20 @@ function ResetDataTab() {
     finally { setResetting(false) }
   }
 
+  // ✅ FIX v3: tambah close_order_reports + hapus saldo localStorage
   async function resetSemua() {
-    const ok1 = confirm('PERHATIAN!\n\nIni akan menghapus SEMUA data operasional:\n- Transaksi kasir & shift\n- Pembelian & mutasi\n- Biaya operasional\n- Produksi & stok\n- Promo\n\nMaster data (bahan, produk, supplier, resep, user) TETAP AMAN.\n\nLanjutkan?')
+    const ok1 = confirm(
+      'PERHATIAN!\n\n' +
+      'Ini akan menghapus SEMUA data operasional:\n' +
+      '- Transaksi kasir & shift\n' +
+      '- Close order reports\n' +
+      '- Pembelian & mutasi\n' +
+      '- Biaya operasional\n' +
+      '- Log produksi & stok\n' +
+      '- Promo\n\n' +
+      'Master data (bahan, produk, supplier, resep, user) TETAP AMAN.\n\n' +
+      'Lanjutkan?'
+    )
     if (!ok1) return
     const typed = prompt('Ketik RESET untuk konfirmasi:')
     if (typed !== 'RESET') { toast.error('Reset dibatalkan'); return }
@@ -1368,6 +1111,9 @@ function ResetDataTab() {
       await supabase.from('transaction_items').delete().neq('id', 'x')
       await supabase.from('transactions').delete().neq('id', 'x')
       await supabase.from('shifts').delete().neq('id', 'x')
+
+      addLog('🗑️ Menghapus close order reports...')
+      await supabase.from('close_order_reports').delete().neq('id', 'x')
 
       addLog('🗑️ Menghapus pembelian & mutasi...')
       await supabase.from('warehouse_mutation_items').delete().neq('id', 'x')
@@ -1382,7 +1128,7 @@ function ResetDataTab() {
       await supabase.from('production_mutation_items').delete().neq('id', 'x')
       await supabase.from('production_mutations').delete().neq('id', 'x')
 
-      addLog('🗑️ Menghapus stok...')
+      addLog('🗑️ Menghapus stok & promo...')
       await supabase.from('production_stock').delete().neq('id', 'x')
       await supabase.from('finished_goods_stock').delete().neq('id', 'x')
       await supabase.from('warehouse_stock').delete().neq('id', 'x')
@@ -1398,14 +1144,17 @@ function ResetDataTab() {
       await db.production_stock.clear(); await db.finished_goods_stock.clear()
       await db.warehouse_stock.clear(); await db.stock.clear(); await db.promotions.clear()
       await db.sync_queue.clear()
+      if ((db as any).close_order_reports) await (db as any).close_order_reports.clear()
+
+      addLog('🧹 Membersihkan localStorage...')
+      clearLocalStorageSaldo()
 
       addLog('✅ Selesai — semua data direset. Siap Go-Live!')
       toast.success('Semua data direset. Siap Go-Live!')
     } catch (e) {
       toast.error('Gagal: ' + String(e))
       addLog('❌ Error: ' + String((e as any)?.message || e))
-    }
-    finally { setResetting(false) }
+    } finally { setResetting(false) }
   }
 
   return (
@@ -1414,12 +1163,11 @@ function ResetDataTab() {
         <p className="text-sm font-medium text-red-700 mb-1">⚠️ Hati-hati — Data tidak bisa dikembalikan</p>
         <p className="text-xs text-red-500">Master data (bahan, produk, supplier, resep, user) tetap aman.</p>
       </div>
-
       {[
-        { label: 'Reset Data Gudang',   sub: 'Pembelian, mutasi, biaya, stok gudang',     fn: resetGudang   },
-        { label: 'Reset Data Produksi', sub: 'Log produksi, stok produksi & produk jadi', fn: resetProduksi },
-        { label: 'Reset Data Toko',     sub: 'Transaksi kasir, shift, stok toko',          fn: resetToko     },
-        { label: 'Reset Promo',         sub: 'Semua promo & diskon',                       fn: resetSettings },
+        { label: 'Reset Data Gudang',   sub: 'Pembelian, mutasi, biaya, stok gudang',          fn: resetGudang   },
+        { label: 'Reset Data Produksi', sub: 'Log produksi, stok produksi & produk jadi',       fn: resetProduksi },
+        { label: 'Reset Data Toko',     sub: 'Transaksi kasir, shift, close order, stok toko',  fn: resetToko     },
+        { label: 'Reset Promo',         sub: 'Semua promo & diskon',                            fn: resetSettings },
       ].map(btn => (
         <div key={btn.label} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-50">
@@ -1434,7 +1182,6 @@ function ResetDataTab() {
           </div>
         </div>
       ))}
-
       <div className="bg-red-50 border border-red-200 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-red-100">
           <p className="text-sm font-bold text-red-800">🚀 Reset Semua Data (Go-Live)</p>
@@ -1447,13 +1194,11 @@ function ResetDataTab() {
           </button>
         </div>
       </div>
-
       {log.length > 0 && (
         <div className="bg-gray-900 rounded-xl p-3 space-y-1">
           {log.map((l, i) => <p key={i} className="text-xs text-gray-300 font-mono">{l}</p>)}
         </div>
       )}
-
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-50">
           <p className="text-sm font-medium text-gray-900">Bersihkan Data Lokal Device</p>
@@ -1474,7 +1219,6 @@ function ResetDataTab() {
   )
 }
 
-
 // ── Shared ────────────────────────────────────────────────────
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
@@ -1489,6 +1233,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
     </div>
   )
 }
+
 function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
   return (
     <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
@@ -1498,9 +1243,7 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
 }
 
 // ── UserForm ──────────────────────────────────────────────────
-function UserForm({ user, currentUser, stores, onClose }: {
-  user: User|null; currentUser: User; stores: any[]; onClose: () => void
-}) {
+function UserForm({ user, currentUser, stores, onClose }: { user: User|null; currentUser: User; stores: any[]; onClose: () => void }) {
   const [name,     setName]   = useState(user?.name||'')
   const [username, setUname]  = useState(user?.username||'')
   const [password, setPass]   = useState('')
@@ -1508,7 +1251,6 @@ function UserForm({ user, currentUser, stores, onClose }: {
   const [storeId,  setStore]  = useState(user?.store_id||currentUser.store_id)
   const [isActive, setActive] = useState(user?.is_active??true)
   const [saving,   setSaving] = useState(false)
-
   const needStorePick = ['kasir','gudang','produksi','manager'].includes(role)
 
   async function handleSave() {
@@ -1516,13 +1258,9 @@ function UserForm({ user, currentUser, stores, onClose }: {
     if (!user&&!password) return toast.error('Password wajib untuk user baru')
     setSaving(true)
     try {
-      const isNew        = !user
+      const isNew = !user
       const finalStoreId = needStorePick ? storeId : currentUser.store_id
-      const data: any    = {
-        id: user?.id||generateId(), store_id: finalStoreId, name, username,
-        password_hash: password ? await hashPassword(password) : (user as any)!.password_hash,
-        role, is_active: isActive, created_at: user?.created_at||now(),
-      }
+      const data: any = { id: user?.id||generateId(), store_id: finalStoreId, name, username, password_hash: password ? await hashPassword(password) : (user as any)!.password_hash, role, is_active: isActive, created_at: user?.created_at||now() }
       await db.users.put(data)
       await supabase.from('users').upsert(data)
       await addToSyncQueue('users', data.id, isNew?'insert':'update', data, finalStoreId)
@@ -1626,4 +1364,3 @@ function MitraForm({ partner, onClose }: { partner: Partner|null; onClose: () =>
     </Modal>
   )
 }
-

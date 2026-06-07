@@ -1,9 +1,9 @@
 /**
- * Sync offline-first — v6
- * FIX: push order priority (shifts → transactions → transaction_items)
- * FIX: FK violation (23503) tidak increment retry_count, skip dan retry run berikutnya
- * FIX: unique violation (23505) langsung mark done
- * FIX: 409 HTTP response juga di-handle
+ * Sync offline-first — v8
+ * FIX: replaceTable pakai bulkPut saja (tidak clear dulu) — hindari data kosong kalau putus
+ * FIX: retry_count >= 5 → mark abandoned bukan stuck (banner hilang)
+ * FIX: push interval 5s
+ * FIX: pull interval 30s
  */
 
 import { supabase } from '@/lib/supabase'
@@ -21,11 +21,10 @@ export function setCurrentStoreId(storeId: string) {
   currentStoreId = storeId
 }
 
-// Urutan push: parent table harus sebelum child table (FK dependency)
 const TABLE_PUSH_ORDER = [
-  'shifts',             // 1. shift dulu — transactions FK ke shifts
-  'transactions',       // 2. transaction — transaction_items FK ke transactions
-  'transaction_items',  // 3. items terakhir
+  'shifts',
+  'transactions',
+  'transaction_items',
 ]
 
 const TABLE_MAP: Record<string, keyof typeof db> = {
@@ -69,7 +68,7 @@ function startRealtime(storeId: string) {
   }
 
   realtimeChannel = supabase
-    .channel('coco-puff-realtime')
+    .channel(`coco-puff-${storeId}`) // FIX: channel unik per toko
     .on('postgres_changes', { event: '*', schema: 'public', table: 'materials' },                payload => handleRealtimeChange('materials', payload))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers' },                payload => handleRealtimeChange('suppliers', payload))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'partners' },                 payload => handleRealtimeChange('partners', payload))
@@ -131,7 +130,6 @@ export async function pullFromSupabase(storeId?: string) {
   isPulling = true
 
   try {
-    // ── Data master — global ──────────────────────────────────
     const [cats, prods, mats, sups, parts, stores, recipes, pkgs, menuCfg, users] = await Promise.all([
       supabase.from('categories').select('*'),
       supabase.from('products').select('*'),
@@ -145,18 +143,18 @@ export async function pullFromSupabase(storeId?: string) {
       supabase.from('users').select('*').eq('is_active', true),
     ])
 
-    await replaceTable(db.categories,         cats.data)
-    await replaceTable(db.products,           prods.data)
-    await replaceTable(db.materials,          mats.data)
-    await replaceTable(db.suppliers,          sups.data)
-    await replaceTable(db.partners,           parts.data)
-    await replaceTable(db.stores,             stores.data)
-    await replaceTable(db.production_recipes, recipes.data)
-    await replaceTable(db.packages,           pkgs.data)
-    await replaceTable(db.menu_role_config,   menuCfg.data)
-    await replaceTable(db.users,              users.data)
+    // FIX: pakai safeReplace — tidak clear kalau data null/kosong
+    await safeReplace(db.categories,         cats.data)
+    await safeReplace(db.products,           prods.data)
+    await safeReplace(db.materials,          mats.data)
+    await safeReplace(db.suppliers,          sups.data)
+    await safeReplace(db.partners,           parts.data)
+    await safeReplace(db.stores,             stores.data)
+    await safeReplace(db.production_recipes, recipes.data)
+    await safeReplace(db.packages,           pkgs.data)
+    await safeReplace(db.menu_role_config,   menuCfg.data)
+    await safeReplace(db.users,              users.data)
 
-    // ── Data operasional per toko ─────────────────────────────
     const [
       prices, promos, stock, wstock, pstock, fgstock,
       wmuts, wmutItems, pmuts, pmutItems, recipeItems,
@@ -184,32 +182,31 @@ export async function pullFromSupabase(storeId?: string) {
       supabase.from('production_log_materials').select('*'),
     ])
 
-    await replaceTable(db.store_product_prices,    prices.data)
-    await replaceTable(db.promotions,              promos.data)
-    await replaceTable(db.stock,                   stock.data)
-    await replaceTable(db.warehouse_stock,         wstock.data)
-    await replaceTable(db.production_stock,        pstock.data)
-    await replaceTable(db.finished_goods_stock,    fgstock.data)
+    await safeReplace(db.store_product_prices,    prices.data)
+    await safeReplace(db.promotions,              promos.data)
+    await safeReplace(db.stock,                   stock.data)
+    await safeReplace(db.warehouse_stock,         wstock.data)
+    await safeReplace(db.production_stock,        pstock.data)
+    await safeReplace(db.finished_goods_stock,    fgstock.data)
     if (storeRecipes.data?.length)     await db.store_recipes.bulkPut(storeRecipes.data)
     if (storeRecipeItems.data?.length) await db.store_recipe_items.bulkPut(storeRecipeItems.data)
-    await replaceTable(db.production_recipe_items, recipeItems.data)
+    await safeReplace(db.production_recipe_items, recipeItems.data)
 
     const wMutIds  = new Set((wmuts.data     || []).map((m: any) => m.id))
     const pMutIds  = new Set((pmuts.data     || []).map((m: any) => m.id))
     const logIds   = new Set((prodLogs.data  || []).map((l: any) => l.id))
     const purchIds = new Set((purchases.data || []).map((p: any) => p.id))
 
-    if (wmuts.data?.length)      await db.warehouse_mutations.bulkPut(wmuts.data)
-    if (wmutItems.data?.length)  await db.warehouse_mutation_items.bulkPut((wmutItems.data  || []).filter((i: any) => wMutIds.has(i.mutation_id)))
-    if (pmuts.data?.length)      await db.production_mutations.bulkPut(pmuts.data)
-    if (pmutItems.data?.length)  await db.production_mutation_items.bulkPut((pmutItems.data || []).filter((i: any) => pMutIds.has(i.mutation_id)))
-    if (wexpenses.data?.length)  await db.warehouse_expenses.bulkPut(wexpenses.data)
-    if (purchases.data?.length)  await db.purchases.bulkPut(purchases.data)
-    if (purchItems.data?.length) await db.purchase_items.bulkPut((purchItems.data || []).filter((i: any) => purchIds.has(i.purchase_id)))
-    if (prodLogs.data?.length)   await db.production_logs.bulkPut(prodLogs.data)
+    if (wmuts.data?.length)       await db.warehouse_mutations.bulkPut(wmuts.data)
+    if (wmutItems.data?.length)   await db.warehouse_mutation_items.bulkPut((wmutItems.data  || []).filter((i: any) => wMutIds.has(i.mutation_id)))
+    if (pmuts.data?.length)       await db.production_mutations.bulkPut(pmuts.data)
+    if (pmutItems.data?.length)   await db.production_mutation_items.bulkPut((pmutItems.data || []).filter((i: any) => pMutIds.has(i.mutation_id)))
+    if (wexpenses.data?.length)   await db.warehouse_expenses.bulkPut(wexpenses.data)
+    if (purchases.data?.length)   await db.purchases.bulkPut(purchases.data)
+    if (purchItems.data?.length)  await db.purchase_items.bulkPut((purchItems.data || []).filter((i: any) => purchIds.has(i.purchase_id)))
+    if (prodLogs.data?.length)    await db.production_logs.bulkPut(prodLogs.data)
     if (prodLogMats.data?.length) await db.production_log_materials.bulkPut((prodLogMats.data || []).filter((i: any) => logIds.has(i.log_id)))
 
-    // ── Pull transaksi semua toko ─────────────────────────────
     const today = new Date().toLocaleDateString('sv-SE')
     const [txs, shifts] = await Promise.all([
       supabase.from('transactions').select('*')
@@ -220,7 +217,6 @@ export async function pullFromSupabase(storeId?: string) {
     ])
     const txIds = new Set((txs.data || []).map((t: any) => t.id))
 
-    // Pull transaction_items batch per 100
     let txItemsData: any[] = []
     if (txIds.size > 0) {
       const txIdArr = Array.from(txIds) as string[]
@@ -232,9 +228,9 @@ export async function pullFromSupabase(storeId?: string) {
       }
     }
 
-    if (shifts.data?.length)   await db.shifts.bulkPut(shifts.data)
-    if (txs.data?.length)      await db.transactions.bulkPut(txs.data)
-    if (txItemsData.length)    await db.transaction_items.bulkPut(txItemsData)
+    if (shifts.data?.length) await db.shifts.bulkPut(shifts.data)
+    if (txs.data?.length)    await db.transactions.bulkPut(txs.data)
+    if (txItemsData.length)  await db.transaction_items.bulkPut(txItemsData)
 
     console.log(`[SYNC] Pull selesai — toko: ${sid}`)
   } catch (e) {
@@ -244,10 +240,20 @@ export async function pullFromSupabase(storeId?: string) {
   }
 }
 
-async function replaceTable(table: any, data: any[] | null) {
-  if (data === null) return
-  await table.clear()
-  if (data.length > 0) await table.bulkPut(data)
+/**
+ * FIX: safeReplace — hanya replace kalau data valid dan tidak kosong
+ * Tidak clear dulu supaya kalau koneksi putus data Dexie tetap ada
+ */
+async function safeReplace(table: any, data: any[] | null) {
+  if (data === null || data === undefined) return // Null = network error, skip
+  if (data.length === 0) {
+    // Data kosong dari server — clear lokal juga (memang kosong)
+    await table.clear()
+    return
+  }
+  // Data ada — bulkPut saja (update/insert), tidak clear
+  // Row yang dihapus di server akan dibersihkan via realtime DELETE event
+  await table.bulkPut(data)
 }
 
 export async function pushToSupabase() {
@@ -259,16 +265,25 @@ export async function pushToSupabase() {
       .filter(q => q.retry_count < 5)
       .limit(50)
       .toArray()
+
+    // FIX: mark abandoned items (retry >= 5) supaya banner hilang
+    const abandoned = await db.sync_queue
+      .where('status').anyOf(['pending', 'failed'])
+      .filter(q => q.retry_count >= 5)
+      .toArray()
+    for (const item of abandoned) {
+      console.warn(`[SYNC] Abandoned ${item.table_name} ${item.record_id} — retry_count >= 5`)
+      await db.sync_queue.update(item.id, { status: 'abandoned', error_msg: 'Max retry reached' })
+    }
+
     if (!pending.length) return
 
-    // Sort by table priority — shifts dulu, baru transactions, baru transaction_items
     pending.sort((a, b) => {
       const ai = TABLE_PUSH_ORDER.indexOf(a.table_name)
       const bi = TABLE_PUSH_ORDER.indexOf(b.table_name)
       const aOrder = ai === -1 ? 999 : ai
       const bOrder = bi === -1 ? 999 : bi
       if (aOrder !== bOrder) return aOrder - bOrder
-      // Sama prioritas — sort by created_at (FIFO)
       return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     })
 
@@ -285,20 +300,21 @@ export async function pushToSupabase() {
             .upsert(payload, { onConflict: 'id' })
 
           if (error) {
-            // 23505 = unique violation → data sudah ada, anggap selesai
             if (error.code === '23505') {
               console.log(`[SYNC] Unique conflict ${item.table_name} ${item.record_id} — mark done`)
               await db.sync_queue.update(item.id, { status: 'done', synced_at: now(), error_msg: undefined })
               continue
             }
-
-            // 23503 = FK violation → parent belum ada, skip (jangan increment retry)
-            // Akan di-retry di run berikutnya setelah parent berhasil di-push
             if (error.code === '23503') {
               console.warn(`[SYNC] FK violation ${item.table_name} ${item.record_id} — skip, retry nanti`)
               continue
             }
-
+            // PGRST204 = column not found → mark done jangan retry terus
+            if (error.code === 'PGRST204') {
+              console.warn(`[SYNC] Schema mismatch ${item.table_name} — mark done, cek kolom DB`)
+              await db.sync_queue.update(item.id, { status: 'done', synced_at: now(), error_msg: error.message })
+              continue
+            }
             throw error
           }
         }
@@ -326,10 +342,10 @@ export function startSyncWorker(storeId: string) {
 
   pullFromSupabase(storeId)
   startRealtime(storeId)
-  pushInterval = setInterval(() => { pushToSupabase() }, 30_000)
-  pullInterval = setInterval(() => { pullFromSupabase(storeId) }, 60_000)
 
-  // Satu listener online saja
+  pushInterval = setInterval(() => { pushToSupabase() }, 5_000)
+  pullInterval = setInterval(() => { pullFromSupabase(storeId) }, 30_000)
+
   document.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('online', handleOnline)
 
@@ -347,7 +363,10 @@ export function stopSyncWorker() {
 }
 
 function handleVisibilityChange() {
-  if (document.visibilityState === 'visible') pullFromSupabase()
+  if (document.visibilityState === 'visible') {
+    pullFromSupabase()
+    pushToSupabase()
+  }
 }
 
 function handleOnline() {

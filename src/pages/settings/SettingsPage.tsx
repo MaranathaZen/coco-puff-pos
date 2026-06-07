@@ -1281,116 +1281,145 @@ function PrinterTab({ storeId }: { storeId: string }) {
 }
 
 function ResetDataTab() {
-  // Reset untuk: persiapan go-live dari sistem lama ke POS baru
-  // Menghapus semua data transaksi, pembelian, biaya, mutasi, produksi, close order
   const [resetting, setResetting] = useState(false)
-  const [done,      setDone]      = useState<string[]>([])
+  const [log,       setLog]       = useState<string[]>([])
+
+  function addLog(msg: string) { setLog(prev => [...prev, msg]) }
 
   async function resetGudang() {
-    setResetting(true); setDone([])
+    if (!confirm('Reset data gudang? Pembelian, mutasi, biaya, stok gudang akan dihapus.')) return
+    setResetting(true); setLog([])
     try {
-      setDone(prev=>[...prev,'Menghapus dari server...'])
-      for (const t of ['warehouse_mutation_items','warehouse_mutations','purchase_items','purchases','warehouse_expenses','warehouse_stock']) {
-        await supabase.from(t).delete().gte('created_at','2000-01-01')
-      }
+      addLog('Menghapus dari server...')
+      await supabase.from('warehouse_mutation_items').delete().neq('id', 'x')
+      await supabase.from('warehouse_mutations').delete().neq('id', 'x')
+      await supabase.from('purchase_items').delete().neq('id', 'x')
+      await supabase.from('purchases').delete().neq('id', 'x')
+      await supabase.from('warehouse_expenses').delete().neq('id', 'x')
+      await supabase.from('warehouse_stock').delete().neq('id', 'x')
+      addLog('Membersihkan lokal...')
       await db.warehouse_mutation_items.clear(); await db.warehouse_mutations.clear()
       await db.purchase_items.clear(); await db.purchases.clear()
       await db.warehouse_expenses.clear(); await db.warehouse_stock.clear()
-      setDone(prev=>[...prev,'Selesai'])
-      toast.success('Data gudang direset')
-    } catch (e) { toast.error('Gagal: '+String(e)) }
-    finally { setResetting(false) }
-  }
-
-  async function resetToko() {
-    setResetting(true); setDone([])
-    try {
-      setDone(prev=>[...prev,'Menghapus dari server...'])
-      for (const t of ['transaction_items','transactions','shifts','stock']) {
-        await supabase.from(t).delete().gte('created_at','2000-01-01')
-      }
-      await db.transaction_items.clear(); await db.transactions.clear()
-      await db.shifts.clear(); await db.stock.clear()
-      setDone(prev=>[...prev,'Selesai'])
-      toast.success('Data toko direset')
-    } catch (e) { toast.error('Gagal: '+String(e)) }
-    finally { setResetting(false) }
-  }
-
-  async function resetSettings() {
-    setResetting(true); setDone([])
-    try {
-      setDone(prev=>[...prev,'Mereset setting...'])
-      for (const t of ['promotions']) {
-        await supabase.from(t).delete().gte('created_at','2000-01-01')
-      }
-      await db.promotions.clear()
-      // Reset PPN di semua toko
-      await supabase.from('stores').update({ ppn_enabled: false, ppn_rate: 11, ppn_mode: 'include' }).gte('id','')
-      setDone(prev=>[...prev,'Selesai'])
-      toast.success('Setting direset')
-    } catch (e) { toast.error('Gagal: '+String(e)) }
-    finally { setResetting(false) }
-  }
-
-  async function resetSemua() {
-    if (!confirm('Reset SEMUA data? Ini tidak bisa dibatalkan!')) return
-    setResetting(true); setDone([])
-    try {
-      const tables = [
-        'transaction_items','transactions','shifts',
-        'warehouse_mutation_items','warehouse_mutations',
-        'purchase_items','purchases','warehouse_expenses','warehouse_stock',
-        'production_log_materials','production_logs',
-        'production_mutation_items','production_mutations',
-        'production_stock','finished_goods_stock','stock','promotions',
-      ]
-      setDone(prev=>[...prev,'Menghapus dari server...'])
-      for (const t of tables) {
-        try { await supabase.from(t).delete().gte('created_at','2000-01-01') } catch {}
-      }
-      setDone(prev=>[...prev,'Membersihkan lokal...'])
-      await db.transaction_items.clear(); await db.transactions.clear(); await db.shifts.clear()
-      await db.warehouse_mutation_items.clear(); await db.warehouse_mutations.clear()
-      await db.purchase_items.clear(); await db.purchases.clear()
-      await db.warehouse_expenses.clear(); await db.warehouse_stock.clear()
-      await db.production_log_materials.clear(); await db.production_logs.clear()
-      await db.production_mutation_items.clear(); await db.production_mutations.clear()
-      await db.production_stock.clear(); await db.finished_goods_stock.clear()
-      await db.stock.clear(); await db.promotions.clear()
-      setDone(prev=>[...prev,'✅ Selesai — semua data direset'])
-      toast.success('Semua data direset')
-    } catch (e) { toast.error('Gagal: '+String(e)) }
+      addLog('✅ Selesai'); toast.success('Data gudang direset')
+    } catch (e) { toast.error('Gagal: ' + String(e)); addLog('❌ ' + String(e)) }
     finally { setResetting(false) }
   }
 
   async function resetProduksi() {
-    setResetting(true); setDone([])
+    if (!confirm('Reset data produksi? Log produksi, stok produksi & produk jadi akan dihapus.')) return
+    setResetting(true); setLog([])
     try {
-      setDone(prev=>[...prev,'Menghapus dari server...'])
-      for (const t of ['production_log_materials','production_logs','production_mutation_items','production_mutations','production_stock','finished_goods_stock']) {
-        await supabase.from(t).delete().gte('created_at','2000-01-01')
-      }
+      addLog('Menghapus dari server...')
+      await supabase.from('production_log_materials').delete().neq('id', 'x')
+      await supabase.from('production_logs').delete().neq('id', 'x')
+      await supabase.from('production_mutation_items').delete().neq('id', 'x')
+      await supabase.from('production_mutations').delete().neq('id', 'x')
+      await supabase.from('production_stock').delete().neq('id', 'x')
+      await supabase.from('finished_goods_stock').delete().neq('id', 'x')
+      addLog('Membersihkan lokal...')
       await db.production_log_materials.clear(); await db.production_logs.clear()
       await db.production_mutation_items.clear(); await db.production_mutations.clear()
       await db.production_stock.clear(); await db.finished_goods_stock.clear()
-      setDone(prev=>[...prev,'Selesai'])
-      toast.success('Data produksi direset')
-    } catch (e) { toast.error('Gagal: '+String(e)) }
+      addLog('✅ Selesai'); toast.success('Data produksi direset')
+    } catch (e) { toast.error('Gagal: ' + String(e)); addLog('❌ ' + String(e)) }
+    finally { setResetting(false) }
+  }
+
+  async function resetToko() {
+    if (!confirm('Reset data toko? Transaksi kasir, shift, stok toko akan dihapus.')) return
+    setResetting(true); setLog([])
+    try {
+      addLog('Menghapus dari server...')
+      await supabase.from('transaction_items').delete().neq('id', 'x')
+      await supabase.from('transactions').delete().neq('id', 'x')
+      await supabase.from('shifts').delete().neq('id', 'x')
+      await supabase.from('stock').delete().neq('id', 'x')
+      addLog('Membersihkan lokal...')
+      await db.transaction_items.clear(); await db.transactions.clear()
+      await db.shifts.clear(); await db.stock.clear()
+      await db.sync_queue.clear()
+      addLog('✅ Selesai'); toast.success('Data toko direset')
+    } catch (e) { toast.error('Gagal: ' + String(e)); addLog('❌ ' + String(e)) }
+    finally { setResetting(false) }
+  }
+
+  async function resetSettings() {
+    if (!confirm('Reset promo? Semua promo akan dihapus.')) return
+    setResetting(true); setLog([])
+    try {
+      addLog('Mereset promo...')
+      await supabase.from('promotions').delete().neq('id', 'x')
+      await db.promotions.clear()
+      addLog('✅ Selesai'); toast.success('Promo direset')
+    } catch (e) { toast.error('Gagal: ' + String(e)); addLog('❌ ' + String(e)) }
+    finally { setResetting(false) }
+  }
+
+  async function resetSemua() {
+    const ok1 = confirm('PERHATIAN!\n\nIni akan menghapus SEMUA data operasional:\n- Transaksi kasir & shift\n- Pembelian & mutasi\n- Biaya operasional\n- Produksi & stok\n- Promo\n\nMaster data (bahan, produk, supplier, resep, user) TETAP AMAN.\n\nLanjutkan?')
+    if (!ok1) return
+    const typed = prompt('Ketik RESET untuk konfirmasi:')
+    if (typed !== 'RESET') { toast.error('Reset dibatalkan'); return }
+
+    setResetting(true); setLog([])
+    try {
+      addLog('🗑️ Menghapus transaksi...')
+      await supabase.from('transaction_items').delete().neq('id', 'x')
+      await supabase.from('transactions').delete().neq('id', 'x')
+      await supabase.from('shifts').delete().neq('id', 'x')
+
+      addLog('🗑️ Menghapus pembelian & mutasi...')
+      await supabase.from('warehouse_mutation_items').delete().neq('id', 'x')
+      await supabase.from('warehouse_mutations').delete().neq('id', 'x')
+      await supabase.from('purchase_items').delete().neq('id', 'x')
+      await supabase.from('purchases').delete().neq('id', 'x')
+      await supabase.from('warehouse_expenses').delete().neq('id', 'x')
+
+      addLog('🗑️ Menghapus produksi...')
+      await supabase.from('production_log_materials').delete().neq('id', 'x')
+      await supabase.from('production_logs').delete().neq('id', 'x')
+      await supabase.from('production_mutation_items').delete().neq('id', 'x')
+      await supabase.from('production_mutations').delete().neq('id', 'x')
+
+      addLog('🗑️ Menghapus stok...')
+      await supabase.from('production_stock').delete().neq('id', 'x')
+      await supabase.from('finished_goods_stock').delete().neq('id', 'x')
+      await supabase.from('warehouse_stock').delete().neq('id', 'x')
+      await supabase.from('stock').delete().neq('id', 'x')
+      await supabase.from('promotions').delete().neq('id', 'x')
+
+      addLog('🧹 Membersihkan lokal...')
+      await db.transaction_items.clear(); await db.transactions.clear(); await db.shifts.clear()
+      await db.warehouse_mutation_items.clear(); await db.warehouse_mutations.clear()
+      await db.purchase_items.clear(); await db.purchases.clear(); await db.warehouse_expenses.clear()
+      await db.production_log_materials.clear(); await db.production_logs.clear()
+      await db.production_mutation_items.clear(); await db.production_mutations.clear()
+      await db.production_stock.clear(); await db.finished_goods_stock.clear()
+      await db.warehouse_stock.clear(); await db.stock.clear(); await db.promotions.clear()
+      await db.sync_queue.clear()
+
+      addLog('✅ Selesai — semua data direset. Siap Go-Live!')
+      toast.success('Semua data direset. Siap Go-Live!')
+    } catch (e) {
+      toast.error('Gagal: ' + String(e))
+      addLog('❌ Error: ' + String((e as any)?.message || e))
+    }
     finally { setResetting(false) }
   }
 
   return (
     <div className="p-4 space-y-4">
       <div className="bg-red-50 border border-red-100 rounded-xl p-3">
-        <p className="text-sm font-medium text-red-700 mb-1">Hati-hati — Data tidak bisa dikembalikan</p>
-        <p className="text-xs text-red-500">Master data (bahan, supplier, resep) tetap aman.</p>
+        <p className="text-sm font-medium text-red-700 mb-1">⚠️ Hati-hati — Data tidak bisa dikembalikan</p>
+        <p className="text-xs text-red-500">Master data (bahan, produk, supplier, resep, user) tetap aman.</p>
       </div>
+
       {[
-        { label:'Reset Data Gudang',   sub:'Pembelian, mutasi, biaya, stok gudang', fn:resetGudang },
-        { label:'Reset Data Produksi', sub:'Log produksi, stok produksi & produk jadi', fn:resetProduksi },
-        { label:'Reset Data Toko',     sub:'Transaksi kasir, shift, stok toko', fn:resetToko },
-        { label:'Reset Setting',       sub:'Promo, PPN', fn:resetSettings },
+        { label: 'Reset Data Gudang',   sub: 'Pembelian, mutasi, biaya, stok gudang',     fn: resetGudang   },
+        { label: 'Reset Data Produksi', sub: 'Log produksi, stok produksi & produk jadi', fn: resetProduksi },
+        { label: 'Reset Data Toko',     sub: 'Transaksi kasir, shift, stok toko',          fn: resetToko     },
+        { label: 'Reset Promo',         sub: 'Semua promo & diskon',                       fn: resetSettings },
       ].map(btn => (
         <div key={btn.label} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-50">
@@ -1398,24 +1427,32 @@ function ResetDataTab() {
             <p className="text-xs text-gray-400 mt-0.5">{btn.sub}</p>
           </div>
           <div className="px-4 py-3">
-            <button onClick={btn.fn} disabled={resetting} className="w-full py-2.5 rounded-xl border border-red-200 text-sm font-medium text-red-600 disabled:opacity-50">
-              {resetting?'Mereset...':btn.label}
+            <button onClick={btn.fn} disabled={resetting}
+              className="w-full py-2.5 rounded-xl border border-red-200 text-sm font-medium text-red-600 disabled:opacity-50 active:bg-red-50">
+              {resetting ? 'Mereset...' : btn.label}
             </button>
           </div>
         </div>
       ))}
-      {/* Reset Semua */}
+
       <div className="bg-red-50 border border-red-200 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-red-100">
-          <p className="text-sm font-bold text-red-800">Reset Semua Data</p>
-          <p className="text-xs text-red-600 mt-0.5">Hapus semua transaksi, stok, pembelian, biaya, produksi, promo. Master data (bahan, produk, supplier, resep) tetap aman.</p>
+          <p className="text-sm font-bold text-red-800">🚀 Reset Semua Data (Go-Live)</p>
+          <p className="text-xs text-red-600 mt-0.5">Hapus SEMUA data operasional. Master data tetap aman. Gunakan saat pertama kali pakai sistem.</p>
         </div>
         <div className="px-4 py-3">
-          <button onClick={resetSemua} disabled={resetting} className="w-full py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold disabled:opacity-50">
-            {resetting?'Mereset...':'Reset Semua Data (Go-Live)'}
+          <button onClick={resetSemua} disabled={resetting}
+            className="w-full py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold disabled:opacity-50">
+            {resetting ? 'Mereset...' : 'Reset Semua Data (Go-Live)'}
           </button>
         </div>
       </div>
+
+      {log.length > 0 && (
+        <div className="bg-gray-900 rounded-xl p-3 space-y-1">
+          {log.map((l, i) => <p key={i} className="text-xs text-gray-300 font-mono">{l}</p>)}
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-50">
@@ -1424,7 +1461,7 @@ function ResetDataTab() {
         </div>
         <div className="px-4 py-3">
           <button onClick={async () => {
-            if (!confirm('Hapus semua data lokal device ini? Data server aman.\nAnda akan logout otomatis.')) return
+            if (!confirm('Hapus semua data lokal device ini?\nData server aman. Anda akan logout otomatis.')) return
             await hardResetLocal()
             toast.success('Data lokal dihapus. Login ulang untuk sync.')
             setTimeout(() => { window.location.href = '/login' }, 1500)
@@ -1433,14 +1470,10 @@ function ResetDataTab() {
           </button>
         </div>
       </div>
-      {done.length > 0 && (
-        <div className="bg-green-50 border border-green-100 rounded-xl p-3 space-y-1">
-          {done.map((d,i) => <p key={i} className="text-xs text-green-700">✓ {d}</p>)}
-        </div>
-      )}
     </div>
   )
 }
+
 
 // ── Shared ────────────────────────────────────────────────────
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {

@@ -316,14 +316,42 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   )
 }
 
+// PATCH untuk UnifiedPembelianPage.tsx
+// Hanya bagian PembelianForm yang berubah
+// Fix:
+// 1. Default "Input Sebagai" owner → gudang (bukan storeId user)
+// 2. Stok masuk ke warehouse_stock ATAU stock toko sesuai activeStoreId
+// 3. Dropdown bahan filter per toko kalau input sebagai toko
+// 4. Kalau input sebagai gudang → semua bahan tampil
+
 function PembelianForm({ userId, storeId, role, onClose }: { userId: string; storeId: string; role: string; onClose: () => void }) {
   const isOwnerManager = ['owner','manager'].includes(role)
+  
   const allStores = useLiveQuery(() =>
-    isOwnerManager ? db.stores.filter(s => s.is_active).toArray() : Promise.resolve([])
+    isOwnerManager ? db.stores.filter(s => s.is_active && !s.id.includes('produksi')).toArray() : Promise.resolve([])
   , [isOwnerManager])
-  const [inputAsStore, setInputAsStore] = useState(storeId)
+
+  // FIX: default input sebagai = gudang (store yang id-nya mengandung 'gudang')
+  // Kalau tidak ada gudang, fallback ke storeId user
+  const [inputAsStore, setInputAsStore] = useState('')
+  
+  useEffect(() => {
+    if (!allStores || allStores.length === 0) return
+    // Cari toko gudang sebagai default
+    const gudang = allStores.find(s => s.id.includes('gudang'))
+    setInputAsStore(gudang?.id || storeId)
+  }, [allStores])
+
   const activeStoreId = isOwnerManager ? inputAsStore : storeId
 
+  // FIX: cek apakah sedang input sebagai gudang
+  const isInputAsGudang = activeStoreId.includes('gudang') || 
+    allStores?.find(s => s.id === activeStoreId)?.id.includes('gudang') || 
+    role === 'gudang'
+
+  // FIX: filter bahan — kalau input sebagai gudang tampil semua
+  // kalau input sebagai toko, tampil semua material (toko bisa beli bahan apapun)
+  // tapi stok masuknya ke stock toko, bukan warehouse_stock
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const suppliers  = useLiveQuery(() => db.suppliers.filter(s => s.is_active !== false).toArray(), [])
 
@@ -377,15 +405,47 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
 
       for (const item of valid) {
         const uc = getUnitCost(item)
-        const pi = { id: generateId(), purchase_id: purchId, material_id: item.material_id, qty: Number(item.qty), unit_cost: uc, subtotal: Number(item.qty) * uc, qty_returned: 0 }
+        const pi = {
+          id: generateId(), purchase_id: purchId, material_id: item.material_id,
+          qty: Number(item.qty), unit_cost: uc, subtotal: Number(item.qty) * uc, qty_returned: 0
+        }
         await db.purchase_items.add(pi)
         await supabase.from('purchase_items').upsert(pi)
 
-        const ws  = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
-        const wsd: WarehouseStock = { id: ws?.id || generateId(), material_id: item.material_id, qty_on_hand: (ws?.qty_on_hand || 0) + Number(item.qty), last_updated: now() }
-        await db.warehouse_stock.put(wsd)
-        await supabase.from('warehouse_stock').upsert(wsd)
+        // FIX: stok masuk ke warehouse_stock kalau gudang, stock toko kalau toko
+        if (isInputAsGudang) {
+          // ── Gudang: update warehouse_stock ────────────────
+          const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
+          const wsd: WarehouseStock = {
+            id: ws?.id || generateId(),
+            material_id: item.material_id,
+            qty_on_hand: (ws?.qty_on_hand || 0) + Number(item.qty),
+            last_updated: now()
+          }
+          await db.warehouse_stock.put(wsd)
+          await supabase.from('warehouse_stock').upsert(wsd)
+        } else {
+          // ── Toko: update stock toko ───────────────────────
+          const existing = await db.stock
+            .filter(s => s.store_id === activeStoreId &&
+              (s.ingredient_id === item.material_id || (s as any).material_id === item.material_id))
+            .first()
+          const newQty = (existing?.qty_on_hand || 0) + Number(item.qty)
+          if (existing) {
+            await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
+            await supabase.from('stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', existing.id)
+          } else {
+            const newStock: any = {
+              id: generateId(), store_id: activeStoreId,
+              ingredient_id: item.material_id, material_id: item.material_id,
+              qty_on_hand: newQty, avg_cost: uc, last_updated: now()
+            }
+            await db.stock.add(newStock)
+            await supabase.from('stock').upsert(newStock)
+          }
+        }
 
+        // ── Update avg_cost di materials (berlaku untuk semua) ──
         if (uc > 0) {
           const mat = await db.materials.get(item.material_id)
           if (mat) {
@@ -394,12 +454,18 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
             const newQty   = prevQty  + Number(item.qty)
             const newCost  = prevCost + Number(item.qty) * uc
             const avgCost  = newQty > 0 ? newCost / newQty : uc
-            await db.materials.update(item.material_id, { unit_cost: avgCost, avg_cost: avgCost, total_qty_purchased: newQty, total_cost_purchased: newCost, updated_at: now() })
-            await supabase.from('materials').update({ unit_cost: avgCost, avg_cost: avgCost, total_qty_purchased: newQty, total_cost_purchased: newCost }).eq('id', item.material_id)
+            await db.materials.update(item.material_id, {
+              unit_cost: avgCost, avg_cost: avgCost,
+              total_qty_purchased: newQty, total_cost_purchased: newCost, updated_at: now()
+            })
+            await supabase.from('materials').update({
+              unit_cost: avgCost, avg_cost: avgCost,
+              total_qty_purchased: newQty, total_cost_purchased: newCost
+            }).eq('id', item.material_id)
           }
         }
       }
-      toast.success(`Pembelian ${poNumber} dicatat`)
+      toast.success(`Pembelian ${poNumber} dicatat — stok masuk ke ${isInputAsGudang ? 'gudang' : allStores?.find(s => s.id === activeStoreId)?.name || 'toko'}`)
       onClose()
     } catch (e) { console.error(e); toast.error('Gagal menyimpan') }
     finally { setSaving(false) }
@@ -411,10 +477,19 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
         <div>
           <Label>Input Sebagai</Label>
           <select className="input" value={inputAsStore} onChange={e => setInputAsStore(e.target.value)}>
-            {allStores.filter(s => !s.id.includes('produksi')).map(s => (
-              <option key={s.id} value={s.id}>{s.name.replace(' Malang','').replace(' Bali','')}</option>
+            {allStores.map(s => (
+              <option key={s.id} value={s.id}>
+                {s.id.includes('gudang') ? '🏭 ' : '🏪 '}
+                {s.name.replace(' Malang','').replace(' Bali','')}
+              </option>
             ))}
           </select>
+          {/* FIX: tampilkan info stok akan masuk ke mana */}
+          <p className="text-xs mt-1 text-gray-400">
+            {isInputAsGudang 
+              ? '📦 Stok masuk ke gudang' 
+              : `🏪 Stok masuk ke stok toko ${allStores?.find(s => s.id === activeStoreId)?.name || ''}`}
+          </p>
         </div>
       )}
       <div className="grid grid-cols-2 gap-3">

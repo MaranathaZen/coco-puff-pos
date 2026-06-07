@@ -1,5 +1,7 @@
 /**
- * Sync offline-first — v8
+ * Sync offline-first — v9
+ * FIX v9: infinite pull loop — guard realtimeConnected di subscribe callback
+ * FIX v9: startSyncWorker guard lebih ketat (cek realtimeChannel juga)
  * FIX: replaceTable pakai bulkPut saja (tidak clear dulu) — hindari data kosong kalau putus
  * FIX: retry_count >= 5 → mark abandoned bukan stuck (banner hilang)
  * FIX: push interval 5s
@@ -10,12 +12,13 @@ import { supabase } from '@/lib/supabase'
 import { db, now } from '@/lib/db'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
-let pushInterval:    ReturnType<typeof setInterval> | null = null
-let pullInterval:    ReturnType<typeof setInterval> | null = null
-let realtimeChannel: RealtimeChannel | null = null
-let isSyncing      = false
-let isPulling      = false
-let currentStoreId = ''
+let pushInterval:      ReturnType<typeof setInterval> | null = null
+let pullInterval:      ReturnType<typeof setInterval> | null = null
+let realtimeChannel:   RealtimeChannel | null = null
+let isSyncing        = false
+let isPulling        = false
+let currentStoreId   = ''
+let realtimeConnected = false  // FIX v9: guard subscribe loop
 
 export function setCurrentStoreId(storeId: string) {
   currentStoreId = storeId
@@ -66,9 +69,10 @@ function startRealtime(storeId: string) {
     supabase.removeChannel(realtimeChannel)
     realtimeChannel = null
   }
+  realtimeConnected = false  // FIX v9: reset flag saat channel baru dibuat
 
   realtimeChannel = supabase
-    .channel(`coco-puff-${storeId}`) // FIX: channel unik per toko
+    .channel(`coco-puff-${storeId}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'materials' },                payload => handleRealtimeChange('materials', payload))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers' },                payload => handleRealtimeChange('suppliers', payload))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'partners' },                 payload => handleRealtimeChange('partners', payload))
@@ -100,9 +104,20 @@ function startRealtime(storeId: string) {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' },                   payload => handleRealtimeChange('shifts', payload))
     .subscribe((status) => {
       console.log(`[REALTIME] Status: ${status}`)
+
       if (status === 'SUBSCRIBED') {
-        console.log('[REALTIME] Connected — pull ulang')
-        pullFromSupabase(storeId)
+        // FIX v9: hanya pull saat pertama connect, bukan setiap kali SUBSCRIBED
+        if (!realtimeConnected) {
+          console.log('[REALTIME] Connected — pull ulang (pertama kali)')
+          pullFromSupabase(storeId)
+        }
+        realtimeConnected = true
+      }
+
+      // FIX v9: reset flag saat disconnect — pull lagi saat reconnect
+      if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        console.log(`[REALTIME] Disconnected (${status}) — akan pull ulang saat reconnect`)
+        realtimeConnected = false
       }
     })
 }
@@ -143,7 +158,6 @@ export async function pullFromSupabase(storeId?: string) {
       supabase.from('users').select('*').eq('is_active', true),
     ])
 
-    // FIX: pakai safeReplace — tidak clear kalau data null/kosong
     await safeReplace(db.categories,         cats.data)
     await safeReplace(db.products,           prods.data)
     await safeReplace(db.materials,          mats.data)
@@ -241,18 +255,15 @@ export async function pullFromSupabase(storeId?: string) {
 }
 
 /**
- * FIX: safeReplace — hanya replace kalau data valid dan tidak kosong
+ * safeReplace — hanya replace kalau data valid dan tidak kosong
  * Tidak clear dulu supaya kalau koneksi putus data Dexie tetap ada
  */
 async function safeReplace(table: any, data: any[] | null) {
-  if (data === null || data === undefined) return // Null = network error, skip
+  if (data === null || data === undefined) return
   if (data.length === 0) {
-    // Data kosong dari server — clear lokal juga (memang kosong)
     await table.clear()
     return
   }
-  // Data ada — bulkPut saja (update/insert), tidak clear
-  // Row yang dihapus di server akan dibersihkan via realtime DELETE event
   await table.bulkPut(data)
 }
 
@@ -266,7 +277,6 @@ export async function pushToSupabase() {
       .limit(50)
       .toArray()
 
-    // FIX: mark abandoned items (retry >= 5) supaya banner hilang
     const abandoned = await db.sync_queue
       .where('status').anyOf(['pending', 'failed'])
       .filter(q => q.retry_count >= 5)
@@ -309,9 +319,14 @@ export async function pushToSupabase() {
               console.warn(`[SYNC] FK violation ${item.table_name} ${item.record_id} — skip, retry nanti`)
               continue
             }
-            // PGRST204 = column not found → mark done jangan retry terus
             if (error.code === 'PGRST204') {
               console.warn(`[SYNC] Schema mismatch ${item.table_name} — mark done, cek kolom DB`)
+              await db.sync_queue.update(item.id, { status: 'done', synced_at: now(), error_msg: error.message })
+              continue
+            }
+            // FIX v9: 409 conflict → mark done, jangan retry
+            if (error.code === '409' || error.message?.includes('409')) {
+              console.warn(`[SYNC] 409 conflict ${item.table_name} ${item.record_id} — mark done`)
               await db.sync_queue.update(item.id, { status: 'done', synced_at: now(), error_msg: error.message })
               continue
             }
@@ -337,7 +352,13 @@ export async function pushToSupabase() {
 
 export function startSyncWorker(storeId: string) {
   setCurrentStoreId(storeId)
-  if (pushInterval && currentStoreId === storeId) return
+
+  // FIX v9: guard lebih ketat — cek semua komponen aktif
+  if (pushInterval && pullInterval && realtimeChannel && currentStoreId === storeId) {
+    console.log(`[SYNC] Worker sudah berjalan untuk toko: ${storeId} — skip`)
+    return
+  }
+
   stopSyncWorker()
 
   pullFromSupabase(storeId)
@@ -356,6 +377,7 @@ export function stopSyncWorker() {
   if (pushInterval)    { clearInterval(pushInterval);  pushInterval    = null }
   if (pullInterval)    { clearInterval(pullInterval);  pullInterval    = null }
   if (realtimeChannel) { supabase.removeChannel(realtimeChannel); realtimeChannel = null }
+  realtimeConnected = false  // FIX v9: reset flag
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   window.removeEventListener('online', handleOnline)
   currentStoreId = ''

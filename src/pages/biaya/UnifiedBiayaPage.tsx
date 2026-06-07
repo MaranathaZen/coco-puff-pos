@@ -35,6 +35,16 @@ const KATEGORI_BIAYA = [
   { value: 'lainnya',      label: 'Lainnya'       },
 ]
 
+function CopyBtn({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button onClick={() => { navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }) }}
+      className="inline-flex items-center gap-0.5 text-[10px] text-blue-400 hover:text-blue-600 ml-1 align-middle">
+      {copied ? '✓' : '⧉'}
+    </button>
+  )
+}
+
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -194,23 +204,29 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
   const totalCard = filtered.reduce((s, e) => s + e.amount, 0)
 
   function BiayaRow({ e, idx }: { e: any; idx: number }) {
-    const katLabel = KATEGORI_BIAYA.find(k => k.value === e.category)?.label || e.category || 'Lainnya'
+    const katLabel    = KATEGORI_BIAYA.find(k => k.value === e.category)?.label || e.category || 'Lainnya'
     const displayName = e.description || e.name || 'Biaya'
+    const expNo       = (e as any).expense_number
     return (
       <div className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
+            {expNo && (
+              <p className="text-xs font-mono text-blue-600 mb-0.5">
+                {expNo}<CopyBtn text={expNo} />
+              </p>
+            )}
             <p className="text-sm font-medium text-gray-900">{displayName}</p>
             <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
               <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full">{katLabel}</span>
-              <span className="text-xs text-gray-400">
-                {new Date(e.created_at).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})},{' '}
-                {new Date(e.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}
-              </span>
               {isOwnerManager && storeMap[(e as any).store_id] && (
                 <span className="text-xs text-gray-300">· {storeMap[(e as any).store_id]}</span>
               )}
             </div>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {new Date(e.created_at).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})},{' '}
+              {new Date(e.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}
+            </p>
             {e.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {e.notes}</p>}
           </div>
           <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(e.amount)}</p>
@@ -324,16 +340,22 @@ function BiayaForm({ userId, storeId, role, onClose }: {
     try {
       const nowStr    = now()
       const todayDate = new Date().toLocaleDateString('sv-SE')
+      // Generate expense_number: BIA-YYYYMMDD-XXX
+      const ds        = todayDate.replace(/-/g, '')
+      const prefix    = `BIA-${ds}-`
+      const existing  = await db.warehouse_expenses.filter(e => (e as any).expense_number?.startsWith(prefix)).toArray()
+      const expNumber = `${prefix}${String(existing.length + 1).padStart(3, '0')}`
       const data: any = {
-        id:           generateId(),
-        store_id:     activeStoreId,
-        description:  description.trim(),
-        name:         description.trim(),
-        amount:       Number(amount),
-        category:     category,
-        expense_date: todayDate,
-        created_by:   userId,
-        created_at:   nowStr,
+        id:             generateId(),
+        store_id:       activeStoreId,
+        description:    description.trim(),
+        name:           description.trim(),
+        amount:         Number(amount),
+        category:       category,
+        expense_date:   todayDate,
+        expense_number: expNumber,
+        created_by:     userId,
+        created_at:     nowStr,
       }
       if (notes?.trim()) data.notes = notes.trim()
       await db.warehouse_expenses.put(data)

@@ -9,6 +9,7 @@
  */
 
 import { supabase } from '@/lib/supabase'
+import { logger } from '@/lib/logger'
 import { db, now } from '@/lib/db'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
@@ -249,6 +250,7 @@ export async function pullFromSupabase(storeId?: string) {
     console.log(`[SYNC] Pull selesai — toko: ${sid}`)
   } catch (e) {
     console.warn('[SYNC] Pull gagal (offline?):', e)
+    if (navigator.onLine) logger.warn('sync', 'Pull gagal', { error: String(e) })
   } finally {
     isPulling = false
   }

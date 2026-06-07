@@ -12,6 +12,17 @@ const queryClient = new QueryClient({
   }
 })
 
+import { logger, setLoggerAuthStore } from '@/lib/logger'
+import { useAuthStore } from '@/store/auth'
+setLoggerAuthStore(useAuthStore)
+
+window.addEventListener('unhandledrejection', (event) => {
+  logger.error('global', 'Unhandled rejection', { reason: String(event.reason) })
+})
+window.addEventListener('error', (event) => {
+  logger.error('global', event.message, { filename: event.filename, lineno: event.lineno })
+})
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>

@@ -14,6 +14,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now, addToSyncQueue } from '@/lib/db'
+import { pushToSupabase } from '@/lib/sync'
 import { useCartStore } from '@/store/cart'
 import { useAuthStore } from '@/store/auth'
 import { supabase } from '@/lib/supabase'
@@ -549,6 +550,7 @@ export default function CashierPage() {
       for (const item of [...txItems, ...txPakets])
         await addToSyncQueue('transaction_items', item.id, 'upsert', item, STORE_ID)
       await deductStockFromRecipes([...txItems, ...txPakets], STORE_ID)
+      pushToSupabase().catch(() => {})
 
       const storeRec  = await db.stores.get(STORE_ID)
       const storeName = storeRec?.name || allStores?.find(s => s.id === STORE_ID)?.name || STORE_ID

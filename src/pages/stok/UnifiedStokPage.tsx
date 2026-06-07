@@ -236,7 +236,7 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: {
             className={`w-full flex items-center px-4 py-3 text-left ${idx !== 0 ? 'border-t border-gray-50' : ''} ${item.qty <= item.min_stock && item.min_stock > 0 ? 'bg-red-50/30' : ''} ${isOwnerManager ? 'active:bg-gray-50' : ''}`}>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
-              <p className="text-xs text-gray-400">{formatKategori(item.category)} Â· Avg {formatRupiah(item.avg_cost)}/{item.unit}</p>
+              <p className="text-xs text-gray-400">{formatKategori(item.category)} · Avg {formatAvgCost(item.avg_cost, item.unit)}</p>
             </div>
             <div className="text-right flex-shrink-0">
               <p className={`text-sm font-semibold ${item.qty <= item.min_stock && item.min_stock > 0 ? 'text-red-600' : 'text-gray-900'}`}>
@@ -368,7 +368,7 @@ function StokProduksiView({ isOwnerManager, setHeaderActions }: {
               className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${isOwnerManager ? 'cursor-pointer active:bg-gray-50' : ''}`}>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900">{s.material?.name}</p>
-                <p className="text-xs text-gray-400">{formatKategori(s.material?.category)} Â· Avg {formatRupiah(s.displayAvgCost)}/{s.material?.unit}</p>
+                <p className="text-xs text-gray-400">{formatKategori(s.material?.category)} · Avg {formatAvgCost(s.displayAvgCost, s.material?.unit || '')}</p>
               </div>
               <div className="text-right">
                 <p className="text-sm font-semibold text-gray-900">{s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.material?.unit}</span></p>
@@ -704,7 +704,7 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: {
                 {s.isProduk
                   ? <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-medium">Produk Jadi</span>
                   : s.categoryName ? <p className="text-xs text-gray-400">{s.categoryName}</p> : null}
-                {s.avg_cost > 0 && <p className="text-xs text-gray-300">Â· Avg {formatAvgCost(s.avg_cost, s.displayUnit)}</p>}
+                {s.avg_cost > 0 && <p className="text-xs text-gray-300">· Avg {formatAvgCost(s.avg_cost, s.displayUnit)}</p>}
               </div>
             </div>
             <div className="text-right">

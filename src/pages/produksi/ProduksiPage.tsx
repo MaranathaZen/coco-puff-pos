@@ -102,11 +102,11 @@ export default function ProduksiPage() {
   const [activeTab,      setActiveTab]      = useState<ProduksiTab>(defaultTab)
   const [isSyncing,      setIsSyncing]      = useState(false)
   const [isInitialLoad,  setIsInitialLoad]  = useState(true)
-  useEffect(() => { syncData() }, [])
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
 
-  // FIX: auto-sync saat mount
-  useEffect(() => { syncData() }, [])
+  // auto-sync saat mount tanpa toast
+  useEffect(() => { syncData(false) }, [])
+
 
   const hasLocalData = useLiveQuery(async () => {
     const count = await db.production_recipes.count()
@@ -117,7 +117,7 @@ export default function ProduksiPage() {
     if (hasLocalData !== undefined) setIsInitialLoad(false)
   }, [hasLocalData])
 
-  async function syncData() {
+  async function syncData(showToast = true) {
     setIsSyncing(true)
     try {
       const storeId = user?.store_id || ''
@@ -155,10 +155,10 @@ export default function ProduksiPage() {
         (storeRecipeItems as any).data?.length ? db.store_recipe_items.bulkPut((storeRecipeItems as any).data) : Promise.resolve(),
       ])
 
-      toast.success('Data produksi diperbarui')
+      if (showToast) toast.success('Data produksi diperbarui')
     } catch (e) {
       console.error('[ProduksiPage sync]', e)
-      toast.error('Gagal sync data')
+      if (showToast) toast.error('Gagal sync data')
     } finally {
       setIsSyncing(false)
     }

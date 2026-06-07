@@ -1093,7 +1093,7 @@ function TutupTahunTab({ currentUser }: { currentUser: User }) {
           <div className="bg-white rounded-xl border border-gray-100 p-4">
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Pilih Tahun yang Akan Ditutup</p>
             <div className="flex gap-2">
-              {[currentYear - 2, currentYear - 1, currentYear].map(y => (
+              {[currentYear - 2, currentYear - 1].map(y => (
                 <button key={y} onClick={() => { setSelectedYear(y); setStats(null) }}
                   className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-colors ${selectedYear === y ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
                   {y}

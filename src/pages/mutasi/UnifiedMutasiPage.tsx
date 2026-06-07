@@ -1,8 +1,9 @@
 // src/pages/mutasi/UnifiedMutasiPage.tsx
-// CHANGELOG v6:
+// CHANGELOG v7:
+// - FIX: auto-sync saat mount (data tampil tanpa klik refresh)
+// - FIX: 409 conflict stock upsert — pakai upsert dengan onConflict
 // - FIX: produksi lihat mutasi yang diterima (destination_id === storeId)
 // - FIX: owner/manager default ke gudang saat buka form mutasi
-// - FIX: template mutasi tampil pengirim → penerima setelah ID
 
 import { useState, useMemo, useEffect, useContext, createContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -79,7 +80,39 @@ export default function UnifiedMutasiPage() {
   const { user } = useAuthStore()
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
   const [syncing, setSyncing] = useState(false)
-  useEffect(() => { syncData() }, [])
+
+  // FIX: auto-sync saat mount — tanpa toast
+  useEffect(() => {
+    async function mountSync() {
+      setSyncing(true)
+      try {
+        const [m, mi, mats, stores, partners, prods, fgStock, wstock, pstock, stock] = await Promise.all([
+          supabase.from('warehouse_mutations').select('*').order('created_at', { ascending: false }).limit(500),
+          supabase.from('warehouse_mutation_items').select('*'),
+          supabase.from('materials').select('*'),
+          supabase.from('stores').select('*'),
+          supabase.from('partners').select('*'),
+          supabase.from('products').select('*').eq('is_active', true),
+          supabase.from('finished_goods_stock').select('*'),
+          supabase.from('warehouse_stock').select('*'),
+          supabase.from('production_stock').select('*'),
+          supabase.from('stock').select('*'),
+        ])
+        if (m.data !== null)   { await db.warehouse_mutations.clear();      if (m.data.length)   await db.warehouse_mutations.bulkPut(m.data)      }
+        if (mi.data !== null)  { await db.warehouse_mutation_items.clear(); if (mi.data.length)  await db.warehouse_mutation_items.bulkPut(mi.data) }
+        if (mats.data?.length)     await db.materials.bulkPut(mats.data)
+        if (stores.data?.length)   await db.stores.bulkPut(stores.data)
+        if (partners.data?.length) await db.partners.bulkPut(partners.data)
+        if (prods.data?.length)    await db.products.bulkPut(prods.data)
+        if (fgStock.data?.length)  await db.finished_goods_stock.bulkPut(fgStock.data)
+        if (wstock.data?.length)   await db.warehouse_stock.bulkPut(wstock.data)
+        if (pstock.data?.length)   await db.production_stock.bulkPut(pstock.data)
+        if (stock.data !== null)   { await db.stock.clear(); if (stock.data.length) await db.stock.bulkPut(stock.data) }
+      } catch (e) { console.warn('[Mutasi mount sync]', e) }
+      finally { setSyncing(false) }
+    }
+    mountSync()
+  }, [])
 
   async function syncData() {
     setSyncing(true)
@@ -184,7 +217,6 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
         )
       )
     } else if (role === 'produksi') {
-      // FIX: produksi lihat yang dibuat sendiri DAN yang diterima
       m = m.filter(x =>
         x.created_by === userId ||
         x.destination_id === storeId ||
@@ -265,7 +297,6 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
             {mutNo && <p className="text-xs font-mono text-blue-600 mb-0.5">{mutNo}<CopyBtn text={mutNo} /></p>}
-            {/* FIX: baris pengirim → penerima */}
             {(pengirim || penerima) && (
               <div className="flex items-center gap-1 text-xs mb-0.5">
                 <span className="font-medium text-gray-700">{pengirim || '—'}</span>
@@ -298,11 +329,6 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
                 </div>
               )
             })}
-            {m.items.length > 1 && totalNilai > 0 && (
-              <div className="flex justify-between text-xs font-semibold text-gray-700 pt-1 border-t border-gray-100 mt-1">
-                <span>Total Nilai</span><span>{formatRupiah(totalNilai)}</span>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -397,7 +423,6 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
   )
 }
 
-// ── FORM MUTASI ───────────────────────────────────────────────
 function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: string; storeId: string; onClose: () => void }) {
   const isOwnerManager = ['owner','manager'].includes(role)
   const allStores = useLiveQuery(() =>
@@ -407,15 +432,11 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
   const [inputAsRole,  setInputAsRole]  = useState(role)
   const [inputAsStore, setInputAsStore] = useState(storeId)
 
-  // FIX: owner/manager default ke gudang saat allStores tersedia
   useEffect(() => {
     if (!isOwnerManager || !allStores || allStores.length === 0) return
     if (inputAsStore === storeId || !inputAsStore) {
       const gudang = (allStores as any[]).find((s: any) => s.id.includes('gudang'))
-      if (gudang) {
-        setInputAsStore(gudang.id)
-        setInputAsRole('gudang')
-      }
+      if (gudang) { setInputAsStore(gudang.id); setInputAsRole('gudang') }
     }
   }, [allStores])
 
@@ -447,7 +468,6 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
       id: s.material_id, name: mMap[s.material_id]?.name || '',
       unit: mMap[s.material_id]?.unit || '', qty: s.qty_on_hand,
       avg_cost: (s as any).avg_cost || mMap[s.material_id]?.unit_cost || 0,
-      category: mMap[s.material_id]?.category || '',
     })).filter(s => s.name)
   }, [effectiveRole])
 
@@ -634,11 +654,17 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           const newAvg   = newQty > 0 ? (prevQty * prevCost + inQty * snapshotCost) / newQty : snapshotCost
           if (existingStock) {
             await db.stock.update(existingStock.id, { qty_on_hand: newQty, avg_cost: newAvg, last_updated: now() } as any)
+            // FIX: pakai update (bukan upsert) karena row sudah ada — hindari 409
             await supabase.from('stock').update({ qty_on_hand: newQty, avg_cost: newAvg, last_updated: now() }).eq('id', existingStock.id)
           } else {
-            const newStock: any = { id: generateId(), store_id: destId, ingredient_id: item.material_id, material_id: item.material_id, qty_on_hand: inQty, avg_cost: newAvg, last_updated: now() }
+            const newStock: any = {
+              id: generateId(), store_id: destId,
+              ingredient_id: item.material_id, material_id: item.material_id,
+              qty_on_hand: inQty, avg_cost: newAvg, last_updated: now(),
+            }
             await db.stock.add(newStock)
-            await supabase.from('stock').upsert({ id: newStock.id, store_id: destId, ingredient_id: item.material_id, material_id: item.material_id, qty_on_hand: inQty, avg_cost: newAvg })
+            // FIX: pakai upsert dengan onConflict untuk row baru
+            await supabase.from('stock').upsert(newStock, { onConflict: 'id' })
           }
         }
       }

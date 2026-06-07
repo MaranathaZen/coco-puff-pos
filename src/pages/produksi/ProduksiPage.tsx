@@ -105,6 +105,9 @@ export default function ProduksiPage() {
   useEffect(() => { syncData() }, [])
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
 
+  // FIX: auto-sync saat mount
+  useEffect(() => { syncData() }, [])
+
   const hasLocalData = useLiveQuery(async () => {
     const count = await db.production_recipes.count()
     return count > 0

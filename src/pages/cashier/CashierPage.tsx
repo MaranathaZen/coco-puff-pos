@@ -609,7 +609,7 @@ export default function CashierPage() {
           }
 
           // ✅ FIX: lebar konsisten sesuai mode
-          const AW   = printModeNow === 'rawbt' ? 28 : printModeNow === 'server' ? 42 : 32
+          const AW   = printModeNow === 'rawbt' ? 28 : printModeNow === 'server' ? 38 : 32
           const ASEP = '='.repeat(AW)
           const asep = '-'.repeat(AW)
           const actr = (s: string) => s.padStart(Math.floor((AW + Math.min(s.length, AW)) / 2)).padEnd(AW)

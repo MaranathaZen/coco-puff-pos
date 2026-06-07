@@ -42,6 +42,15 @@ const KATEGORI = [
   { value: 'non_produksi',        label: 'Non Produksi / ATK' },
 ]
 
+function formatAvgCost(cost: number, unit: string): string {
+  if (!cost || cost === 0) return `Rp 0/${unit}`
+  if (cost < 100) {
+    const formatted = parseFloat(cost.toFixed(3)).toString()
+    return `Rp ${formatted}/${unit}`
+  }
+  return `Rp ${Math.round(cost).toLocaleString('id-ID')}/${unit}`
+}
+
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -469,7 +478,9 @@ function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
         is_active: true, updated_at: now(),
       }
       await db.materials.update(matId, matData)
-      await supabase.from('materials').update({ name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock) }).eq('id', matId)
+      const hasHistoryPs = (mat as any)?.total_qty_purchased > 0
+      const newAvgPs = hasHistoryPs ? (mat as any)?.avg_cost : Number(unitCost)
+      await supabase.from('materials').update({ name: name.trim(), category, unit, unit_cost: Number(unitCost), avg_cost: newAvgPs, min_stock: Number(minStock) }).eq('id', matId)
 
       // Update production stock
       const existing = ps || await db.production_stock.where('material_id').equals(matId).first()
@@ -693,7 +704,7 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: {
                 {s.isProduk
                   ? <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-medium">Produk Jadi</span>
                   : s.categoryName ? <p className="text-xs text-gray-400">{s.categoryName}</p> : null}
-                {s.avg_cost > 0 && <p className="text-xs text-gray-300">· Avg {formatRupiah(s.avg_cost)}/{s.displayUnit}</p>}
+                {s.avg_cost > 0 && <p className="text-xs text-gray-300">· Avg {formatAvgCost(s.avg_cost, s.displayUnit)}</p>}
               </div>
             </div>
             <div className="text-right">
@@ -829,8 +840,10 @@ function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void 
     try {
       // Update material data kalau ada
       if (mat) {
-        await db.materials.update(mat.id, { name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock), updated_at: now() } as any)
-        await supabase.from('materials').update({ name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock) }).eq('id', mat.id)
+        const hasHistoryToko = (mat as any)?.total_qty_purchased > 0
+        const newAvgToko = hasHistoryToko ? (mat as any)?.avg_cost : Number(unitCost)
+        await db.materials.update(mat.id, { name: name.trim(), category, unit, unit_cost: Number(unitCost), avg_cost: newAvgToko, min_stock: Number(minStock), updated_at: now() } as any)
+        await supabase.from('materials').update({ name: name.trim(), category, unit, unit_cost: Number(unitCost), avg_cost: newAvgToko, min_stock: Number(minStock) }).eq('id', mat.id)
       }
       // Update stock toko
       await db.stock.update(stock.stockId, { qty_on_hand: Number(qty), avg_cost: Number(avg), last_updated: now() } as any)
@@ -925,9 +938,12 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
     }
     setSaving(true)
     try {
-      const data: Material = {
+      const hasPurchaseHistory = ((material as any)?.total_qty_purchased || 0) > 0
+      const data: any = {
         id: material?.id || generateId(), name: name.trim(), category, unit,
-        unit_cost: Number(unitCost), min_stock: Number(minStock),
+        unit_cost: Number(unitCost),
+        avg_cost: hasPurchaseHistory ? (material as any)?.avg_cost : Number(unitCost),
+        min_stock: Number(minStock),
         is_active: isActive, created_at: material?.created_at || now(), updated_at: now(),
       }
       await db.materials.put(data)

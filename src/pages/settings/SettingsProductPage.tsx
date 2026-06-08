@@ -381,6 +381,7 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
   const [pkgQty,     setPkgQty]    = useState(String(product?.pkg_qty || ''))
   const [pkgUnit,    setPkgUnit]   = useState(product?.pkg_unit || 'dus')
   const [saving,     setSaving]    = useState(false)
+  const packaging = useLiveQuery(() => db.materials.filter(m => m.category === 'packaging' && m.is_active).toArray(), [])
 
   // Harga per toko per tipe order
   const stores = useLiveQuery(() => db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray(), [])

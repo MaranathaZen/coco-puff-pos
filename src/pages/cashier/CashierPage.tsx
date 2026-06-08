@@ -1284,7 +1284,15 @@ function ProductCard({ product, onAdd }: { product: any; onAdd: () => void }) {
     <button onClick={onAdd} className="bg-white rounded-2xl border border-gray-100 p-3 text-left active:scale-95 transition-transform shadow-sm relative overflow-hidden">
       {isBuy1Get1 && <div className="absolute top-0 right-0 bg-purple-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-bl-xl">B1G1</div>}
       {hasPromo && !isBuy1Get1 && <div className="absolute top-0 right-0 bg-green-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-bl-xl">PROMO</div>}
-      <div className="text-2xl mb-2">🧁</div>
+      {(product as any).image_url ? (
+        <img
+          src={(product as any).image_url}
+          alt={product.name}
+          className="w-full h-20 object-cover rounded-xl mb-2"
+        />
+      ) : (
+        <div className="text-2xl mb-2">🧁</div>
+      )}
       <p className="text-sm font-medium text-gray-800 line-clamp-2 leading-tight">{product.name}</p>
       {isBuy1Get1 ? (
         <div className="mt-1">

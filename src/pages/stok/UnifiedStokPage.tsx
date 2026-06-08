@@ -15,18 +15,18 @@ import toast from 'react-hot-toast'
 type StokTab = 'gudang' | 'produksi' | 'toko'
 
 const TAB_ACCESS: Record<string, StokTab[]> = {
-  owner:    ['gudang', 'produksi', 'toko'],
-  manager:  ['gudang', 'produksi', 'toko'],
-  gudang:   ['gudang', 'produksi', 'toko'],
+  owner: ['gudang', 'produksi', 'toko'],
+  manager: ['gudang', 'produksi', 'toko'],
+  gudang: ['gudang', 'produksi', 'toko'],
   produksi: ['produksi'],
-  kasir:    ['toko'],
+  kasir: ['toko'],
 }
 
 const KAT_LABEL: Record<string, string> = {
-  bahan_baku:          'Bahan Baku',
+  bahan_baku: 'Bahan Baku',
   bahan_setengah_jadi: 'Bahan Setengah Jadi',
-  packaging:           'Packaging',
-  non_produksi:        'Non-Produksi',
+  packaging: 'Packaging',
+  non_produksi: 'Non-Produksi',
 }
 function formatKategori(raw: string | undefined): string {
   if (!raw) return ''
@@ -34,12 +34,12 @@ function formatKategori(raw: string | undefined): string {
   return raw.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
-const SATUAN   = ['Gram', 'Ml', 'Pcs', 'Kg', 'Liter', 'Pack', 'Lembar', 'Roll']
+const SATUAN = ['Gram', 'Ml', 'Pcs', 'Kg', 'Liter', 'Pack', 'Lembar', 'Roll']
 const KATEGORI = [
-  { value: 'bahan_baku',          label: 'Bahan Baku' },
+  { value: 'bahan_baku', label: 'Bahan Baku' },
   { value: 'bahan_setengah_jadi', label: 'Bahan Setengah Jadi' },
-  { value: 'packaging',           label: 'Packaging' },
-  { value: 'non_produksi',        label: 'Non Produksi / ATK' },
+  { value: 'packaging', label: 'Packaging' },
+  { value: 'non_produksi', label: 'Non Produksi / ATK' },
 ]
 
 function formatAvgCost(cost: number, unit: string): string {
@@ -72,11 +72,11 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
 
 export default function UnifiedStokPage() {
   const { user } = useAuthStore()
-  const role  = user?.role || 'kasir'
-  const tabs  = TAB_ACCESS[role] || ['toko']
+  const role = user?.role || 'kasir'
+  const tabs = TAB_ACCESS[role] || ['toko']
   const [tab, setTab] = useState<StokTab>(tabs[0])
   const [syncing, setSyncing] = useState(false)
-  const isOwnerManager = ['owner','manager'].includes(role)
+  const isOwnerManager = ['owner', 'manager'].includes(role)
   const [headerActions, setHeaderActions] = useState<React.ReactNode>(null)
 
   async function syncAll() {
@@ -92,23 +92,27 @@ export default function UnifiedStokPage() {
         supabase.from('categories').select('*'),
         supabase.from('stores').select('*'),
       ])
-      if (mats.data?.length)   await db.materials.bulkPut(mats.data)
-      if (ws.data?.length)     await db.warehouse_stock.bulkPut(ws.data)
-      if (ps.data?.length)     await db.production_stock.bulkPut(ps.data)
-      if (fgs.data?.length)    await db.finished_goods_stock.bulkPut(fgs.data)
+      if (mats.data?.length) await db.materials.bulkPut(mats.data)
+      const recipes = await supabase.from('store_recipes').select('*')
+      const recipeItems = await supabase.from('store_recipe_items').select('*')
+      if (recipes.data?.length) await db.store_recipes.bulkPut(recipes.data)
+      if (recipeItems.data?.length) await db.store_recipe_items.bulkPut(recipeItems.data)
+      if (ws.data?.length) await db.warehouse_stock.bulkPut(ws.data)
+      if (ps.data?.length) await db.production_stock.bulkPut(ps.data)
+      if (fgs.data?.length) await db.finished_goods_stock.bulkPut(fgs.data)
       if (stores.data?.length) await db.stores.bulkPut(stores.data)
-      if (prods.data !== null)  { await db.products.clear();   if (prods.data.length)  await db.products.bulkPut(prods.data)   }
-      if (stocks.data !== null) { await db.stock.clear();      if (stocks.data.length) await db.stock.bulkPut(stocks.data)     }
-      if (cats.data !== null)   { await db.categories.clear(); if (cats.data.length)   await db.categories.bulkPut(cats.data)  }
+      if (prods.data !== null) { await db.products.clear(); if (prods.data.length) await db.products.bulkPut(prods.data) }
+      if (stocks.data !== null) { await db.stock.clear(); if (stocks.data.length) await db.stock.bulkPut(stocks.data) }
+      if (cats.data !== null) { await db.categories.clear(); if (cats.data.length) await db.categories.bulkPut(cats.data) }
       toast.success('Stok diperbarui')
     } catch { toast.error('Gagal sync') }
     finally { setSyncing(false) }
   }
 
   const tabConfig = [
-    { id: 'gudang'   as StokTab, label: 'Gudang',   icon: Warehouse },
+    { id: 'gudang' as StokTab, label: 'Gudang', icon: Warehouse },
     { id: 'produksi' as StokTab, label: 'Produksi', icon: FlaskConical },
-    { id: 'toko'     as StokTab, label: 'Toko',     icon: Store },
+    { id: 'toko' as StokTab, label: 'Toko', icon: Store },
   ].filter(t => tabs.includes(t.id))
 
   return (
@@ -133,32 +137,32 @@ export default function UnifiedStokPage() {
         </div>
       )}
       <div className="flex-1 overflow-auto bg-gray-50">
-        {tab === 'gudang'   && <StokGudangView   isOwnerManager={isOwnerManager} isOwner={role === 'owner'} setHeaderActions={setHeaderActions} />}
+        {tab === 'gudang' && <StokGudangView isOwnerManager={isOwnerManager} isOwner={role === 'owner'} setHeaderActions={setHeaderActions} />}
         {tab === 'produksi' && <StokProduksiView isOwnerManager={isOwnerManager} setHeaderActions={setHeaderActions} />}
-        {tab === 'toko'     && <StokTokoView     storeId={user?.store_id || ''} role={role} isOwnerManager={isOwnerManager} setHeaderActions={setHeaderActions} />}
+        {tab === 'toko' && <StokTokoView storeId={user?.store_id || ''} role={role} isOwnerManager={isOwnerManager} setHeaderActions={setHeaderActions} />}
       </div>
     </div>
   )
 }
 
 const KAT_FILTERS = [
-  { k: 'semua',               l: 'Semua' },
-  { k: 'stok_rendah',         l: '⚠ Stok Rendah' },
-  { k: 'bahan_baku',          l: 'Bahan Baku' },
+  { k: 'semua', l: 'Semua' },
+  { k: 'stok_rendah', l: '⚠ Stok Rendah' },
+  { k: 'bahan_baku', l: 'Bahan Baku' },
   { k: 'bahan_setengah_jadi', l: 'Bahan Setengah Jadi' },
-  { k: 'packaging',           l: 'Packaging' },
-  { k: 'non_produksi',        l: 'Non-Produksi' },
+  { k: 'packaging', l: 'Packaging' },
+  { k: 'non_produksi', l: 'Non-Produksi' },
 ]
 
 // ── STOK GUDANG ───────────────────────────────────────────────
 function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: {
   isOwnerManager: boolean; isOwner: boolean; setHeaderActions: (n: React.ReactNode) => void
 }) {
-  const [search,      setSearch]      = useState('')
-  const [filterKat,   setFilterKat]   = useState('semua')
-  const [showForm,    setShowForm]    = useState(false)
+  const [search, setSearch] = useState('')
+  const [filterKat, setFilterKat] = useState('semua')
+  const [showForm, setShowForm] = useState(false)
   const [showOpening, setShowOpening] = useState(false)
-  const [editMat,     setEditMat]     = useState<Material | null>(null)
+  const [editMat, setEditMat] = useState<Material | null>(null)
 
   useEffect(() => {
     if (!isOwnerManager) { setHeaderActions(null); return }
@@ -178,12 +182,12 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: {
   }, [isOwnerManager])
 
   const data = useLiveQuery(async () => {
-    const mats   = await db.materials.filter(m => m.is_active).toArray()
+    const mats = await db.materials.filter(m => m.is_active).toArray()
     const stocks = await db.warehouse_stock.toArray()
-    const sMap   = Object.fromEntries(stocks.map(s => [s.material_id, s.qty_on_hand]))
-    const items  = mats.map(m => ({ ...m, qty: sMap[m.id] ?? 0, avg_cost: m.avg_cost || m.unit_cost || 0 }))
+    const sMap = Object.fromEntries(stocks.map(s => [s.material_id, s.qty_on_hand]))
+    const items = mats.map(m => ({ ...m, qty: sMap[m.id] ?? 0, avg_cost: m.avg_cost || m.unit_cost || 0 }))
     const totalNilai = items.reduce((s, i) => s + i.qty * i.avg_cost, 0)
-    const lowStock   = items.filter(i => i.qty <= i.min_stock && i.min_stock > 0)
+    const lowStock = items.filter(i => i.qty <= i.min_stock && i.min_stock > 0)
     return { items, totalNilai, lowStock }
   }, [])
 
@@ -191,7 +195,7 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: {
     const matchSearch = !search || item.name.toLowerCase().includes(search.toLowerCase())
     const matchKat = filterKat === 'semua' ? true
       : filterKat === 'stok_rendah' ? item.qty <= item.min_stock && item.min_stock > 0
-      : item.category === filterKat
+        : item.category === filterKat
     return matchSearch && matchKat
   })
 
@@ -236,7 +240,7 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: {
             className={`w-full flex items-center px-4 py-3 text-left ${idx !== 0 ? 'border-t border-gray-50' : ''} ${item.qty <= item.min_stock && item.min_stock > 0 ? 'bg-red-50/30' : ''} ${isOwnerManager ? 'active:bg-gray-50' : ''}`}>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
-              <p className="text-xs text-gray-400">{formatKategori(item.category)} � Avg {formatAvgCost(item.avg_cost, item.unit)}</p>
+              <p className="text-xs text-gray-400">{formatKategori(item.category)} � Avg {formatAvgCost(item.avg_cost, item.unit)}</p>
             </div>
             <div className="text-right flex-shrink-0">
               <p className={`text-sm font-semibold ${item.qty <= item.min_stock && item.min_stock > 0 ? 'text-red-600' : 'text-gray-900'}`}>
@@ -252,7 +256,7 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: {
           </div>
         )}
       </div>
-      {showForm    && isOwnerManager && <MaterialForm material={editMat} isOwner={isOwner} onClose={() => { setShowForm(false); setEditMat(null) }} />}
+      {showForm && isOwnerManager && <MaterialForm material={editMat} isOwner={isOwner} onClose={() => { setShowForm(false); setEditMat(null) }} />}
       {showOpening && isOwnerManager && <OpeningStockForm onClose={() => setShowOpening(false)} />}
     </div>
   )
@@ -262,12 +266,12 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: {
 function StokProduksiView({ isOwnerManager, setHeaderActions }: {
   isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void
 }) {
-  const [search,       setSearch]       = useState('')
-  const [filterKat,    setFilterKat]    = useState('semua')
-  const [showFgsForm,  setShowFgsForm]  = useState(false)
-  const [showPsForm,   setShowPsForm]   = useState(false)
-  const [editFgs,      setEditFgs]      = useState<any>(null)
-  const [editPs,       setEditPs]       = useState<any>(null)
+  const [search, setSearch] = useState('')
+  const [filterKat, setFilterKat] = useState('semua')
+  const [showFgsForm, setShowFgsForm] = useState(false)
+  const [showPsForm, setShowPsForm] = useState(false)
+  const [editFgs, setEditFgs] = useState<any>(null)
+  const [editPs, setEditPs] = useState<any>(null)
 
   useEffect(() => {
     if (!isOwnerManager) { setHeaderActions(null); return }
@@ -287,8 +291,8 @@ function StokProduksiView({ isOwnerManager, setHeaderActions }: {
   }, [isOwnerManager])
 
   const data = useLiveQuery(async () => {
-    const ps   = await db.production_stock.toArray()
-    const fgs  = await db.finished_goods_stock.toArray()
+    const ps = await db.production_stock.toArray()
+    const fgs = await db.finished_goods_stock.toArray()
     const mats = await db.materials.toArray()
     const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
     const bahan = ps.map(s => ({
@@ -303,7 +307,7 @@ function StokProduksiView({ isOwnerManager, setHeaderActions }: {
     const matchSearch = !search || s.material?.name?.toLowerCase().includes(search.toLowerCase())
     const matchKat = filterKat === 'semua' ? true
       : filterKat === 'stok_rendah' ? s.qty_on_hand <= (s.material?.min_stock || 0) && (s.material?.min_stock || 0) > 0
-      : s.material?.category === filterKat
+        : s.material?.category === filterKat
     return matchSearch && matchKat
   })
 
@@ -368,7 +372,7 @@ function StokProduksiView({ isOwnerManager, setHeaderActions }: {
               className={`flex items-center px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${isOwnerManager ? 'cursor-pointer active:bg-gray-50' : ''}`}>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900">{s.material?.name}</p>
-                <p className="text-xs text-gray-400">{formatKategori(s.material?.category)} � Avg {formatAvgCost(s.displayAvgCost, s.material?.unit || '')}</p>
+                <p className="text-xs text-gray-400">{formatKategori(s.material?.category)} � Avg {formatAvgCost(s.displayAvgCost, s.material?.unit || '')}</p>
               </div>
               <div className="text-right">
                 <p className="text-sm font-semibold text-gray-900">{s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.material?.unit}</span></p>
@@ -383,16 +387,16 @@ function StokProduksiView({ isOwnerManager, setHeaderActions }: {
       </div>
 
       {showFgsForm && isOwnerManager && <FgsEditForm fgs={editFgs} onClose={() => { setShowFgsForm(false); setEditFgs(null) }} />}
-      {showPsForm  && isOwnerManager && <PsEditForm  ps={editPs}   onClose={() => { setShowPsForm(false);  setEditPs(null)  }} />}
+      {showPsForm && isOwnerManager && <PsEditForm ps={editPs} onClose={() => { setShowPsForm(false); setEditPs(null) }} />}
     </div>
   )
 }
 
 // ── FORM: Edit Produk Jadi ─────────────────────────────────────
 function FgsEditForm({ fgs, onClose }: { fgs: any; onClose: () => void }) {
-  const [name,   setName]   = useState(fgs?.product_name || '')
-  const [qty,    setQty]    = useState(String(fgs?.qty_on_hand || ''))
-  const [hpp,    setHpp]    = useState(String(fgs?.hpp_per_unit || ''))
+  const [name, setName] = useState(fgs?.product_name || '')
+  const [qty, setQty] = useState(String(fgs?.qty_on_hand || ''))
+  const [hpp, setHpp] = useState(String(fgs?.hpp_per_unit || ''))
   const [saving, setSaving] = useState(false)
 
   async function handleSave() {
@@ -401,10 +405,10 @@ function FgsEditForm({ fgs, onClose }: { fgs: any; onClose: () => void }) {
     setSaving(true)
     try {
       const data: any = {
-        id:           fgs?.id || generateId(),
-        product_id:   fgs?.product_id || `fgs-${generateId().slice(0,8)}`,
+        id: fgs?.id || generateId(),
+        product_id: fgs?.product_id || `fgs-${generateId().slice(0, 8)}`,
         product_name: name.trim(),
-        qty_on_hand:  Number(qty),
+        qty_on_hand: Number(qty),
         hpp_per_unit: Number(hpp) || 0,
         last_updated: now(),
       }
@@ -442,16 +446,16 @@ function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const mat = materials?.find(m => m.id === ps?.material_id)
 
-  const [matId,      setMatId]    = useState(ps?.material_id || '')
-  const [name,       setName]     = useState('')
-  const [category,   setCategory] = useState('bahan_baku')
-  const [unit,       setUnit]     = useState('')
-  const [unitCost,   setUnitCost] = useState('0')
-  const [minStock,   setMinStock] = useState('0')
-  const [customUnit, setCustom]   = useState(false)
-  const [qty,        setQty]      = useState(String(ps?.qty_on_hand || ''))
-  const [avg,        setAvg]      = useState(String((ps as any)?.avg_cost || ''))
-  const [saving,     setSaving]   = useState(false)
+  const [matId, setMatId] = useState(ps?.material_id || '')
+  const [name, setName] = useState('')
+  const [category, setCategory] = useState('bahan_baku')
+  const [unit, setUnit] = useState('')
+  const [unitCost, setUnitCost] = useState('0')
+  const [minStock, setMinStock] = useState('0')
+  const [customUnit, setCustom] = useState(false)
+  const [qty, setQty] = useState(String(ps?.qty_on_hand || ''))
+  const [avg, setAvg] = useState(String((ps as any)?.avg_cost || ''))
+  const [saving, setSaving] = useState(false)
 
   // Load material data when mat changes
   useEffect(() => {
@@ -485,10 +489,10 @@ function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
       // Update production stock
       const existing = ps || await db.production_stock.where('material_id').equals(matId).first()
       const data: any = {
-        id:           existing?.id || generateId(),
-        material_id:  matId,
-        qty_on_hand:  Number(qty),
-        avg_cost:     Number(avg) || Number(unitCost) || 0,
+        id: existing?.id || generateId(),
+        material_id: matId,
+        qty_on_hand: Number(qty),
+        avg_cost: Number(avg) || Number(unitCost) || 0,
         last_updated: now(),
       }
       await db.production_stock.put(data)
@@ -552,10 +556,10 @@ function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
 function StokTokoView({ storeId, role, isOwnerManager, setHeaderActions }: {
   storeId: string; role: string; isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void
 }) {
-  const canSeeAllStores = ['owner','manager','gudang','produksi'].includes(role)
+  const canSeeAllStores = ['owner', 'manager', 'gudang', 'produksi'].includes(role)
   const stores = useLiveQuery(() =>
     db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray()
-  , [])
+    , [])
   const [selectedStore, setSelectedStore] = useState('')
 
   useEffect(() => {
@@ -600,15 +604,15 @@ function StokTokoView({ storeId, role, isOwnerManager, setHeaderActions }: {
 function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: {
   storeId: string; isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void
 }) {
-  const [search,        setSearch]        = useState('')
+  const [search, setSearch] = useState('')
   const [filterTokoKat, setFilterTokoKat] = useState('semua')
-  const [showStokAwal,  setShowStokAwal]  = useState(false)
-  const [editStock,     setEditStock]     = useState<any>(null)
+  const [showStokAwal, setShowStokAwal] = useState(false)
+  const [editStock, setEditStock] = useState<any>(null)
 
   useEffect(() => {
     if (!storeId) return
     supabase.from('stock').select('*').eq('store_id', storeId).then(({ data }) => {
-      if (data?.length) db.stock.bulkPut(data).catch(() => {})
+      if (data?.length) db.stock.bulkPut(data).catch(() => { })
     })
   }, [storeId])
 
@@ -626,14 +630,14 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: {
   const data = useLiveQuery(async () => {
     if (!storeId) return []
     const stocks = await db.stock.where('store_id').equals(storeId).toArray()
-    const prods  = await db.products.toArray()
-    const cats   = await db.categories.toArray()
-    const mats   = await db.materials.toArray()
-    const pMap   = Object.fromEntries(prods.map(p => [p.id, p]))
-    const cMap   = Object.fromEntries(cats.map(c => [c.id, c]))
-    const mMap   = Object.fromEntries(mats.map(m => [m.id, m]))
+    const prods = await db.products.toArray()
+    const cats = await db.categories.toArray()
+    const mats = await db.materials.toArray()
+    const pMap = Object.fromEntries(prods.map(p => [p.id, p]))
+    const cMap = Object.fromEntries(cats.map(c => [c.id, c]))
+    const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
     return stocks.map(s => {
-      const id  = (s as any).material_id || s.ingredient_id || ''
+      const id = (s as any).material_id || s.ingredient_id || ''
       const prod = pMap[id]; const mat = mMap[id]
       if (!prod && !mat) return null
       return {
@@ -642,7 +646,7 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: {
         avg_cost: (s as any).avg_cost || 0,
         displayName: prod?.name || mat?.name || '',
         displayUnit: prod?.unit || mat?.unit || 'pcs',
-        categoryName: prod ? (cMap[prod.category_id||'']?.name || 'Produk') : formatKategori(mat?.category),
+        categoryName: prod ? (cMap[prod.category_id || '']?.name || 'Produk') : formatKategori(mat?.category),
         categoryRaw: prod ? '' : (mat?.category || ''),
         isProduk: !!prod,
       }
@@ -650,24 +654,24 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: {
   }, [storeId])
 
   const TOKO_FILTERS = [
-    { k: 'semua',               l: 'Semua'          },
-    { k: 'stok_rendah',         l: '⚠ Stok Rendah'  },
-    { k: 'stok_habis',          l: 'Habis'           },
-    { k: 'produk_jadi',         l: 'Produk Jadi'     },
-    { k: 'bahan_baku',          l: 'Bahan Baku'      },
-    { k: 'bahan_setengah_jadi', l: 'Bahan Setengah'  },
-    { k: 'packaging',           l: 'Packaging'       },
-    { k: 'non_produksi',        l: 'Non-Produksi'    },
+    { k: 'semua', l: 'Semua' },
+    { k: 'stok_rendah', l: '⚠ Stok Rendah' },
+    { k: 'stok_habis', l: 'Habis' },
+    { k: 'produk_jadi', l: 'Produk Jadi' },
+    { k: 'bahan_baku', l: 'Bahan Baku' },
+    { k: 'bahan_setengah_jadi', l: 'Bahan Setengah' },
+    { k: 'packaging', l: 'Packaging' },
+    { k: 'non_produksi', l: 'Non-Produksi' },
   ]
 
   const filtered = (data || []).filter(s => {
     const matchSearch = !search || s.displayName.toLowerCase().includes(search.toLowerCase())
     const matchKat =
-      filterTokoKat === 'semua'       ? true :
-      filterTokoKat === 'stok_rendah' ? s.qty_on_hand > 0 && s.qty_on_hand <= 5 :
-      filterTokoKat === 'stok_habis'  ? s.qty_on_hand <= 0 :
-      filterTokoKat === 'produk_jadi' ? s.isProduk :
-      s.categoryRaw === filterTokoKat
+      filterTokoKat === 'semua' ? true :
+        filterTokoKat === 'stok_rendah' ? s.qty_on_hand > 0 && s.qty_on_hand <= 5 :
+          filterTokoKat === 'stok_habis' ? s.qty_on_hand <= 0 :
+            filterTokoKat === 'produk_jadi' ? s.isProduk :
+              s.categoryRaw === filterTokoKat
     return matchSearch && matchKat
   })
 
@@ -704,7 +708,7 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: {
                 {s.isProduk
                   ? <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-medium">Produk Jadi</span>
                   : s.categoryName ? <p className="text-xs text-gray-400">{s.categoryName}</p> : null}
-                {s.avg_cost > 0 && <p className="text-xs text-gray-300">� Avg {formatAvgCost(s.avg_cost, s.displayUnit)}</p>}
+                {s.avg_cost > 0 && <p className="text-xs text-gray-300">� Avg {formatAvgCost(s.avg_cost, s.displayUnit)}</p>}
               </div>
             </div>
             <div className="text-right">
@@ -722,7 +726,7 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: {
         )}
       </div>
       {showStokAwal && isOwnerManager && <StokAwalTokoForm storeId={storeId} onClose={() => setShowStokAwal(false)} />}
-      {editStock    && isOwnerManager && <EditStokTokoForm stock={editStock} onClose={() => setEditStock(null)} />}
+      {editStock && isOwnerManager && <EditStokTokoForm stock={editStock} onClose={() => setEditStock(null)} />}
     </div>
   )
 }
@@ -730,7 +734,7 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: {
 // ── FORM: Stok Awal Toko ──────────────────────────────────────
 function StokAwalTokoForm({ storeId, onClose }: { storeId: string; onClose: () => void }) {
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
-  const [items,  setItems]  = useState([{ material_id: '', qty: '', avg_cost: '' }])
+  const [items, setItems] = useState([{ material_id: '', qty: '', avg_cost: '' }])
   const [saving, setSaving] = useState(false)
 
   async function handleSave() {
@@ -746,13 +750,13 @@ function StokAwalTokoForm({ storeId, onClose }: { storeId: string; onClose: () =
           )
         ).first()
         const data: any = {
-          id:            existing?.id || generateId(),
-          store_id:      storeId,
+          id: existing?.id || generateId(),
+          store_id: storeId,
           ingredient_id: item.material_id,
-          material_id:   item.material_id,
-          qty_on_hand:   Number(item.qty),
-          avg_cost:      Number(item.avg_cost) || 0,
-          last_updated:  now(),
+          material_id: item.material_id,
+          qty_on_hand: Number(item.qty),
+          avg_cost: Number(item.avg_cost) || 0,
+          last_updated: now(),
         }
         await db.stock.put(data)
         if (existing) {
@@ -813,15 +817,15 @@ function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void 
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const mat = materials?.find(m => m.id === stock.ingredient_id)
 
-  const [name,       setName]     = useState(stock.displayName || '')
-  const [category,   setCategory] = useState('')
-  const [unit,       setUnit]     = useState(stock.displayUnit || '')
-  const [unitCost,   setUnitCost] = useState('0')
-  const [minStock,   setMinStock] = useState('0')
-  const [customUnit, setCustom]   = useState(false)
-  const [qty,        setQty]      = useState(String(stock.qty_on_hand || 0))
-  const [avg,        setAvg]      = useState(String(stock.avg_cost || 0))
-  const [saving,     setSaving]   = useState(false)
+  const [name, setName] = useState(stock.displayName || '')
+  const [category, setCategory] = useState('')
+  const [unit, setUnit] = useState(stock.displayUnit || '')
+  const [unitCost, setUnitCost] = useState('0')
+  const [minStock, setMinStock] = useState('0')
+  const [customUnit, setCustom] = useState(false)
+  const [qty, setQty] = useState(String(stock.qty_on_hand || 0))
+  const [avg, setAvg] = useState(String(stock.avg_cost || 0))
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!mat) return
@@ -901,20 +905,20 @@ function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void 
 }
 
 function MaterialForm({ material, isOwner, onClose }: { material: Material | null; isOwner: boolean; onClose: () => void }) {
-  const [name,       setName]     = useState(material?.name || '')
-  const [category,   setCategory] = useState(material?.category || 'bahan_baku')
-  const [unit,       setUnit]     = useState(material?.unit || '')
-  const [unitCost,   setUnitCost] = useState(String(material?.unit_cost || '0'))
-  const [minStock,   setMinStock] = useState(String(material?.min_stock || '0'))
-  const [customUnit, setCustom]   = useState(material ? !SATUAN.map(s => s.toLowerCase()).includes((material.unit || '').toLowerCase()) : false)
-  const [isActive,   setIsActive] = useState(material?.is_active ?? true)
-  const [saving,     setSaving]   = useState(false)
+  const [name, setName] = useState(material?.name || '')
+  const [category, setCategory] = useState(material?.category || 'bahan_baku')
+  const [unit, setUnit] = useState(material?.unit || '')
+  const [unitCost, setUnitCost] = useState(String(material?.unit_cost || '0'))
+  const [minStock, setMinStock] = useState(String(material?.min_stock || '0'))
+  const [customUnit, setCustom] = useState(material ? !SATUAN.map(s => s.toLowerCase()).includes((material.unit || '').toLowerCase()) : false)
+  const [isActive, setIsActive] = useState(material?.is_active ?? true)
+  const [saving, setSaving] = useState(false)
 
   async function handleDelete() {
     if (!material || !isOwner) return
     if (!confirm(`Hapus "${material.name}" permanen?`)) return
     try {
-      for (const t of ['warehouse_mutation_items','purchase_items','warehouse_stock','production_stock','store_recipe_items']) {
+      for (const t of ['warehouse_mutation_items', 'purchase_items', 'warehouse_stock', 'production_stock', 'store_recipe_items']) {
         await supabase.from(t).delete().eq('material_id', material.id)
       }
       await supabase.from('stock').delete().eq('ingredient_id', material.id)
@@ -931,7 +935,7 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
 
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama bahan wajib diisi')
-    if (!unit)        return toast.error('Satuan wajib diisi')
+    if (!unit) return toast.error('Satuan wajib diisi')
     if (!material) {
       const existing = await db.materials.filter(m => m.name.toLowerCase() === name.trim().toLowerCase() && m.is_active).first()
       if (existing) return toast.error(`Bahan "${name}" sudah ada`)
@@ -1007,9 +1011,9 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
 // ── FORM: Stok Awal Gudang ────────────────────────────────────
 function OpeningStockForm({ onClose }: { onClose: () => void }) {
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
-  const [items,  setItems]  = useState([{ material_id: '', qty: '', unit_cost: '' }])
-  const [date,   setDate]   = useState(new Date().toISOString().slice(0, 10))
-  const [notes,  setNotes]  = useState('Saldo awal migrasi')
+  const [items, setItems] = useState([{ material_id: '', qty: '', unit_cost: '' }])
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [notes, setNotes] = useState('Saldo awal migrasi')
   const [saving, setSaving] = useState(false)
 
   function updateItem(i: number, f: string, v: string) {
@@ -1030,9 +1034,9 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
     setSaving(true)
     try {
       for (const item of valid) {
-        const qty  = Number(item.qty)
+        const qty = Number(item.qty)
         const cost = Number(item.unit_cost) || 0
-        const ws   = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
+        const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
         const wsd: WarehouseStock = { id: ws?.id || generateId(), material_id: item.material_id, qty_on_hand: qty, last_updated: now() }
         await db.warehouse_stock.put(wsd)
         await supabase.from('warehouse_stock').upsert(wsd)
@@ -1041,7 +1045,7 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
           await supabase.from('materials').update({ unit_cost: cost, avg_cost: cost }).eq('id', item.material_id)
         }
         const mutId = generateId()
-        const mut   = { id: mutId, mutation_type: 'opening_stock', destination_name: 'Saldo Awal', notes: notes || 'Stok awal', status: 'confirmed', created_by: 'system', created_at: `${date}T00:00:00.000Z`, confirmed_at: now(), confirmed_by: 'system' }
+        const mut = { id: mutId, mutation_type: 'opening_stock', destination_name: 'Saldo Awal', notes: notes || 'Stok awal', status: 'confirmed', created_by: 'system', created_at: `${date}T00:00:00.000Z`, confirmed_at: now(), confirmed_by: 'system' }
         await db.warehouse_mutations.add(mut as any)
         await supabase.from('warehouse_mutations').upsert(mut)
         const mi = { id: generateId(), mutation_id: mutId, material_id: item.material_id, qty, unit_cost: cost }

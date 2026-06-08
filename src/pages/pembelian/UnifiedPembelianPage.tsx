@@ -1,5 +1,6 @@
 // src/pages/pembelian/UnifiedPembelianPage.tsx
-// CHANGELOG v6:
+// CHANGELOG v7:
+// - FEAT: Realtime subscription purchases — semua role lihat perubahan otomatis
 // - FEAT: Void pembelian — owner/manager bisa void, stok gudang/toko dikurangi kembali
 // - UI: Row voided tampil strikethrough + badge "Dibatalkan"
 
@@ -206,6 +207,26 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
     )
     return () => setToolbarActions(null)
   }, [groupMode, isKasir])
+
+  // Realtime — update Dexie otomatis saat ada perubahan purchases
+  useEffect(() => {
+    const filter = isOwnerManager ? undefined : `store_id=eq.${storeId}`
+    const channel = supabase
+      .channel(`purchases:${storeId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'purchases', ...(filter ? { filter } : {}) },
+        async (payload) => {
+          if (payload.eventType === 'DELETE') {
+            await db.purchases.delete((payload.old as any).id)
+          } else if (payload.new) {
+            await db.purchases.put(payload.new as any)
+          }
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [storeId, isOwnerManager])
 
   const purchases = useLiveQuery(async () => {
     let p = await db.purchases.orderBy('created_at').reverse().toArray()

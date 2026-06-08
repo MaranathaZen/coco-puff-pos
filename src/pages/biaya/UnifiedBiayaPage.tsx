@@ -1,5 +1,6 @@
 // src/pages/biaya/UnifiedBiayaPage.tsx
-// CHANGELOG v6:
+// CHANGELOG v7:
+// - FEAT: Realtime subscription warehouse_expenses — semua role lihat perubahan otomatis
 // - FEAT: Void biaya — owner/manager bisa void, tidak ada rollback stok (biaya = uang keluar)
 // - UI: Row voided tampil strikethrough + badge "Dibatalkan"
 // - Total biaya exclude voided
@@ -204,6 +205,26 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
     )
     return () => setToolbarActions(null)
   }, [groupMode, isKasir])
+
+  // Realtime — update Dexie otomatis saat ada perubahan warehouse_expenses
+  useEffect(() => {
+    const filter = isOwnerManager ? undefined : `store_id=eq.${storeId}`
+    const channel = supabase
+      .channel(`warehouse_expenses:${storeId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'warehouse_expenses', ...(filter ? { filter } : {}) },
+        async (payload) => {
+          if (payload.eventType === 'DELETE') {
+            await db.warehouse_expenses.delete((payload.old as any).id)
+          } else if (payload.new) {
+            await db.warehouse_expenses.put(payload.new as any)
+          }
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [storeId, isOwnerManager])
 
   const expenses = useLiveQuery(async () => {
     let list = await db.warehouse_expenses.orderBy('created_at').reverse().toArray()

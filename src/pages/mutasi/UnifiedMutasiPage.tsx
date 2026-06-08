@@ -1,5 +1,6 @@
 // src/pages/mutasi/UnifiedMutasiPage.tsx
-// CHANGELOG v8:
+// CHANGELOG v9:
+// - FEAT: Realtime subscription warehouse_mutations — semua role lihat perubahan otomatis
 // - FEAT: Void mutasi — owner/manager bisa void, stok dikembalikan sesuai tipe mutasi
 // - UI: Row voided tampil strikethrough + badge "Dibatalkan"
 // - Total nilai mutasi exclude voided
@@ -243,6 +244,25 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
     )
     return () => setToolbar(null)
   }, [groupMode, isKasir])
+
+  // Realtime — update Dexie otomatis saat ada perubahan warehouse_mutations
+  useEffect(() => {
+    const channel = supabase
+      .channel(`warehouse_mutations:${storeId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'warehouse_mutations' },
+        async (payload) => {
+          if (payload.eventType === 'DELETE') {
+            await db.warehouse_mutations.delete((payload.old as any).id)
+          } else if (payload.new) {
+            await db.warehouse_mutations.put(payload.new as any)
+          }
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [storeId])
 
   const mutations = useLiveQuery(async () => {
     let m = await db.warehouse_mutations.orderBy('created_at').reverse().toArray()

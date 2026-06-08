@@ -1,14 +1,14 @@
 // src/components/layout/Layout.tsx
-// CHANGELOG v3:
-// - Logo & nama app di sidebar dinamis dari app_settings
-// - Favicon browser diupdate saat login
+// CHANGELOG v2:
+// - Kasir: urutan Kasir, Stok, Produksi, Mutasi, Close Order, Lainnya(Pembelian+Biaya)
+// - Produksi: hapus menu Biaya
+// - Desktop sidebar + mobile bottom nav
 
 import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useAuthStore } from '@/store/auth'
 import { db } from '@/lib/db'
-import { useAppSettings, applyFavicon } from '@/hooks/useAppSettings'
 import {
   LogOut, Wifi, WifiOff,
   ShoppingCart, FlaskConical,
@@ -101,13 +101,6 @@ export default function Layout() {
   const location   = useLocation()
   const [showMore, setShowMore] = useState(false)
   const [isOnline, setIsOnline] = useState(navigator.onLine)
-  const { settings } = useAppSettings()
-
-  // Apply favicon & title saat settings berubah
-  useEffect(() => {
-    if (settings.app_icon_url) applyFavicon(settings.app_icon_url)
-    if (settings.app_name) document.title = settings.app_name
-  }, [settings])
 
   useEffect(() => {
     const up = () => setIsOnline(true)
@@ -163,20 +156,11 @@ export default function Layout() {
       <aside className="hidden md:flex flex-col w-56 bg-white border-r border-gray-100 flex-shrink-0">
         <div className="px-4 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2.5">
-            {/* Logo dinamis */}
-            {settings.app_logo_url ? (
-              <img
-                src={settings.app_logo_url}
-                alt={settings.app_name}
-                className="w-8 h-8 rounded-lg object-cover flex-shrink-0"
-              />
-            ) : (
-              <div className="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center flex-shrink-0">
-                <span className="text-white text-xs font-bold">CP</span>
-              </div>
-            )}
+            <div className="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center flex-shrink-0">
+              <span className="text-white text-xs font-bold">CP</span>
+            </div>
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-gray-900 truncate">{settings.app_name}</p>
+              <p className="text-sm font-semibold text-gray-900 truncate">Coco Puff POS</p>
               <p className="text-xs text-gray-400 capitalize truncate">{user?.name}</p>
             </div>
           </div>
@@ -206,7 +190,7 @@ export default function Layout() {
             <WifiOff size={12} /><span>Offline — data tersimpan lokal</span>
           </div>
         )}
-        <div className="flex-1 overflow-hidden relative max-w-lg mx-auto w-full md:max-w-none">
+        <div className="flex-1 overflow-hidden relative w-full">
           <Outlet />
         </div>
 
@@ -224,6 +208,7 @@ export default function Layout() {
                 </NavLink>
               )
             })}
+            {/* Selalu tampilkan tombol Lainnya — untuk logout + menu overflow */}
             <button onClick={() => setShowMore(true)}
               className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${isMoreActive ? 'text-gray-900' : 'text-gray-400'}`}>
               <MoreHorizontal size={20} strokeWidth={isMoreActive ? 2 : 1.5} />

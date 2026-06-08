@@ -1,9 +1,8 @@
 // src/pages/produksi/ProduksiPage.tsx
-// CHANGELOG v4:
-// - FIX: CatatProduksiTab logs query — hapus referensi activeStoreId yang tidak ada di scope
-// - FIX: ProduksiTokoTab logs query — tambah load materials untuk detail bahan
-// - FIX: tag penutup </div> yang kurang di ProduksiTokoTab
-// - FIX: syncStoreRecipes tambah production_log_materials
+// CHANGELOG v5:
+// - FEAT: Void produksi divisi — owner/manager bisa void log, stok dikembalikan
+// - FEAT: Void produksi toko — owner/manager bisa void log, stok toko dikembalikan
+// - UI: Row voided tampil strikethrough + badge "Dibatalkan"
 
 import { useState, useEffect, useMemo, createContext, useContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -90,6 +89,45 @@ function LoadingSkeleton() {
   )
 }
 
+// ── VOID CONFIRM MODAL ────────────────────────────────────────
+function VoidConfirmModal({ logNumber, onConfirm, onClose }: {
+  logNumber: string; onConfirm: () => void; onClose: () => void
+}) {
+  const [loading, setLoading] = useState(false)
+  async function handleConfirm() {
+    setLoading(true)
+    await onConfirm()
+    setLoading(false)
+  }
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+      <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl p-5 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+            <span className="text-red-600 text-lg">⚠</span>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900">Batalkan Produksi?</p>
+            <p className="text-xs text-gray-500 mt-0.5">{logNumber}</p>
+          </div>
+        </div>
+        <p className="text-xs text-gray-600 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+          Stok bahan/produk akan dikembalikan ke kondisi sebelum produksi ini. Aksi ini tidak bisa diurungkan.
+        </p>
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">
+            Batal
+          </button>
+          <button onClick={handleConfirm} disabled={loading}
+            className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium disabled:opacity-50">
+            {loading ? 'Memproses...' : 'Ya, Batalkan'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 type ProduksiTab = 'divisi' | 'toko'
 
 export default function ProduksiPage() {
@@ -104,9 +142,7 @@ export default function ProduksiPage() {
   const [isInitialLoad, setIsInitialLoad] = useState(true)
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
 
-  // auto-sync saat mount tanpa toast
   useEffect(() => { syncData(false) }, [])
-
 
   const hasLocalData = useLiveQuery(async () => {
     const count = await db.production_recipes.count()
@@ -243,6 +279,7 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
     return { [today]: true }
   })
   const [search, setSearch] = useState('')
+  const [voidTarget, setVoidTarget] = useState<{ id: string; logNumber: string } | null>(null)
 
   useEffect(() => {
     setToolbar(
@@ -257,7 +294,6 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
     return () => setToolbar(null)
   }, [groupMode])
 
-  // FIX: hanya load log divisi produksi — yang TIDAK punya store_id (bukan log produksi toko)
   const logs = useLiveQuery(async () => {
     const all = await db.production_logs.orderBy('created_at').reverse().limit(200).toArray()
     const l = all.filter(log => !(log as any).store_id)
@@ -274,13 +310,6 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
     })
   }, [])
 
-  const todayTotal = useMemo(() => {
-    if (!logs) return { count: 0, yield: 0 }
-    const today = new Date().toISOString().slice(0, 10)
-    const todayLogs = logs.filter(l => l.created_at.slice(0, 10) === today)
-    return { count: todayLogs.length, yield: todayLogs.reduce((s, l) => s + l.total_yield, 0) }
-  }, [logs])
-
   const filteredLogs = useMemo(() => {
     if (!logs) return []
     if (!search) return logs
@@ -292,18 +321,69 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
     )
   }, [logs, search])
 
+  // ── VOID HANDLER: DIVISI ──────────────────────────────────
+  async function handleVoidDivisi(logId: string) {
+    try {
+      const log = await db.production_logs.get(logId)
+      if (!log) return
+
+      // 1. Kembalikan bahan ke production_stock
+      const logMats = await db.production_log_materials.where('log_id').equals(logId).toArray()
+      for (const lm of logMats) {
+        const ps = await db.production_stock.where('material_id').equals(lm.material_id).first()
+        if (ps) {
+          const newQty = ps.qty_on_hand + lm.qty_used
+          await db.production_stock.update(ps.id, { qty_on_hand: newQty, last_updated: now() })
+          await supabase.from('production_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', ps.id)
+        }
+      }
+
+      // 2. Kurangi finished_goods_stock
+      const recipeDef = await db.production_recipes.get(log.recipe_id)
+      const productName = (recipeDef as any)?.product_name || recipeDef?.name || ''
+      if (productName) {
+        const mat = await db.materials.filter(m => m.name.toLowerCase() === productName.toLowerCase()).first()
+        if (mat) {
+          const fgs = await db.finished_goods_stock.filter(f => f.product_id === mat.id || f.product_name === productName).first()
+          if (fgs) {
+            const newQty = Math.max(0, fgs.qty_on_hand - log.total_yield)
+            await db.finished_goods_stock.update(fgs.id, { qty_on_hand: newQty, last_updated: now() })
+            await supabase.from('finished_goods_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', fgs.id)
+          }
+        }
+      }
+
+      // 3. Set status voided di production_logs
+      await db.production_logs.update(logId, {
+        status: 'voided',
+        voided_at: now(),
+        voided_by: (await db.production_logs.get(logId) as any)?.created_by,
+      } as any)
+      await supabase.from('production_logs').update({
+        status: 'voided',
+        voided_at: new Date().toISOString(),
+      }).eq('id', logId)
+
+      toast.success('Produksi dibatalkan & stok dikembalikan')
+      setVoidTarget(null)
+    } catch (e) {
+      console.error('[VoidDivisi]', e)
+      toast.error('Gagal membatalkan produksi')
+    }
+  }
+
   return (
     <div className="p-4 space-y-3">
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400">Produksi Bulan Ini</p>
-          <p className="text-xl font-bold text-gray-900">{logs?.filter(l => l.created_at.slice(0, 7) === new Date().toISOString().slice(0, 7)).reduce((s, l) => s + l.total_yield, 0) || 0}</p>
-          <p className="text-xs text-gray-400">{logs?.filter(l => l.created_at.slice(0, 7) === new Date().toISOString().slice(0, 7)).length || 0} batch</p>
+          <p className="text-xl font-bold text-gray-900">{logs?.filter(l => (l as any).status !== 'voided' && l.created_at.slice(0, 7) === new Date().toISOString().slice(0, 7)).reduce((s, l) => s + l.total_yield, 0) || 0}</p>
+          <p className="text-xs text-gray-400">{logs?.filter(l => (l as any).status !== 'voided' && l.created_at.slice(0, 7) === new Date().toISOString().slice(0, 7)).length || 0} batch</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400">Total Semua</p>
-          <p className="text-xl font-bold text-gray-900">{logs?.reduce((s, l) => s + l.total_yield, 0) || 0}</p>
-          <p className="text-xs text-gray-400">{logs?.length || 0} produksi</p>
+          <p className="text-xl font-bold text-gray-900">{logs?.filter(l => (l as any).status !== 'voided').reduce((s, l) => s + l.total_yield, 0) || 0}</p>
+          <p className="text-xs text-gray-400">{logs?.filter(l => (l as any).status !== 'voided').length || 0} produksi</p>
         </div>
       </div>
 
@@ -331,53 +411,73 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
               />
               <div className="bg-white rounded-xl border border-gray-100 overflow-hidden"
                 style={{ display: expanded ? undefined : 'none' }}>
-                {grpItems.map((log, idx) => (
-                  <div key={log.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-mono text-blue-600 mb-0.5">
-                          {(log as any).log_number || `PROD-${log.created_at.slice(0, 10).replace(/-/g, '')}-${log.id.slice(-4).toUpperCase()}`}
-                          <CopyBtn text={log.id} />
-                        </p>
-                        <p className="text-sm font-medium text-gray-900">{log.recipe?.name || '—'}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {new Date(log.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          {', '}
-                          {new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })}
-                          {' · '}{log.batch_count} batch
-                          {log.notes && ` · ${log.notes}`}
-                        </p>
-                      </div>
-                      <div className="text-right flex-shrink-0 ml-3">
-                        <p className="text-sm font-bold text-gray-900">{log.total_yield} {log.recipe?.yield_unit || 'pcs'}</p>
-                      </div>
-                    </div>
-                    {log.materials.length > 0 && (
-                      <div className="mt-1.5 border-t border-gray-50 pt-1.5 space-y-0.5">
-                        {log.materials.map(m => (
-                          <div key={m.id} className="flex justify-between text-xs text-gray-400">
-                            <span>{m.material?.name} × {m.qty_used} {m.material?.unit} @ {formatRupiah(m.material?.unit_cost || 0)}</span>
-                            <span>{formatRupiah(m.qty_used * (m.material?.unit_cost || 0))}</span>
-                          </div>
-                        ))}
-                        {(log as any).total_cost > 0 && (
-                          <div className="pt-1 border-t border-gray-50 mt-1 space-y-0.5">
-                            <div className="flex justify-between text-xs font-medium text-gray-700">
-                              <span>Total Biaya Bahan</span>
-                              <span>{formatRupiah((log as any).total_cost)}</span>
-                            </div>
-                            {(log as any).hpp_per_unit > 0 && (
-                              <div className="flex justify-between text-xs text-gray-500">
-                                <span>HPP per pcs</span>
-                                <span>{formatRupiah((log as any).hpp_per_unit)}</span>
-                              </div>
+                {grpItems.map((log, idx) => {
+                  const isVoided = (log as any).status === 'voided'
+                  const logNumber = (log as any).log_number || `PROD-${log.created_at.slice(0, 10).replace(/-/g, '')}-${log.id.slice(-4).toUpperCase()}`
+                  return (
+                    <div key={log.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${isVoided ? 'opacity-50 bg-gray-50' : ''}`}>
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <p className={`text-xs font-mono text-blue-600 ${isVoided ? 'line-through' : ''}`}>
+                              {logNumber}
+                              {!isVoided && <CopyBtn text={log.id} />}
+                            </p>
+                            {isVoided && (
+                              <span className="text-[10px] font-medium text-red-500 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded-full">
+                                Dibatalkan
+                              </span>
                             )}
                           </div>
-                        )}
+                          <p className={`text-sm font-medium text-gray-900 ${isVoided ? 'line-through' : ''}`}>{log.recipe?.name || '—'}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {new Date(log.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            {', '}
+                            {new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                            {' · '}{log.batch_count} batch
+                            {log.notes && ` · ${log.notes}`}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                          <div className="text-right">
+                            <p className={`text-sm font-bold text-gray-900 ${isVoided ? 'line-through' : ''}`}>{log.total_yield} {log.recipe?.yield_unit || 'pcs'}</p>
+                          </div>
+                          {isOwnerManager && !isVoided && (
+                            <button
+                              onClick={() => setVoidTarget({ id: log.id, logNumber })}
+                              className="text-[10px] font-medium text-red-400 border border-red-200 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors">
+                              Void
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    )}
-                  </div>
-                ))}
+                      {!isVoided && log.materials.length > 0 && (
+                        <div className="mt-1.5 border-t border-gray-50 pt-1.5 space-y-0.5">
+                          {log.materials.map(m => (
+                            <div key={m.id} className="flex justify-between text-xs text-gray-400">
+                              <span>{m.material?.name} × {m.qty_used} {m.material?.unit} @ {formatRupiah(m.material?.unit_cost || 0)}</span>
+                              <span>{formatRupiah(m.qty_used * (m.material?.unit_cost || 0))}</span>
+                            </div>
+                          ))}
+                          {(log as any).total_cost > 0 && (
+                            <div className="pt-1 border-t border-gray-50 mt-1 space-y-0.5">
+                              <div className="flex justify-between text-xs font-medium text-gray-700">
+                                <span>Total Biaya Bahan</span>
+                                <span>{formatRupiah((log as any).total_cost)}</span>
+                              </div>
+                              {(log as any).hpp_per_unit > 0 && (
+                                <div className="flex justify-between text-xs text-gray-500">
+                                  <span>HPP per pcs</span>
+                                  <span>{formatRupiah((log as any).hpp_per_unit)}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )
@@ -385,6 +485,14 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
       })()}
 
       {showForm && <ProduksiForm userId={userId} isOwnerManager={isOwnerManager} onClose={() => setShowForm(false)} />}
+
+      {voidTarget && (
+        <VoidConfirmModal
+          logNumber={voidTarget.logNumber}
+          onConfirm={() => handleVoidDivisi(voidTarget.id)}
+          onClose={() => setVoidTarget(null)}
+        />
+      )}
     </div>
   )
 }
@@ -435,6 +543,7 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
         id: logId, log_number: logNumber, recipe_id: recipeId,
         batch_count: Number(batchCount), total_yield: finalYield,
         notes: notes || undefined, created_by: userId, created_at: now(),
+        status: 'done',
       }
       await db.production_logs.add(log)
       await supabase.from('production_logs').upsert(log)
@@ -453,19 +562,14 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
         }
       }
 
-      // FIX: cari material yang namanya sama dengan produk yang dihasilkan
-      // Kalau ada di materials → pakai ID-nya supaya konsisten dengan resep BOM kasir
-      // Kalau tidak ada → buat material baru sekalian supaya stok kasir bisa match
       const existingMat = await db.materials.filter(m =>
         m.name.toLowerCase() === productName.trim().toLowerCase()
       ).first()
 
       let fgsProductId: string
       if (existingMat) {
-        // Pakai ID material yang sudah ada
         fgsProductId = existingMat.id
       } else {
-        // Buat material baru dengan ID yang konsisten
         const newMatId = `mat-${generateId().slice(0, 8)}`
         const newMat: any = {
           id: newMatId, name: productName.trim(), unit: selectedRecipe?.yield_unit || 'pcs',
@@ -477,7 +581,6 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
         fgsProductId = newMatId
       }
 
-      // Update HPP di materials supaya resep BOM bisa hitung biaya
       if (hppPerUnit > 0) {
         await db.materials.update(fgsProductId, { unit_cost: hppPerUnit, avg_cost: hppPerUnit, updated_at: now() } as any)
         await supabase.from('materials').update({ unit_cost: hppPerUnit, avg_cost: hppPerUnit }).eq('id', fgsProductId)
@@ -689,6 +792,7 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
 function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: string; role: string }) {
   const isOwnerManager = ['owner', 'manager'].includes(role)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [voidTarget, setVoidTarget] = useState<{ id: string; logNumber: string; storeId: string; recipeId: string; totalYield: number } | null>(null)
 
   const stores = useLiveQuery(() =>
     isOwnerManager
@@ -700,7 +804,6 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
   const [activeStoreId, setActiveStoreId] = useState(storeId)
   const [showForm, setShowForm] = useState(false)
 
-  // Button Catat di toolbar kanan atas (sama seperti tab divisi)
   useEffect(() => {
     setToolbar(
       <button onClick={() => setShowForm(true)} disabled={isSyncing}
@@ -728,7 +831,6 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
       if (recs?.length) await db.store_recipes.bulkPut(recs)
       if (items?.length) await db.store_recipe_items.bulkPut(items)
       if (logMats?.length) await db.production_log_materials.bulkPut(logMats)
-      console.log('[ProduksiToko] sync done:', recs?.length, 'resep,', items?.length, 'items,', logMats?.length, 'log materials')
     } catch (e) {
       console.warn('[ProduksiToko] sync gagal:', e)
     } finally {
@@ -746,7 +848,6 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
     return all.filter(r => (r as any).recipe_type === 'production')
   }, [activeStoreId])
 
-  // FIX: load materials untuk detail bahan di log produksi toko
   const logs = useLiveQuery(async () => {
     const today = new Date().toLocaleDateString('sv-SE')
     const all = await db.production_logs
@@ -764,7 +865,57 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
     })
   }, [activeStoreId])
 
-  const totalHariIni = logs?.reduce((s, l) => s + l.total_yield, 0) || 0
+  const totalHariIni = logs?.filter(l => (l as any).status !== 'voided').reduce((s, l) => s + l.total_yield, 0) || 0
+
+  // ── VOID HANDLER: TOKO ────────────────────────────────────
+  async function handleVoidToko(logId: string, logStoreId: string, recipeId: string, totalYield: number) {
+    try {
+      // 1. Kembalikan bahan yang dipakai (tambah kembali ke stok toko)
+      const logMats = await db.production_log_materials.where('log_id').equals(logId).toArray()
+      for (const lm of logMats) {
+        const existing = await db.stock
+          .filter(s => s.store_id === logStoreId &&
+            (s.ingredient_id === lm.material_id || (s as any).material_id === lm.material_id))
+          .first()
+        if (existing) {
+          const newQty = existing.qty_on_hand + lm.qty_used
+          await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
+          supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', existing.id).then(() => { })
+        }
+      }
+
+      // 2. Kurangi stok produk hasil produksi (teh, fla, dll)
+      const recipe = await db.store_recipes.get(recipeId)
+      const productName = (recipe as any)?.product_name || ''
+      if (productName) {
+        const mat = await db.materials.filter(m => m.name.toLowerCase() === productName.toLowerCase()).first()
+        if (mat) {
+          const existing = await db.stock
+            .filter(s => s.store_id === logStoreId &&
+              (s.ingredient_id === mat.id || (s as any).material_id === mat.id))
+            .first()
+          if (existing) {
+            const newQty = Math.max(0, existing.qty_on_hand - totalYield)
+            await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
+            supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', existing.id).then(() => { })
+          }
+        }
+      }
+
+      // 3. Set status voided
+      await db.production_logs.update(logId, { status: 'voided', voided_at: now() } as any)
+      await supabase.from('production_logs').update({
+        status: 'voided',
+        voided_at: new Date().toISOString(),
+      }).eq('id', logId)
+
+      toast.success('Produksi dibatalkan & stok dikembalikan')
+      setVoidTarget(null)
+    } catch (e) {
+      console.error('[VoidToko]', e)
+      toast.error('Gagal membatalkan produksi')
+    }
+  }
 
   return (
     <div className="p-4 space-y-4">
@@ -783,7 +934,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400">Produksi Hari Ini</p>
           <p className="text-lg font-bold text-gray-900">{totalHariIni}</p>
-          <p className="text-xs text-gray-400">{logs?.length || 0} batch</p>
+          <p className="text-xs text-gray-400">{logs?.filter(l => (l as any).status !== 'voided').length || 0} batch</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400">Resep Tersedia</p>
@@ -815,61 +966,88 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
           <div className="px-4 py-2.5 border-b border-gray-50">
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Produksi Hari Ini</p>
           </div>
-          {logs.map((l, idx) => (
-            <div key={l.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  {(l as any).log_number && (
-                    <p className="text-xs font-mono text-blue-600 mb-0.5">
-                      {(l as any).log_number}
-                      {/* FIX #2: tambah CopyBtn di log produksi toko */}
-                      <CopyBtn text={(l as any).log_number} />
-                    </p>
-                  )}
-                  <p className="text-sm font-medium text-gray-900">{(l.recipe as any)?.product_name || 'Produksi'}</p>
-                  <p className="text-xs text-gray-400">
-                    {new Date(l.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
-                    {', '}
-                    {new Date(l.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })}
-                    {' · '}{l.batch_count} batch
-                  </p>
-                </div>
-                <p className="text-sm font-bold text-blue-600 flex-shrink-0 ml-3">
-                  {l.total_yield} {(l.recipe as any)?.yield_unit || 'pcs'}
-                </p>
-              </div>
-              {(l as any).materials?.length > 0 && (
-                <div className="mt-2 border-t border-gray-50 pt-1.5 space-y-0.5">
-                  {(l as any).materials.map((m: any) => (
-                    <div key={m.id} className="flex justify-between text-xs text-gray-400">
-                      <span>{m.material?.name} × {m.qty_used} {m.material?.unit}{m.material?.unit_cost > 0 ? ` @ ${formatRupiah(m.material.unit_cost)}` : ''}</span>
-                      {m.material?.unit_cost > 0 && <span>{formatRupiah(m.qty_used * m.material.unit_cost)}</span>}
-                    </div>
-                  ))}
-                  {(l as any).total_cost > 0 && (
-                    <div className="pt-1 border-t border-gray-100 mt-1 space-y-0.5">
-                      <div className="flex justify-between text-xs font-medium text-gray-700">
-                        <span>Total Biaya Bahan</span>
-                        <span>{formatRupiah((l as any).total_cost)}</span>
-                      </div>
-                      {(l as any).hpp_per_unit > 0 && (
-                        <div className="flex justify-between text-xs text-gray-500">
-                          <span>HPP per {(l.recipe as any)?.yield_unit || 'pcs'}</span>
-                          <span>{formatRupiah((l as any).hpp_per_unit)}</span>
-                          {(l.recipe as any)?.yield_unit === 'ml' && (l as any).hpp_per_unit > 0 && (
-                            <>
-                              <span className="text-gray-400">HPP per porsi (300ml)</span>
-                              <span className="text-gray-400">{formatRupiah((l as any).hpp_per_unit * 300)}</span>
-                            </>
-                          )}
-                        </div>
+          {logs.map((l, idx) => {
+            const isVoided = (l as any).status === 'voided'
+            const logNumber = (l as any).log_number || l.id
+            return (
+              <div key={l.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${isVoided ? 'opacity-50 bg-gray-50' : ''}`}>
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      {(l as any).log_number && (
+                        <p className={`text-xs font-mono text-blue-600 ${isVoided ? 'line-through' : ''}`}>
+                          {(l as any).log_number}
+                          {!isVoided && <CopyBtn text={(l as any).log_number} />}
+                        </p>
+                      )}
+                      {isVoided && (
+                        <span className="text-[10px] font-medium text-red-500 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded-full">
+                          Dibatalkan
+                        </span>
                       )}
                     </div>
-                  )}
+                    <p className={`text-sm font-medium text-gray-900 ${isVoided ? 'line-through' : ''}`}>
+                      {(l.recipe as any)?.product_name || 'Produksi'}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {new Date(l.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      {', '}
+                      {new Date(l.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                      {' · '}{l.batch_count} batch
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                    <p className={`text-sm font-bold text-blue-600 ${isVoided ? 'line-through' : ''}`}>
+                      {l.total_yield} {(l.recipe as any)?.yield_unit || 'pcs'}
+                    </p>
+                    {isOwnerManager && !isVoided && (
+                      <button
+                        onClick={() => setVoidTarget({
+                          id: l.id,
+                          logNumber,
+                          storeId: (l as any).store_id || activeStoreId,
+                          recipeId: (l as any).recipe_id,
+                          totalYield: l.total_yield,
+                        })}
+                        className="text-[10px] font-medium text-red-400 border border-red-200 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors">
+                        Void
+                      </button>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
-          ))}
+                {!isVoided && (l as any).materials?.length > 0 && (
+                  <div className="mt-2 border-t border-gray-50 pt-1.5 space-y-0.5">
+                    {(l as any).materials.map((m: any) => (
+                      <div key={m.id} className="flex justify-between text-xs text-gray-400">
+                        <span>{m.material?.name} × {m.qty_used} {m.material?.unit}{m.material?.unit_cost > 0 ? ` @ ${formatRupiah(m.material.unit_cost)}` : ''}</span>
+                        {m.material?.unit_cost > 0 && <span>{formatRupiah(m.qty_used * m.material.unit_cost)}</span>}
+                      </div>
+                    ))}
+                    {(l as any).total_cost > 0 && (
+                      <div className="pt-1 border-t border-gray-100 mt-1 space-y-0.5">
+                        <div className="flex justify-between text-xs font-medium text-gray-700">
+                          <span>Total Biaya Bahan</span>
+                          <span>{formatRupiah((l as any).total_cost)}</span>
+                        </div>
+                        {(l as any).hpp_per_unit > 0 && (
+                          <div className="flex justify-between text-xs text-gray-500">
+                            <span>HPP per {(l.recipe as any)?.yield_unit || 'pcs'}</span>
+                            <span>{formatRupiah((l as any).hpp_per_unit)}</span>
+                            {(l.recipe as any)?.yield_unit === 'ml' && (l as any).hpp_per_unit > 0 && (
+                              <>
+                                <span className="text-gray-400">HPP per porsi (300ml)</span>
+                                <span className="text-gray-400">{formatRupiah((l as any).hpp_per_unit * 300)}</span>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
 
@@ -879,6 +1057,14 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
           storeId={activeStoreId}
           recipes={recipes || []}
           onClose={() => setShowForm(false)}
+        />
+      )}
+
+      {voidTarget && (
+        <VoidConfirmModal
+          logNumber={voidTarget.logNumber}
+          onConfirm={() => handleVoidToko(voidTarget.id, voidTarget.storeId, voidTarget.recipeId, voidTarget.totalYield)}
+          onClose={() => setVoidTarget(null)}
         />
       )}
     </div>
@@ -912,7 +1098,8 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
       const logData: any = {
         id: logId, log_number: logNumber, recipe_id: recipeId,
         batch_count: Number(batchCount), total_yield: finalYield,
-        notes: notes || undefined, created_by: userId, store_id: storeId, created_at: now(),
+        notes: notes || undefined, created_by: userId, store_id: storeId,
+        created_at: now(), status: 'done',
       }
       await db.production_logs.add(logData)
       const { error } = await supabase.from('production_logs').upsert(logData)

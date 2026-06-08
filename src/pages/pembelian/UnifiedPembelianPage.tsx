@@ -1,7 +1,7 @@
 // src/pages/pembelian/UnifiedPembelianPage.tsx
-// CHANGELOG v5:
-// - FIX: auto-sync saat mount
-// - FIX: kasir hanya tampil pembelian hari ini
+// CHANGELOG v6:
+// - FEAT: Void pembelian — owner/manager bisa void, stok gudang/toko dikurangi kembali
+// - UI: Row voided tampil strikethrough + badge "Dibatalkan"
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -63,6 +63,45 @@ function CopyBtn({ text }: { text: string }) {
   )
 }
 
+// ── VOID CONFIRM MODAL ────────────────────────────────────────
+function VoidConfirmModal({ poNumber, onConfirm, onClose }: {
+  poNumber: string; onConfirm: () => Promise<void>; onClose: () => void
+}) {
+  const [loading, setLoading] = useState(false)
+  async function handleConfirm() {
+    setLoading(true)
+    await onConfirm()
+    setLoading(false)
+  }
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+      <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl p-5 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+            <span className="text-red-600 text-lg">⚠</span>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900">Batalkan Pembelian?</p>
+            <p className="text-xs text-gray-500 mt-0.5">{poNumber}</p>
+          </div>
+        </div>
+        <p className="text-xs text-gray-600 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+          Stok gudang/toko akan dikurangi kembali sesuai item pembelian ini. Aksi ini tidak bisa diurungkan.
+        </p>
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">
+            Batal
+          </button>
+          <button onClick={handleConfirm} disabled={loading}
+            className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium disabled:opacity-50">
+            {loading ? 'Memproses...' : 'Ya, Batalkan'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function UnifiedPembelianPage() {
   const { user } = useAuthStore()
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
@@ -106,7 +145,6 @@ export default function UnifiedPembelianPage() {
     finally { setSyncing(false) }
   }
 
-  // FIX: auto-sync saat mount
   useEffect(() => { doSync(false) }, [])
 
   return (
@@ -135,6 +173,7 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
     [new Date().toISOString().slice(0, 10)]: true
   }))
+  const [voidTarget, setVoidTarget] = useState<{ id: string; poNumber: string } | null>(null)
 
   const isOwnerManager = ['owner','manager','gudang'].includes(role)
   const isKasir = role === 'kasir'
@@ -209,19 +248,82 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   const grouped = useMemo(() => groupBy(filtered, p => groupKey(p.created_at, groupMode)), [filtered, groupMode])
 
   const { totalCardAmount, totalCardCount } = useMemo(() => ({
-    totalCardAmount: filtered.reduce((s, p) => s + p.total_amount, 0),
-    totalCardCount: filtered.length,
+    // Exclude voided from totals
+    totalCardAmount: filtered.filter(p => (p as any).status !== 'voided').reduce((s, p) => s + p.total_amount, 0),
+    totalCardCount: filtered.filter(p => (p as any).status !== 'voided').length,
   }), [filtered])
 
+  // ── VOID HANDLER: PEMBELIAN ───────────────────────────────
+  async function handleVoidPembelian(purchaseId: string) {
+    try {
+      const purchase = await db.purchases.get(purchaseId)
+      if (!purchase) return
+
+      const purchStoreId = (purchase as any).store_id || ''
+      const isGudang = purchStoreId.includes('gudang') || role === 'gudang'
+      const items = await db.purchase_items.where('purchase_id').equals(purchaseId).toArray()
+
+      for (const item of items) {
+        if (isGudang) {
+          // Kurangi warehouse_stock
+          const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
+          if (ws) {
+            const newQty = Math.max(0, ws.qty_on_hand - item.qty)
+            await db.warehouse_stock.update(ws.id, { qty_on_hand: newQty, last_updated: now() })
+            await supabase.from('warehouse_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', ws.id)
+          }
+        } else {
+          // Kurangi stock toko
+          const existing = await db.stock
+            .filter(s => s.store_id === purchStoreId &&
+              (s.ingredient_id === item.material_id || (s as any).material_id === item.material_id))
+            .first()
+          if (existing) {
+            const newQty = Math.max(0, existing.qty_on_hand - item.qty)
+            await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
+            await supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', existing.id)
+          }
+        }
+      }
+
+      // Set status voided
+      await db.purchases.update(purchaseId, { status: 'voided', voided_at: now() } as any)
+      await supabase.from('purchases').update({
+        status: 'voided',
+        voided_at: new Date().toISOString(),
+      }).eq('id', purchaseId)
+
+      toast.success('Pembelian dibatalkan & stok dikurangi kembali')
+      setVoidTarget(null)
+    } catch (e) {
+      console.error('[VoidPembelian]', e)
+      toast.error('Gagal membatalkan pembelian')
+    }
+  }
+
   function PurchaseRow({ p, idx }: { p: any; idx: number }) {
+    const isVoided = (p as any).status === 'voided'
+    const poNumber = (p as any).po_number || p.id
     return (
-      <div className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
+      <div className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''} ${isVoided ? 'opacity-50 bg-gray-50' : ''}`}>
         <div className="flex items-start justify-between mb-1">
           <div className="flex-1 min-w-0">
-            {(p as any).po_number && (
-              <p className="text-xs font-mono text-blue-600 mb-0.5">{(p as any).po_number}<CopyBtn text={(p as any).po_number} /></p>
-            )}
-            <p className="text-sm font-medium text-gray-900">{p.supplier?.name || 'Tanpa Supplier'}</p>
+            <div className="flex items-center gap-2 mb-0.5">
+              {(p as any).po_number && (
+                <p className={`text-xs font-mono text-blue-600 ${isVoided ? 'line-through' : ''}`}>
+                  {(p as any).po_number}
+                  {!isVoided && <CopyBtn text={(p as any).po_number} />}
+                </p>
+              )}
+              {isVoided && (
+                <span className="text-[10px] font-medium text-red-500 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded-full">
+                  Dibatalkan
+                </span>
+              )}
+            </div>
+            <p className={`text-sm font-medium text-gray-900 ${isVoided ? 'line-through' : ''}`}>
+              {p.supplier?.name || 'Tanpa Supplier'}
+            </p>
             <p className="text-xs text-gray-400 mt-0.5">
               {new Date(p.created_at).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})},{' '}
               {new Date(p.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}
@@ -232,9 +334,20 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
             </p>
             {p.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {p.notes}</p>}
           </div>
-          <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(p.total_amount)}</p>
+          <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+            <p className={`text-sm font-semibold text-gray-900 ${isVoided ? 'line-through' : ''}`}>
+              {formatRupiah(p.total_amount)}
+            </p>
+            {isOwnerManager && !isVoided && (
+              <button
+                onClick={() => setVoidTarget({ id: p.id, poNumber })}
+                className="text-[10px] font-medium text-red-400 border border-red-200 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors">
+                Void
+              </button>
+            )}
+          </div>
         </div>
-        {p.items.length > 0 && (
+        {!isVoided && p.items.length > 0 && (
           <div className="mt-1.5 border-t border-gray-50 pt-1.5 space-y-0.5">
             {p.items.map((i: any) => (
               <div key={i.id} className="flex justify-between text-xs text-gray-400">
@@ -281,7 +394,7 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
       ) : (
         <>
           {grouped.map(({ key, items: grpItems }) => {
-            const total    = grpItems.reduce((s, p) => s + p.total_amount, 0)
+            const total    = grpItems.filter(p => (p as any).status !== 'voided').reduce((s, p) => s + p.total_amount, 0)
             const today    = new Date().toLocaleDateString('sv-SE')
             const isFirst  = grouped[0]?.key === key
             const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : (key === today || isFirst)
@@ -311,18 +424,19 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
           )}
         </>
       )}
+
       {showForm && <PembelianForm userId={userId} storeId={storeId} role={role} onClose={() => setShowForm(false)} />}
+
+      {voidTarget && (
+        <VoidConfirmModal
+          poNumber={voidTarget.poNumber}
+          onConfirm={() => handleVoidPembelian(voidTarget.id)}
+          onClose={() => setVoidTarget(null)}
+        />
+      )}
     </div>
   )
 }
-
-// PATCH untuk UnifiedPembelianPage.tsx
-// Hanya bagian PembelianForm yang berubah
-// Fix:
-// 1. Default "Input Sebagai" owner → gudang (bukan storeId user)
-// 2. Stok masuk ke warehouse_stock ATAU stock toko sesuai activeStoreId
-// 3. Dropdown bahan filter per toko kalau input sebagai toko
-// 4. Kalau input sebagai gudang → semua bahan tampil
 
 function PembelianForm({ userId, storeId, role, onClose }: { userId: string; storeId: string; role: string; onClose: () => void }) {
   const isOwnerManager = ['owner','manager'].includes(role)
@@ -331,27 +445,20 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
     isOwnerManager ? db.stores.filter(s => s.is_active && !s.id.includes('produksi')).toArray() : Promise.resolve([])
   , [isOwnerManager])
 
-  // FIX: default input sebagai = gudang (store yang id-nya mengandung 'gudang')
-  // Kalau tidak ada gudang, fallback ke storeId user
   const [inputAsStore, setInputAsStore] = useState('')
   
   useEffect(() => {
     if (!allStores || allStores.length === 0) return
-    // Cari toko gudang sebagai default
     const gudang = allStores.find(s => s.id.includes('gudang'))
     setInputAsStore(gudang?.id || storeId)
   }, [allStores])
 
   const activeStoreId = isOwnerManager ? inputAsStore : storeId
 
-  // FIX: cek apakah sedang input sebagai gudang
   const isInputAsGudang = activeStoreId.includes('gudang') || 
     allStores?.find(s => s.id === activeStoreId)?.id.includes('gudang') || 
     role === 'gudang'
 
-  // FIX: filter bahan — kalau input sebagai gudang tampil semua
-  // kalau input sebagai toko, tampil semua material (toko bisa beli bahan apapun)
-  // tapi stok masuknya ke stock toko, bukan warehouse_stock
   const materials = useLiveQuery(async () => {
     if (!activeStoreId || activeStoreId.includes('gudang') || role === 'gudang') {
       return db.materials.filter(m => m.is_active).toArray()
@@ -420,9 +527,7 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
         await db.purchase_items.add(pi)
         await supabase.from('purchase_items').upsert(pi)
 
-        // FIX: stok masuk ke warehouse_stock kalau gudang, stock toko kalau toko
         if (isInputAsGudang) {
-          // ── Gudang: update warehouse_stock ────────────────
           const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
           const wsd: WarehouseStock = {
             id: ws?.id || generateId(),
@@ -433,7 +538,6 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
           await db.warehouse_stock.put(wsd)
           await supabase.from('warehouse_stock').upsert(wsd)
         } else {
-          // ── Toko: update stock toko ───────────────────────
           const existing = await db.stock
             .filter(s => s.store_id === activeStoreId &&
               (s.ingredient_id === item.material_id || (s as any).material_id === item.material_id))
@@ -453,7 +557,6 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
           }
         }
 
-        // ── Update avg_cost di materials (berlaku untuk semua) ──
         if (uc > 0) {
           const mat = await db.materials.get(item.material_id)
           if (mat) {
@@ -492,7 +595,6 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
               </option>
             ))}
           </select>
-          {/* FIX: tampilkan info stok akan masuk ke mana */}
           <p className="text-xs mt-1 text-gray-400">
             {isInputAsGudang 
               ? '📦 Stok masuk ke gudang' 

@@ -1,8 +1,8 @@
 // src/pages/biaya/UnifiedBiayaPage.tsx
-// CHANGELOG v5:
-// - FIX: auto-sync saat mount (data tampil tanpa perlu klik refresh)
-// - FIX: expense_date & name diisi saat simpan
-// - FIX: filter kasir pakai created_at
+// CHANGELOG v6:
+// - FEAT: Void biaya — owner/manager bisa void, tidak ada rollback stok (biaya = uang keluar)
+// - UI: Row voided tampil strikethrough + badge "Dibatalkan"
+// - Total biaya exclude voided
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -64,6 +64,46 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
   </label>
 }
 
+// ── VOID CONFIRM MODAL ────────────────────────────────────────
+function VoidConfirmModal({ expNumber, description, onConfirm, onClose }: {
+  expNumber: string; description: string; onConfirm: () => Promise<void>; onClose: () => void
+}) {
+  const [loading, setLoading] = useState(false)
+  async function handleConfirm() {
+    setLoading(true)
+    await onConfirm()
+    setLoading(false)
+  }
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+      <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl p-5 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+            <span className="text-red-600 text-lg">⚠</span>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900">Batalkan Biaya?</p>
+            <p className="text-xs text-gray-500 mt-0.5">{expNumber}</p>
+            <p className="text-xs text-gray-700 mt-0.5 font-medium">{description}</p>
+          </div>
+        </div>
+        <p className="text-xs text-gray-600 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+          Biaya ini akan ditandai sebagai dibatalkan dan tidak terhitung di total. Aksi ini tidak bisa diurungkan.
+        </p>
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">
+            Batal
+          </button>
+          <button onClick={handleConfirm} disabled={loading}
+            className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium disabled:opacity-50">
+            {loading ? 'Memproses...' : 'Ya, Batalkan'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function UnifiedBiayaPage() {
   const { user } = useAuthStore()
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
@@ -84,7 +124,6 @@ export default function UnifiedBiayaPage() {
     finally { setSyncing(false) }
   }
 
-  // FIX: auto-sync saat mount
   useEffect(() => { syncData() }, [])
 
   async function syncDataWithToast() {
@@ -132,6 +171,7 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
     [new Date().toLocaleDateString('sv-SE')]: true
   }))
+  const [voidTarget, setVoidTarget] = useState<{ id: string; expNumber: string; description: string } | null>(null)
 
   const isOwnerManager = ['owner','manager','gudang'].includes(role)
   const isKasir = role === 'kasir'
@@ -201,22 +241,51 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
   }, [expenses, filterStore, filterKat, search, isOwnerManager])
 
   const grouped = useMemo(() => groupBy(filtered, e => groupKey(e.created_at, groupMode)), [filtered, groupMode])
-  const totalCard = filtered.reduce((s, e) => s + e.amount, 0)
+
+  // Exclude voided dari total
+  const totalCard = filtered.filter(e => (e as any).status !== 'voided').reduce((s, e) => s + e.amount, 0)
+  const totalCount = filtered.filter(e => (e as any).status !== 'voided').length
+
+  // ── VOID HANDLER ─────────────────────────────────────────
+  async function handleVoidBiaya(expenseId: string) {
+    try {
+      await db.warehouse_expenses.update(expenseId, { status: 'voided', voided_at: now() } as any)
+      await supabase.from('warehouse_expenses').update({
+        status: 'voided',
+        voided_at: new Date().toISOString(),
+      }).eq('id', expenseId)
+
+      toast.success('Biaya dibatalkan')
+      setVoidTarget(null)
+    } catch (e) {
+      console.error('[VoidBiaya]', e)
+      toast.error('Gagal membatalkan biaya')
+    }
+  }
 
   function BiayaRow({ e, idx }: { e: any; idx: number }) {
+    const isVoided    = (e as any).status === 'voided'
     const katLabel    = KATEGORI_BIAYA.find(k => k.value === e.category)?.label || e.category || 'Lainnya'
     const displayName = e.description || e.name || 'Biaya'
     const expNo       = (e as any).expense_number
     return (
-      <div className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+      <div className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${isVoided ? 'opacity-50 bg-gray-50' : ''}`}>
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
-            {expNo && (
-              <p className="text-xs font-mono text-blue-600 mb-0.5">
-                {expNo}<CopyBtn text={expNo} />
-              </p>
-            )}
-            <p className="text-sm font-medium text-gray-900">{displayName}</p>
+            <div className="flex items-center gap-2 mb-0.5">
+              {expNo && (
+                <p className={`text-xs font-mono text-blue-600 ${isVoided ? 'line-through' : ''}`}>
+                  {expNo}
+                  {!isVoided && <CopyBtn text={expNo} />}
+                </p>
+              )}
+              {isVoided && (
+                <span className="text-[10px] font-medium text-red-500 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded-full">
+                  Dibatalkan
+                </span>
+              )}
+            </div>
+            <p className={`text-sm font-medium text-gray-900 ${isVoided ? 'line-through' : ''}`}>{displayName}</p>
             <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
               <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full">{katLabel}</span>
               {isOwnerManager && storeMap[(e as any).store_id] && (
@@ -229,7 +298,18 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
             </p>
             {e.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {e.notes}</p>}
           </div>
-          <p className="text-sm font-semibold text-gray-900 ml-2 flex-shrink-0">{formatRupiah(e.amount)}</p>
+          <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+            <p className={`text-sm font-semibold text-gray-900 ${isVoided ? 'line-through' : ''}`}>
+              {formatRupiah(e.amount)}
+            </p>
+            {isOwnerManager && !isVoided && (
+              <button
+                onClick={() => setVoidTarget({ id: e.id, expNumber: expNo || e.id, description: displayName })}
+                className="text-[10px] font-medium text-red-400 border border-red-200 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors">
+                Void
+              </button>
+            )}
+          </div>
         </div>
       </div>
     )
@@ -240,7 +320,7 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
       <div className="bg-white rounded-xl border border-gray-100 p-4">
         <p className="text-xs text-gray-400 mb-1">{isKasir ? 'Total Biaya Hari Ini' : 'Total Biaya'}</p>
         <p className="text-xl font-semibold text-gray-900">{formatRupiah(totalCard)}</p>
-        <p className="text-xs text-gray-400 mt-0.5">{filtered.length} transaksi</p>
+        <p className="text-xs text-gray-400 mt-0.5">{totalCount} transaksi</p>
       </div>
 
       {isOwnerManager && stores && stores.length > 0 && (
@@ -281,7 +361,8 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
       ) : (
         <>
           {grouped.map(({ key, items: grpItems }) => {
-            const total   = grpItems.reduce((s, e) => s + e.amount, 0)
+            // Total per grup exclude voided
+            const total   = grpItems.filter(e => (e as any).status !== 'voided').reduce((s, e) => s + e.amount, 0)
             const today   = new Date().toLocaleDateString('sv-SE')
             const isFirst = grouped[0]?.key === key
             const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : (key === today || isFirst)
@@ -313,6 +394,15 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
       )}
 
       {showForm && <BiayaForm userId={userId} storeId={storeId} role={role} onClose={() => setShowForm(false)} />}
+
+      {voidTarget && (
+        <VoidConfirmModal
+          expNumber={voidTarget.expNumber}
+          description={voidTarget.description}
+          onConfirm={() => handleVoidBiaya(voidTarget.id)}
+          onClose={() => setVoidTarget(null)}
+        />
+      )}
     </div>
   )
 }
@@ -340,7 +430,6 @@ function BiayaForm({ userId, storeId, role, onClose }: {
     try {
       const nowStr    = now()
       const todayDate = new Date().toLocaleDateString('sv-SE')
-      // Generate expense_number: BIA-YYYYMMDD-XXX
       const ds        = todayDate.replace(/-/g, '')
       const prefix    = `BIA-${ds}-`
       const existing  = await db.warehouse_expenses.filter(e => (e as any).expense_number?.startsWith(prefix)).toArray()
@@ -354,6 +443,7 @@ function BiayaForm({ userId, storeId, role, onClose }: {
         category:       category,
         expense_date:   todayDate,
         expense_number: expNumber,
+        status:         'done',
         created_by:     userId,
         created_at:     nowStr,
       }

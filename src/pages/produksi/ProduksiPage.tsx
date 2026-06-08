@@ -915,6 +915,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
 
   // ── VOID HANDLER: TOKO ────────────────────────────────────
   async function handleVoidToko(logId: string, logStoreId: string, recipeId: string, totalYield: number) {
+    console.log('[VOID TOKO] START', logId, new Date().toISOString())
     try {
       // Guard: cek dulu di Supabase — kalau sudah voided, jangan proses lagi
       const { data: existingLog } = await supabase

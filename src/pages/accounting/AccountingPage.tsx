@@ -585,6 +585,37 @@ function StoreLaporanCard({ store, year, month, period }: { store: any; year: nu
   const endISO    = `${endDate}T23:59:59.999Z`
 
   const data = useLiveQuery(async () => {
+    const isClosed = period?.status === 'closed'
+
+    // ── Kalau periode sudah closed → pakai snapshot permanen ──
+    if (isClosed && period?.total_omzet != null) {
+      const omzet           = period.total_omzet         || 0
+      const totalBiaya      = period.total_biaya         || 0
+      const totalMutasi     = period.total_mutations     || 0
+      const totalPurchases  = period.total_purchases     || 0
+      const totalSetor      = period.total_setor         || 0
+      const persediaanAwal  = period.opening_stock_value || 0
+      const persediaanAkhir = period.closing_stock_value || 0
+      const hpp             = persediaanAwal + totalMutasi + totalPurchases - persediaanAkhir
+      const labaKotor       = omzet - Math.max(0, hpp)
+      const labaBersih      = labaKotor - totalBiaya
+
+      // Cash masuk hitung dari transaksi (tidak disimpan di snapshot)
+      const txs = await db.transactions
+        .filter(t => t.store_id === store.id && t.status === 'completed' &&
+          t.created_at >= startISO && t.created_at <= endISO).toArray()
+      const totalCash    = txs.filter(t => t.payment_method === 'cash').reduce((s, t) => s + t.total, 0)
+      const piutangSetor = totalCash - totalSetor
+
+      return {
+        omzet, totalCash, totalBiaya, totalMutasi, totalPurchases,
+        persediaanAwal, persediaanAkhir, hpp: Math.max(0, hpp),
+        labaKotor, labaBersih, totalSetor, piutangSetor,
+        txCount: txs.length, isClosed: true, isSnapshot: true,
+      }
+    }
+
+    // ── Periode masih open → hitung live dari Dexie ──────────
     const txs = await db.transactions
       .filter(t => t.store_id === store.id && t.status === 'completed' &&
         t.created_at >= startISO && t.created_at <= endISO).toArray()
@@ -607,6 +638,13 @@ function StoreLaporanCard({ store, year, month, period }: { store: any; year: nu
       return s + items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0)
     }, 0)
 
+    // Pembelian langsung toko
+    const purchases = await db.purchases
+      .filter(p => (p as any).store_id === store.id &&
+        (p as any).status !== 'voided' &&
+        p.created_at >= startISO && p.created_at <= endISO).toArray()
+    const totalPurchases = purchases.reduce((s, p) => s + p.total_amount, 0)
+
     const stocks = await db.stock.where('store_id').equals(store.id).toArray()
     const mats   = await db.materials.toArray()
     const mMap   = Object.fromEntries(mats.map(m => [m.id, m]))
@@ -622,17 +660,17 @@ function StoreLaporanCard({ store, year, month, period }: { store: any; year: nu
     const totalSetor = (deps||[]).reduce((s: number, d: any) => s + d.amount, 0)
 
     const persediaanAwal  = period?.opening_stock_value || 0
-    const persediaanAkhir = period?.status === 'closed' ? (period?.closing_stock_value || 0) : nilaiStokNow
-    const hpp             = persediaanAwal + totalMutasi - persediaanAkhir
+    const persediaanAkhir = nilaiStokNow
+    const hpp             = persediaanAwal + totalMutasi + totalPurchases - persediaanAkhir
     const labaKotor       = omzet - Math.max(0, hpp)
     const labaBersih      = labaKotor - totalBiaya
     const piutangSetor    = totalCash - totalSetor
 
     return {
-      omzet, totalCash, totalBiaya, totalMutasi,
+      omzet, totalCash, totalBiaya, totalMutasi, totalPurchases,
       persediaanAwal, persediaanAkhir, hpp: Math.max(0, hpp),
       labaKotor, labaBersih, totalSetor, piutangSetor,
-      txCount: txs.length, isClosed: period?.status === 'closed',
+      txCount: txs.length, isClosed: false, isSnapshot: false,
     }
   }, [store.id, startISO, endISO, period])
 
@@ -649,13 +687,32 @@ function StoreLaporanCard({ store, year, month, period }: { store: any; year: nu
         </span>
       </div>
       <div className="px-4 py-3 space-y-1.5">
-        <LRow label="Persediaan Awal"        value={data.persediaanAwal}  note={data.persediaanAwal===0?'Belum ada snapshot':''} />
-        <LRow label="+ Bahan Masuk (Mutasi)" value={data.totalMutasi} />
-        <LRow label="- Persediaan Akhir"     value={data.persediaanAkhir} note={!data.isClosed?'estimasi saat ini':''} />
+        {data.isSnapshot && (
+          <div className="flex items-center gap-1.5 mb-2 bg-gray-50 rounded-lg px-2 py-1.5">
+            <span className="w-1.5 h-1.5 bg-gray-400 rounded-full flex-shrink-0" />
+            <p className="text-[10px] text-gray-500">Data snapshot saat tutup bulan — tidak berubah</p>
+          </div>
+        )}
+        {!data.isSnapshot && (
+          <div className="flex items-center gap-1.5 mb-2 bg-blue-50 rounded-lg px-2 py-1.5">
+            <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse flex-shrink-0" />
+            <p className="text-[10px] text-blue-600">Data live — berubah sesuai transaksi terkini</p>
+          </div>
+        )}
+
+        {/* HPP */}
+        <LRow label="Persediaan Awal"          value={data.persediaanAwal}  note={data.persediaanAwal===0?'Belum ada snapshot':''} />
+        <LRow label="+ Bahan Masuk (Mutasi)"   value={data.totalMutasi} />
+        {(data.totalPurchases||0) > 0 && (
+          <LRow label="+ Pembelian Langsung Toko" value={data.totalPurchases} />
+        )}
+        <LRow label="- Persediaan Akhir"       value={data.persediaanAkhir} note={!data.isClosed?'estimasi saat ini':''} />
         <div className="flex justify-between py-1 border-t border-dashed border-gray-200 mt-1">
           <span className="text-sm font-semibold text-gray-700">= HPP</span>
           <span className="text-sm font-semibold text-orange-600">{formatRupiah(data.hpp)}</span>
         </div>
+
+        {/* Laba Rugi */}
         <div className="border-t border-gray-100 pt-1.5 mt-1.5 space-y-1">
           <LRow label="Omzet Penjualan" value={data.omzet} note={`${data.txCount} transaksi`} />
           <div className="flex justify-between">
@@ -668,6 +725,8 @@ function StoreLaporanCard({ store, year, month, period }: { store: any; year: nu
             <span className={`text-sm font-bold ${data.labaBersih>=0?'text-green-700':'text-red-600'}`}>{formatRupiah(data.labaBersih)}</span>
           </div>
         </div>
+
+        {/* Kas */}
         <div className="border-t border-gray-100 pt-1.5 mt-1.5 space-y-1">
           <LRow label="Total Cash Masuk"       value={data.totalCash} />
           <LRow label="Total Setor (Approved)" value={data.totalSetor} />
@@ -714,9 +773,15 @@ function TutupBulanTab({ userId }: { userId: string }) {
   useEffect(() => { loadPeriods() }, [year, month])
 
   async function handleClose(store: any) {
-    if (!confirm(`Tutup bulan ${month}/${year} untuk ${store.name}?`)) return
+    if (!confirm(`Tutup bulan ${month}/${year} untuk ${store.name}?\n\nSistem akan menyimpan snapshot semua angka keuangan bulan ini.`)) return
     setClosing(true)
     try {
+      const startDate = `${year}-${String(month).padStart(2,'0')}-01`
+      const endDate   = new Date(year, month, 0).toISOString().slice(0,10)
+      const startISO  = `${startDate}T00:00:00.000Z`
+      const endISO    = `${endDate}T23:59:59.999Z`
+
+      // 1. Nilai persediaan akhir dari Dexie
       const stocks = await db.stock.where('store_id').equals(store.id).toArray()
       const mats   = await db.materials.toArray()
       const mMap   = Object.fromEntries(mats.map(m => [m.id, m]))
@@ -725,17 +790,67 @@ function TutupBulanTab({ userId }: { userId: string }) {
         const avg = (st as any).avg_cost || mMap[mid]?.unit_cost || 0
         return s + st.qty_on_hand * avg
       }, 0)
-      const existingPeriod = periods.find(p => p.store_id === store.id)
+
+      // 2. Snapshot omzet dari Supabase (bukan Dexie — supaya akurat)
+      const { data: txData } = await supabase.from('transactions')
+        .select('total, payment_method')
+        .eq('store_id', store.id).eq('status', 'completed')
+        .gte('created_at', startISO).lte('created_at', endISO)
+      const totalOmzet = (txData||[]).reduce((s: number, t: any) => s + t.total, 0)
+
+      // 3. Snapshot biaya dari Supabase
+      const { data: expData } = await supabase.from('warehouse_expenses')
+        .select('amount')
+        .eq('store_id', store.id).neq('status', 'voided')
+        .gte('created_at', startISO).lte('created_at', endISO)
+      const totalBiaya = (expData||[]).reduce((s: number, e: any) => s + e.amount, 0)
+
+      // 4. Snapshot mutasi bahan masuk dari Supabase
+      const { data: mutData } = await supabase.from('warehouse_mutations')
+        .select('id').eq('destination_id', store.id).eq('mutation_type', 'to_store')
+        .neq('status', 'voided')
+        .gte('created_at', startISO).lte('created_at', endISO)
+      let totalMutasi = 0
+      if (mutData?.length) {
+        const mutIds = mutData.map((m: any) => m.id)
+        const { data: mutItems } = await supabase.from('warehouse_mutation_items')
+          .select('qty, unit_cost').in('mutation_id', mutIds)
+        totalMutasi = (mutItems||[]).reduce((s: number, i: any) => s + i.qty * i.unit_cost, 0)
+      }
+
+      // 5. Snapshot pembelian langsung toko dari Supabase
+      const { data: purchData } = await supabase.from('purchases')
+        .select('total_amount')
+        .eq('store_id', store.id).neq('status', 'voided')
+        .gte('created_at', startISO).lte('created_at', endISO)
+      const totalPurchases = (purchData||[]).reduce((s: number, p: any) => s + p.total_amount, 0)
+
+      // 6. Snapshot setoran approved dari Supabase
+      const { data: depData } = await supabase.from('cash_deposits')
+        .select('amount').eq('store_id', store.id).eq('status', 'approved')
+        .gte('deposit_date', startDate).lte('deposit_date', endDate)
+      const totalSetor = (depData||[]).reduce((s: number, d: any) => s + d.amount, 0)
+
+      // 7. Persediaan awal dari periode sebelumnya
       const prevMonth = month === 1 ? 12 : month - 1
       const prevYear  = month === 1 ? year - 1 : year
       const { data: prevPeriod } = await supabase.from('accounting_periods').select('closing_stock_value')
-        .eq('store_id', store.id).eq('year', prevYear).eq('month', prevMonth).single()
+        .eq('store_id', store.id).eq('year', prevYear).eq('month', prevMonth).maybeSingle()
+
+      const existingPeriod    = periods.find(p => p.store_id === store.id)
+      const openingStockValue = prevPeriod?.closing_stock_value || existingPeriod?.opening_stock_value || 0
+
       const periodData: any = {
         id:                  existingPeriod?.id || generateId(),
         store_id:            store.id, year, month,
         status:              'closed',
-        opening_stock_value: prevPeriod?.closing_stock_value || existingPeriod?.opening_stock_value || 0,
+        opening_stock_value: openingStockValue,
         closing_stock_value: nilaiStok,
+        total_omzet:         totalOmzet,
+        total_biaya:         totalBiaya,
+        total_mutations:     totalMutasi,
+        total_purchases:     totalPurchases,
+        total_setor:         totalSetor,
         closed_at:           now(),
         closed_by:           userId,
       }
@@ -744,7 +859,7 @@ function TutupBulanTab({ userId }: { userId: string }) {
       } else {
         await supabase.from('accounting_periods').upsert(periodData)
       }
-      toast.success(`${store.name} — periode ${month}/${year} ditutup`)
+      toast.success(`${store.name} — periode ${month}/${year} ditutup & snapshot disimpan`)
       loadPeriods()
     } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }
     finally { setClosing(false) }

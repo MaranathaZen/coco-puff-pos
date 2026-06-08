@@ -421,7 +421,7 @@ export default function CashierPage() {
         const riList = recipeItems.filter(ri => ri.recipe_id === recipe.id)
         const _prod = await db.products.get(txItem.product_id); 
         const _pkgQty = _prod?.pkg_qty || 1; 
-        const totalQty = (txItem.qty_eceran || 0) + (txItem.qty_dus || 0) * _pkgQty * _pkgQty
+        const totalQty = (txItem.qty_eceran || 0) + (txItem.qty_dus || 0) * _pkgQty
         if (totalQty <= 0) continue
         for (const ri of riList) {
           const qty = ri.qty_used * totalQty

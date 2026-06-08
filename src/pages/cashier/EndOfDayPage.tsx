@@ -1,8 +1,11 @@
 // src/pages/cashier/EndOfDayPage.tsx
-// CHANGELOG v4:
+// CHANGELOG v5:
 // - DESKTOP: Produk Terjual + Sisa Stok side-by-side (kiri-kanan)
 // - DESKTOP: Input Manual + Penjualan Hari Ini side-by-side (kiri-kanan)
 // - MOBILE: tidak ada perubahan sama sekali
+// - FIX: floating point qty stok (103.400000... → 103.4)
+// - FIX: tombol Simpan full width di desktop
+// - FIX: card Input Manual & Penjualan tidak stretch paksa
 
 import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -200,7 +203,7 @@ export default function EndOfDayPage() {
     const uMap  = Object.fromEntries([...prods.map(p => [p.id, p.unit]), ...mats.map(m => [m.id, m.unit])])
     return stocks
       .filter(s => { const id = s.ingredient_id || (s as any).product_id || ''; return !!(pMap[id] || mMap[id] || fgMap[id]) })
-      .map(s => { const id = s.ingredient_id || (s as any).product_id || ''; return { id: s.id, name: pMap[id] || mMap[id] || fgMap[id] || id, qty: s.qty_on_hand, unit: uMap[id] || 'pcs' } })
+      .map(s => { const id = s.ingredient_id || (s as any).product_id || ''; return { id: s.id, name: pMap[id] || mMap[id] || fgMap[id] || id, qty: Math.round(s.qty_on_hand * 100) / 100, unit: uMap[id] || 'pcs' } })
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [storeId])
 
@@ -342,7 +345,7 @@ export default function EndOfDayPage() {
   // ── SHARED SECTIONS ───────────────────────────────────────
 
   const sectionInputManual = (
-    <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3 h-full">
+    <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Input Manual</p>
       <div className="grid grid-cols-2 gap-3">
         <NumInput label="Saldo Awal"          value={saldoAwal}     onChange={setSaldoAwal}     disabled={!!existingReport} hint={saldoAwal ? undefined : 'Auto dari kemarin'} />
@@ -361,7 +364,7 @@ export default function EndOfDayPage() {
   )
 
   const sectionPenjualan = (
-    <div className="bg-white rounded-xl border border-gray-100 p-4 h-full">
+    <div className="bg-white rounded-xl border border-gray-100 p-4">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Penjualan Hari Ini</p>
       <div className="grid grid-cols-2 gap-2 mb-3">
         {PAY_METHODS.map(m => (
@@ -567,7 +570,7 @@ export default function EndOfDayPage() {
             )}
 
             {/* Actions */}
-            <div className="max-w-sm">{sectionActions}</div>
+            <div>{sectionActions}</div>
             <div className="h-4" />
           </div>
         </div>

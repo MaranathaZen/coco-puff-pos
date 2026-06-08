@@ -1148,7 +1148,20 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
       const { error } = await supabase.from('production_logs').upsert(logData)
       if (error) console.error('[PTOKO LOG ERROR]', error)
 
-      const recipeItems = await db.store_recipe_items.where('recipe_id').equals(recipeId).toArray()
+      // FIX: query langsung dari Supabase, bukan Dexie
+      // Dexie bisa stale — qty_used tersimpan salah (semua jadi 1)
+      const { data: riFromSupabase, error: riErr } = await supabase
+        .from('store_recipe_items')
+        .select('*')
+        .eq('recipe_id', recipeId)
+      if (riErr) console.error('[PTOKO RI ERROR]', riErr)
+      // Fallback ke Dexie kalau Supabase gagal
+      const recipeItems = riFromSupabase?.length
+        ? riFromSupabase
+        : await db.store_recipe_items.where('recipe_id').equals(recipeId).toArray()
+      // Sync hasil Supabase ke Dexie supaya konsisten ke depannya
+      if (riFromSupabase?.length) await db.store_recipe_items.bulkPut(riFromSupabase)
+
       for (const ri of recipeItems) {
         const used = ri.qty_used * Number(batchCount)
         const existing = await db.stock

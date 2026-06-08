@@ -1,8 +1,9 @@
 // src/pages/accounting/AccountingPage.tsx
-// CHANGELOG v3:
-// - FIX: gudang tidak tampil tab Laporan Keuangan (hanya owner/manager)
-// - FIX: setoran default pending untuk approver, all untuk kasir
-// - Setoran semua toko tampil untuk gudang/owner
+// CHANGELOG v4:
+// - FEAT: Reject dengan alasan — modal input alasan sebelum reject
+// - FEAT: Tampilkan alasan reject di row setoran
+// - FEAT: Realtime subscription cash_deposits — admin gudang lihat setoran baru otomatis
+// - FIX: rejected_by & rejected_at pakai kolom dedicated (bukan approved_by)
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -10,7 +11,7 @@ import { db, generateId, now } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
-import { CheckCircle, Clock, X, Plus, RefreshCw, TrendingUp, Package, AlertCircle } from 'lucide-react'
+import { CheckCircle, Clock, X, Plus, RefreshCw, AlertCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 type Tab = 'setoran' | 'laporan' | 'tutup_bulan'
@@ -38,11 +39,7 @@ export default function AccountingPage() {
   const { user } = useAuthStore()
   const role = user?.role || 'kasir'
   const isOwnerManager = ['owner', 'manager'].includes(role)
-  const isGudang = role === 'gudang'
-  const isKasir  = role === 'kasir'
-
-  const defaultTab: Tab = 'setoran'
-  const [tab, setTab] = useState<Tab>(defaultTab)
+  const [tab, setTab] = useState<Tab>('setoran')
   const [syncing, setSyncing] = useState(false)
 
   async function syncData() {
@@ -61,10 +58,8 @@ export default function AccountingPage() {
     finally { setSyncing(false) }
   }
 
-  // FIX: gudang hanya lihat setoran, TIDAK lihat laporan keuangan
   const tabs = [
-    { id: 'setoran'    as Tab, label: 'Setoran Kas' },
-    // Laporan Keuangan: hanya owner/manager
+    { id: 'setoran'     as Tab, label: 'Setoran Kas' },
     ...(isOwnerManager ? [{ id: 'laporan'     as Tab, label: 'Laporan Keuangan' }] : []),
     ...(isOwnerManager ? [{ id: 'tutup_bulan' as Tab, label: 'Tutup Bulan'      }] : []),
   ]
@@ -99,13 +94,17 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
   const isGudang   = role === 'gudang'
   const isOwnerMgr = ['owner','manager'].includes(role)
   const canApprove = isGudang || isOwnerMgr
+
   const [showForm,    setShowForm]    = useState(false)
   const [showFilters, setShowFilters] = useState(false)
+  const [rejectTarget, setRejectTarget] = useState<any>(null)
+  const [rejectReason, setRejectReason] = useState('')
+  const [rejecting,    setRejecting]    = useState(false)
 
-  const [filterStatus,    setFilterStatus]    = useState<'all'|'pending'|'approved'|'rejected'>(canApprove ? 'pending' : 'all')
-  const [filterStore,     setFilterStore]     = useState('semua')
-  const [filterDateFrom,  setFilterDateFrom]  = useState('')
-  const [filterDateTo,    setFilterDateTo]    = useState('')
+  const [filterStatus,   setFilterStatus]   = useState<'all'|'pending'|'approved'|'rejected'>(canApprove ? 'pending' : 'all')
+  const [filterStore,    setFilterStore]     = useState('semua')
+  const [filterDateFrom, setFilterDateFrom]  = useState('')
+  const [filterDateTo,   setFilterDateTo]    = useState('')
 
   const stores = useLiveQuery(() =>
     db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray()
@@ -117,7 +116,10 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
   async function loadDeposits() {
     setLoading(true)
     try {
-      let q = supabase.from('cash_deposits').select('*').order('deposit_date', { ascending: false }).order('created_at', { ascending: false }).limit(300)
+      let q = supabase.from('cash_deposits').select('*')
+        .order('deposit_date', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(300)
       if (!canApprove) q = q.eq('store_id', storeId)
       const { data } = await q
       setDeposits(data || [])
@@ -126,6 +128,29 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
   }
 
   useEffect(() => { loadDeposits() }, [storeId])
+
+  // ── Realtime subscription ─────────────────────────────────
+  useEffect(() => {
+    const filter = canApprove ? undefined : `store_id=eq.${storeId}`
+    const channel = supabase
+      .channel(`cash_deposits:${storeId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'cash_deposits', ...(filter ? { filter } : {}) },
+        async (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setDeposits(prev => [payload.new as any, ...prev])
+            if (canApprove) toast('💰 Setoran baru masuk', { icon: '🔔' })
+          } else if (payload.eventType === 'UPDATE') {
+            setDeposits(prev => prev.map(d => d.id === (payload.new as any).id ? payload.new as any : d))
+          } else if (payload.eventType === 'DELETE') {
+            setDeposits(prev => prev.filter(d => d.id !== (payload.old as any).id))
+          }
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [storeId, canApprove])
 
   const filtered = useMemo(() => {
     return deposits.filter(d => {
@@ -137,7 +162,6 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
     })
   }, [deposits, filterStatus, filterStore, filterDateFrom, filterDateTo])
 
-  // Group by tanggal untuk tampilan expand/collapse
   const byDate = useMemo(() => {
     const map: Record<string, typeof filtered> = {}
     for (const d of filtered) {
@@ -154,42 +178,55 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
   const storeMap      = Object.fromEntries((stores||[]).map(s => [s.id, s.name]))
   const totalPending  = deposits.filter(d => d.status === 'pending').reduce((s, d) => s + d.amount, 0)
   const totalApproved = deposits.filter(d => d.status === 'approved').reduce((s, d) => s + d.amount, 0)
-
-  // Hitung total filtered
   const totalFiltered = filtered.reduce((s, d) => s + d.amount, 0)
+  const today         = new Date().toISOString().slice(0,10)
 
   async function handleApprove(dep: any) {
     if (!canApprove) return
     const { error } = await supabase.from('cash_deposits')
-      .update({ status: 'approved', approved_by: userId, approved_at: now() }).eq('id', dep.id)
+      .update({ status: 'approved', approved_by: userId, approved_at: now() })
+      .eq('id', dep.id)
     if (error) return toast.error('Gagal approve')
-    toast.success('Setoran disetujui')
-    loadDeposits()
+    toast.success(`Setoran ${formatRupiah(dep.amount)} disetujui ✓`)
   }
 
-  async function handleReject(dep: any) {
-    if (!canApprove) return
-    if (!confirm('Tolak setoran ini?')) return
-    const { error } = await supabase.from('cash_deposits')
-      .update({ status: 'rejected', approved_by: userId, approved_at: now() }).eq('id', dep.id)
-    if (error) return toast.error('Gagal')
-    toast.success('Setoran ditolak')
-    loadDeposits()
+  async function handleRejectConfirm() {
+    if (!rejectTarget || !rejectReason.trim()) return toast.error('Alasan wajib diisi')
+    setRejecting(true)
+    try {
+      const { error } = await supabase.from('cash_deposits')
+        .update({
+          status:          'rejected',
+          rejected_by:     userId,
+          rejected_at:     now(),
+          rejected_reason: rejectReason.trim(),
+        })
+        .eq('id', rejectTarget.id)
+      if (error) throw error
+      toast.success('Setoran ditolak')
+      setRejectTarget(null)
+      setRejectReason('')
+    } catch { toast.error('Gagal menolak setoran') }
+    finally { setRejecting(false) }
   }
-
-  const today = new Date().toISOString().slice(0,10)
 
   return (
     <div className="p-4 space-y-3">
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
-          <div className="flex items-center gap-1.5 mb-1"><Clock size={13} className="text-amber-500" /><p className="text-xs text-amber-600">Menunggu Approve</p></div>
+          <div className="flex items-center gap-1.5 mb-1">
+            <Clock size={13} className="text-amber-500" />
+            <p className="text-xs text-amber-600">Menunggu Approve</p>
+          </div>
           <p className="text-lg font-bold text-amber-700">{formatRupiah(totalPending)}</p>
           <p className="text-xs text-amber-500">{deposits.filter(d=>d.status==='pending').length} setoran</p>
         </div>
         <div className="bg-green-50 border border-green-100 rounded-xl p-3">
-          <div className="flex items-center gap-1.5 mb-1"><CheckCircle size={13} className="text-green-500" /><p className="text-xs text-green-600">Sudah Disetujui</p></div>
+          <div className="flex items-center gap-1.5 mb-1">
+            <CheckCircle size={13} className="text-green-500" />
+            <p className="text-xs text-green-600">Sudah Disetujui</p>
+          </div>
           <p className="text-lg font-bold text-green-700">{formatRupiah(totalApproved)}</p>
           <p className="text-xs text-green-500">{deposits.filter(d=>d.status==='approved').length} setoran</p>
         </div>
@@ -198,8 +235,16 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
       {!canApprove && (
         <button onClick={() => setShowForm(true)}
           className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white py-3 rounded-xl text-sm font-semibold">
-          <Plus size={16} /> Catat Setoran
+          <Plus size={16} /> Catat Setoran Manual
         </button>
+      )}
+
+      {/* Realtime indicator */}
+      {canApprove && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-100 rounded-xl">
+          <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse flex-shrink-0" />
+          <p className="text-xs text-green-700">Live — notifikasi otomatis saat ada setoran baru</p>
+        </div>
       )}
 
       {/* Filter bar */}
@@ -222,7 +267,6 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
 
         {showFilters && (
           <div className="border-t border-gray-50 px-4 py-3 space-y-3">
-            {/* Filter Status */}
             <div>
               <p className="text-xs text-gray-400 mb-1.5">Status</p>
               <div className="flex gap-1.5 flex-wrap">
@@ -235,7 +279,6 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
               </div>
             </div>
 
-            {/* Filter Toko — hanya untuk approver */}
             {canApprove && stores && stores.length > 0 && (
               <div>
                 <p className="text-xs text-gray-400 mb-1.5">Toko</p>
@@ -254,7 +297,6 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
               </div>
             )}
 
-            {/* Filter Tanggal */}
             <div>
               <p className="text-xs text-gray-400 mb-1.5">Tanggal</p>
               <div className="flex gap-2 items-center">
@@ -264,13 +306,12 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
                 <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)}
                   className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-xs" />
               </div>
-              {/* Quick date buttons */}
               <div className="flex gap-1.5 mt-1.5">
                 {[
-                  { l: 'Hari ini', f: today,                                        t: today },
-                  { l: '7 Hari',   f: new Date(Date.now()-6*86400000).toISOString().slice(0,10), t: today },
-                  { l: 'Bulan ini',f: today.slice(0,7)+'-01',                       t: today },
-                  { l: 'Semua',    f: '',                                            t: '' },
+                  { l: 'Hari ini',  f: today,                                                    t: today },
+                  { l: '7 Hari',    f: new Date(Date.now()-6*86400000).toISOString().slice(0,10), t: today },
+                  { l: 'Bulan ini', f: today.slice(0,7)+'-01',                                   t: today },
+                  { l: 'Semua',     f: '',                                                        t: '' },
                 ].map(q => (
                   <button key={q.l} onClick={() => { setFilterDateFrom(q.f); setFilterDateTo(q.t) }}
                     className={`flex-1 py-1 text-[10px] rounded-lg border font-medium transition-colors ${
@@ -284,35 +325,34 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
               </div>
             </div>
 
-            {/* Reset filter */}
             <button onClick={() => { setFilterStatus(canApprove?'pending':'all'); setFilterStore('semua'); setFilterDateFrom(''); setFilterDateTo('') }}
               className="text-xs text-gray-400 underline">Reset filter</button>
           </div>
         )}
       </div>
 
-      {/* List setoran — grouped by tanggal */}
+      {/* List setoran grouped by tanggal */}
       {loading ? (
         <div className="bg-white rounded-xl border border-gray-100 py-8 text-center text-sm text-gray-400">Memuat...</div>
       ) : byDate.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-100 py-10 text-center text-sm text-gray-400">
-          {filterStatus === 'pending' ? 'Tidak ada setoran pending' : 'Belum ada setoran'}
+          {filterStatus === 'pending' ? 'Tidak ada setoran pending ✓' : 'Belum ada setoran'}
         </div>
       ) : (
         <div className="space-y-2">
           {byDate.map(([date, items]) => {
-            const isExpanded = expandedDates[date] !== undefined ? expandedDates[date] : date === today
-            const dateTotal  = items.reduce((s, d) => s + d.amount, 0)
+            const isExpanded  = expandedDates[date] !== undefined ? expandedDates[date] : date === today
+            const dateTotal   = items.reduce((s, d) => s + d.amount, 0)
             const datePending = items.filter(d => d.status === 'pending').length
+            const dateLabel   = new Date(date + 'T00:00:00').toLocaleDateString('id-ID', {
+              weekday: 'short', day: 'numeric', month: 'short', year: 'numeric'
+            })
             return (
               <div key={date} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                {/* Date header */}
                 <button onClick={() => setExpandedDates(prev => ({ ...prev, [date]: !isExpanded }))}
                   className="w-full flex items-center justify-between px-4 py-2.5">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-gray-700">
-                      {new Date(date + 'T00:00:00').toLocaleDateString('id-ID', { weekday:'short', day:'numeric', month:'short', year:'numeric' })}
-                    </span>
+                    <span className="text-xs font-semibold text-gray-700">{dateLabel}</span>
                     {datePending > 0 && (
                       <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">
                         {datePending} pending
@@ -329,7 +369,7 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
                   <div className="border-t border-gray-50">
                     {items.map((d, idx) => (
                       <div key={d.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
-                        <div className="flex items-start justify-between">
+                        <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap mb-0.5">
                               <p className="text-sm font-semibold text-gray-900">{formatRupiah(d.amount)}</p>
@@ -337,20 +377,53 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
                                 d.status==='approved' ? 'bg-green-100 text-green-700' :
                                 d.status==='rejected' ? 'bg-red-100 text-red-600' :
                                 'bg-amber-100 text-amber-700'}`}>
-                                {d.status==='approved'?'✓ Disetujui':d.status==='rejected'?'✗ Ditolak':'⏳ Pending'}
+                                {d.status==='approved' ? '✓ Disetujui' : d.status==='rejected' ? '✗ Ditolak' : '⏳ Pending'}
                               </span>
                             </div>
+
+                            {/* Nama toko (untuk approver) */}
                             {canApprove && storeMap[d.store_id] && (
                               <p className="text-xs font-medium text-gray-600">{storeMap[d.store_id]}</p>
                             )}
+
+                            {/* Tanggal setor vs approved/rejected */}
+                            <p className="text-xs text-gray-400 mt-0.5">
+                              Setor: {d.deposit_date}
+                              {d.status === 'approved' && d.approved_at && (
+                                <span className="ml-2 text-green-600">
+                                  · Approved {new Date(d.approved_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
+                                </span>
+                              )}
+                              {d.status === 'rejected' && d.rejected_at && (
+                                <span className="ml-2 text-red-500">
+                                  · Ditolak {new Date(d.rejected_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
+                                </span>
+                              )}
+                            </p>
+
+                            {/* Catatan */}
                             {d.notes && <p className="text-xs text-gray-400 italic mt-0.5">📝 {d.notes}</p>}
+
+                            {/* Alasan reject */}
+                            {d.status === 'rejected' && d.rejected_reason && (
+                              <div className="mt-1 flex items-start gap-1">
+                                <AlertCircle size={11} className="text-red-400 flex-shrink-0 mt-0.5" />
+                                <p className="text-xs text-red-500">Alasan: {d.rejected_reason}</p>
+                              </div>
+                            )}
                           </div>
+
+                          {/* Tombol approve/reject */}
                           {canApprove && d.status === 'pending' && (
-                            <div className="flex gap-1.5 ml-2 flex-shrink-0">
+                            <div className="flex gap-1.5 flex-shrink-0">
                               <button onClick={() => handleApprove(d)}
-                                className="px-2.5 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg">✓</button>
-                              <button onClick={() => handleReject(d)}
-                                className="px-2.5 py-1.5 bg-red-100 text-red-600 text-xs font-medium rounded-lg">✗</button>
+                                className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700">
+                                ✓ Approve
+                              </button>
+                              <button onClick={() => { setRejectTarget(d); setRejectReason('') }}
+                                className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 text-xs font-medium rounded-lg hover:bg-red-100">
+                                ✗ Tolak
+                              </button>
                             </div>
                           )}
                         </div>
@@ -361,6 +434,46 @@ function SetoranTab({ role, userId, storeId }: { role: string; userId: string; s
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Modal reject dengan alasan */}
+      {rejectTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-5 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                <AlertCircle size={18} className="text-red-600" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Tolak Setoran</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {canApprove && storeMap[rejectTarget.store_id] && `${storeMap[rejectTarget.store_id]} · `}
+                  {formatRupiah(rejectTarget.amount)}
+                </p>
+              </div>
+            </div>
+            <div>
+              <Label required>Alasan Penolakan</Label>
+              <input
+                className="input"
+                value={rejectReason}
+                onChange={e => setRejectReason(e.target.value)}
+                placeholder="Contoh: Uang belum diterima, jumlah tidak sesuai..."
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => { setRejectTarget(null); setRejectReason('') }}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">
+                Batal
+              </button>
+              <button onClick={handleRejectConfirm} disabled={rejecting || !rejectReason.trim()}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium disabled:opacity-50">
+                {rejecting ? 'Memproses...' : 'Tolak Setoran'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -404,7 +517,7 @@ function SetoranForm({ storeId, userId, onClose, onSaved }: {
   return (
     <Modal title="Catat Setoran Kas" onClose={onClose}>
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
-        <p className="text-xs text-blue-700">Catat uang tunai yang disetor ke kurir gudang hari ini.</p>
+        <p className="text-xs text-blue-700">Catat uang tunai yang disetor ke kurir gudang.</p>
       </div>
       <div><Label required>Jumlah Setor (Rp)</Label>
         <input className="input text-lg font-semibold" inputMode="decimal" value={amount}
@@ -424,7 +537,7 @@ function SetoranForm({ storeId, userId, onClose, onSaved }: {
   )
 }
 
-// ── TAB LAPORAN KEUANGAN (owner/manager only) ─────────────────
+// ── TAB LAPORAN KEUANGAN ──────────────────────────────────────
 function LaporanKeuanganTab() {
   const now2 = new Date()
   const [year,  setYear]  = useState(now2.getFullYear())
@@ -479,11 +592,14 @@ function StoreLaporanCard({ store, year, month, period }: { store: any; year: nu
     const totalCash = txs.filter(t => t.payment_method === 'cash').reduce((s, t) => s + t.total, 0)
 
     const expenses = await db.warehouse_expenses
-      .filter(e => (e as any).store_id === store.id && e.created_at >= startISO && e.created_at <= endISO).toArray()
+      .filter(e => (e as any).store_id === store.id &&
+        (e as any).status !== 'voided' &&
+        e.created_at >= startISO && e.created_at <= endISO).toArray()
     const totalBiaya = expenses.reduce((s, e) => s + e.amount, 0)
 
     const mutations = await db.warehouse_mutations
       .filter(m => m.destination_id === store.id && m.mutation_type === 'to_store' &&
+        (m as any).status !== 'voided' &&
         m.created_at >= startISO && m.created_at <= endISO).toArray()
     const mutItems = await db.warehouse_mutation_items.toArray()
     const totalMutasi = mutations.reduce((s, m) => {
@@ -535,7 +651,7 @@ function StoreLaporanCard({ store, year, month, period }: { store: any; year: nu
       <div className="px-4 py-3 space-y-1.5">
         <LRow label="Persediaan Awal"        value={data.persediaanAwal}  note={data.persediaanAwal===0?'Belum ada snapshot':''} />
         <LRow label="+ Bahan Masuk (Mutasi)" value={data.totalMutasi} />
-        <LRow label="- Persediaan Akhir"     value={data.persediaanAkhir} note={!data.isClosed?'(estimasi saat ini)':''} />
+        <LRow label="- Persediaan Akhir"     value={data.persediaanAkhir} note={!data.isClosed?'estimasi saat ini':''} />
         <div className="flex justify-between py-1 border-t border-dashed border-gray-200 mt-1">
           <span className="text-sm font-semibold text-gray-700">= HPP</span>
           <span className="text-sm font-semibold text-orange-600">{formatRupiah(data.hpp)}</span>
@@ -553,8 +669,8 @@ function StoreLaporanCard({ store, year, month, period }: { store: any; year: nu
           </div>
         </div>
         <div className="border-t border-gray-100 pt-1.5 mt-1.5 space-y-1">
-          <LRow label="Total Cash Masuk"        value={data.totalCash} />
-          <LRow label="Total Setor (Approved)"  value={data.totalSetor} />
+          <LRow label="Total Cash Masuk"       value={data.totalCash} />
+          <LRow label="Total Setor (Approved)" value={data.totalSetor} />
           <div className="flex justify-between">
             <span className="text-sm font-medium text-gray-700">Piutang Setor</span>
             <span className={`text-sm font-semibold ${data.piutangSetor>0?'text-amber-600':'text-gray-500'}`}>

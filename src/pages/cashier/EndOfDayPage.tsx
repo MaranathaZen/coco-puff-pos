@@ -1,8 +1,8 @@
 // src/pages/cashier/EndOfDayPage.tsx
-// CHANGELOG v3:
-// - FIX: otomatis buat cash_deposits saat simpan close order
-// - Tambah Total Non Tunai
-// - Fix timezone WIB
+// CHANGELOG v4:
+// - DESKTOP: Produk Terjual + Sisa Stok side-by-side (kiri-kanan)
+// - DESKTOP: Input Manual + Penjualan Hari Ini side-by-side (kiri-kanan)
+// - MOBILE: tidak ada perubahan sama sekali
 
 import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -256,7 +256,6 @@ export default function EndOfDayPage() {
     window.open(`https://wa.me/?text=${encodeURIComponent(generateWAText(report))}`, '_blank')
   }
 
-
   async function handleSave() {
     try {
       const { data: existing } = await supabase
@@ -304,7 +303,6 @@ export default function EndOfDayPage() {
         throw error
       }
 
-      // FIX: otomatis buat setoran kas saat close order disimpan
       if (totalSetorNum > 0) {
         try {
           await supabase.from('cash_deposits').insert({
@@ -319,7 +317,6 @@ export default function EndOfDayPage() {
           })
         } catch (e) {
           console.warn('[CLOSE ORDER] Gagal buat setoran otomatis:', e)
-          // Tidak blocking — close order tetap tersimpan
         }
       }
 
@@ -342,6 +339,154 @@ export default function EndOfDayPage() {
     )
   }
 
+  // ── SHARED SECTIONS ───────────────────────────────────────
+
+  const sectionInputManual = (
+    <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3 h-full">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Input Manual</p>
+      <div className="grid grid-cols-2 gap-3">
+        <NumInput label="Saldo Awal"          value={saldoAwal}     onChange={setSaldoAwal}     disabled={!!existingReport} hint={saldoAwal ? undefined : 'Auto dari kemarin'} />
+        <NumInput label="Saldo Tambahan"       value={saldoTambahan} onChange={setSaldoTambahan} disabled={!!existingReport} />
+        <NumInput label="Total Setor ke Pusat" value={totalSetor}    onChange={setTotalSetor}    disabled={!!existingReport}
+          hint={!existingReport ? 'Otomatis masuk ke Setoran Kas' : undefined} />
+        <NumInput label="Uang Fisik di Laci"   value={uangFisik}     onChange={setUangFisik}     disabled={!!existingReport} />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Catatan</label>
+        <input className={`input ${existingReport ? 'opacity-50 cursor-not-allowed' : ''}`}
+          value={notes} onChange={e => !existingReport && setNotes(e.target.value)}
+          placeholder="Opsional" readOnly={!!existingReport} />
+      </div>
+    </div>
+  )
+
+  const sectionPenjualan = (
+    <div className="bg-white rounded-xl border border-gray-100 p-4 h-full">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Penjualan Hari Ini</p>
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        {PAY_METHODS.map(m => (
+          <div key={m.key} className="bg-gray-50 rounded-lg p-2.5">
+            <p className="text-xs text-gray-400">{m.label}</p>
+            <p className="text-sm font-semibold text-gray-900">
+              {formatRupiah(existingReport
+                ? (existingReport[`total_${m.key}`] || 0)
+                : (todayData?.byMethod[m.key] || 0))}
+            </p>
+          </div>
+        ))}
+      </div>
+      <div className="bg-blue-50 rounded-lg p-2.5 mb-2">
+        <p className="text-xs text-blue-600">Total Non Tunai (QRIS + Transfer + dll)</p>
+        <p className="text-sm font-semibold text-blue-700">
+          {formatRupiah(existingReport
+            ? ((existingReport.total_penjualan||0) - (existingReport.total_cash||0))
+            : (todayData?.totalNonTunai || 0))}
+        </p>
+      </div>
+      <Row label="Total Penjualan" value={existingReport?.total_penjualan ?? totalPenjualan} highlight />
+      <p className="text-xs text-gray-400 mt-1">{todayData?.txCount || 0} transaksi · Auto dari sistem</p>
+    </div>
+  )
+
+  const sectionProdukTerjual = todayData?.soldMap && Object.keys(todayData.soldMap).length > 0 ? (
+    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden h-full">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 border-b border-gray-50">Produk Terjual</p>
+      {Object.values(todayData.soldMap).sort((a,b) => b.qty - a.qty).map((item, idx) => (
+        <div key={idx} className={`flex items-center justify-between px-4 py-2.5 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+          <p className="text-sm text-gray-800">{item.name}</p>
+          <div className="text-right">
+            <p className="text-sm font-medium text-gray-900">{item.qty} pcs</p>
+            <p className="text-xs text-gray-400">{formatRupiah(item.total)}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  ) : null
+
+  const sectionSisaStok = stokSisa && stokSisa.length > 0 ? (
+    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden h-full">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 border-b border-gray-50">Sisa Stok</p>
+      {stokSisa.map((s, idx) => (
+        <div key={s.id} className={`flex items-center justify-between px-4 py-2.5 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+          <p className="text-sm text-gray-800">{s.name}</p>
+          <p className="text-sm font-medium text-gray-900">
+            {s.qty} <span className="text-xs text-gray-400">{s.unit}</span>
+          </p>
+        </div>
+      ))}
+    </div>
+  ) : null
+
+  const sectionLaporanKas = (
+    <div className="bg-white rounded-xl border border-gray-100 p-4">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Laporan Kas</p>
+      <Row label="Saldo Awal"         value={saldoAwalNum} />
+      <Row label="Saldo Tambahan"     value={saldoTambahanNum} />
+      <Row label="Penjualan Tunai"    value={cashPenjualan} sub="Auto dari sistem" />
+      <Row label="Total Setor"        value={totalSetorNum}  negative />
+      {totalBiaya > 0     && <Row label="Total Biaya"     value={totalBiaya}     negative sub="Auto dari sistem" />}
+      {totalPembelian > 0 && <Row label="Total Pembelian" value={totalPembelian} negative sub="Auto dari sistem" />}
+      <Row label="Saldo Akhir"        value={existingReport?.saldo_akhir ?? saldoAkhir} highlight />
+      <Row label="Uang Fisik di Laci" value={uangFisikNum} />
+      <div className="flex items-center justify-between py-3 border-t border-gray-200 mt-1">
+        <span className="text-sm font-semibold text-gray-900">Selisih</span>
+        <div className="flex items-center gap-1.5">
+          {(existingReport?.selisih ?? selisih) === 0
+            ? <CheckCircle size={14} className="text-green-500" />
+            : <AlertCircle size={14} className="text-red-500" />}
+          <span className={`text-base font-bold ${
+            (existingReport?.selisih ?? selisih) === 0 ? 'text-green-600' :
+            (existingReport?.selisih ?? selisih) > 0 ? 'text-blue-600' : 'text-red-600'}`}>
+            {(existingReport?.selisih ?? selisih) > 0 ? '+' : ''}{formatRupiah(existingReport?.selisih ?? selisih)}
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+
+  const sectionVoid = ((todayData?.voidCount || 0) > 0 || (todayData?.reqVoidCount || 0) > 0) ? (
+    <div className="bg-red-50 border border-red-100 rounded-xl p-4">
+      <p className="text-xs font-semibold text-red-500 uppercase tracking-wide mb-2">Void Hari Ini</p>
+      {(todayData?.voidCount || 0) > 0 && (
+        <div className="flex justify-between text-sm mb-1">
+          <span className="text-red-600">Disetujui</span>
+          <span className="font-semibold text-red-700">{todayData?.voidCount} transaksi · {formatRupiah(todayData?.totalVoid || 0)}</span>
+        </div>
+      )}
+      {(todayData?.reqVoidCount || 0) > 0 && (
+        <div className="flex justify-between text-sm">
+          <span className="text-amber-600">Pending Approval</span>
+          <span className="font-semibold text-amber-700">{todayData?.reqVoidCount} transaksi</span>
+        </div>
+      )}
+    </div>
+  ) : null
+
+  const sectionActions = !saved ? (
+    <button onClick={handleSave} disabled={saving}
+      className="w-full py-3.5 rounded-xl bg-gray-900 text-white text-sm font-semibold disabled:opacity-50">
+      {saving ? 'Menyimpan...' : 'Simpan Close Order'}
+    </button>
+  ) : (
+    <div className="space-y-3">
+      <div className="bg-green-50 border border-green-100 rounded-xl px-4 py-3 flex items-center gap-2">
+        <CheckCircle size={16} className="text-green-500 flex-shrink-0" />
+        <div>
+          <p className="text-sm text-green-700 font-medium">Close Order sudah tersimpan</p>
+          {existingReport?.submitted_at && (
+            <p className="text-xs text-green-600">
+              {new Date(existingReport.submitted_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
+            </p>
+          )}
+        </div>
+      </div>
+      <button onClick={() => shareWhatsApp(savedReport || existingReport)}
+        className="w-full py-3.5 rounded-xl bg-green-600 text-white text-sm font-semibold flex items-center justify-center gap-2">
+        <Share2 size={16} />Share ke WhatsApp
+      </button>
+    </div>
+  )
+
   return (
     <div className="flex flex-col h-full bg-gray-50">
       <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
@@ -356,159 +501,77 @@ export default function EndOfDayPage() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-auto p-4 space-y-4">
-        {existingReport && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-2">
-            <Lock size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-amber-800">Close Order sudah disimpan hari ini</p>
-              <p className="text-xs text-amber-600 mt-0.5">
-                Disimpan pukul {existingReport.submitted_at
-                  ? new Date(existingReport.submitted_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })
-                  : '-'}
-              </p>
-            </div>
-          </div>
-        )}
+      <div className="flex-1 overflow-auto">
 
-        <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Input Manual</p>
-          <div className="grid grid-cols-2 gap-3">
-            <NumInput label="Saldo Awal"          value={saldoAwal}     onChange={setSaldoAwal}     disabled={!!existingReport} hint={saldoAwal ? undefined : 'Auto dari kemarin'} />
-            <NumInput label="Saldo Tambahan"       value={saldoTambahan} onChange={setSaldoTambahan} disabled={!!existingReport} />
-            <NumInput label="Total Setor ke Pusat" value={totalSetor}    onChange={setTotalSetor}    disabled={!!existingReport}
-              hint={!existingReport ? 'Otomatis masuk ke Setoran Kas' : undefined} />
-            <NumInput label="Uang Fisik di Laci"   value={uangFisik}     onChange={setUangFisik}     disabled={!!existingReport} />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Catatan</label>
-            <input className={`input ${existingReport ? 'opacity-50 cursor-not-allowed' : ''}`}
-              value={notes} onChange={e => !existingReport && setNotes(e.target.value)}
-              placeholder="Opsional" readOnly={!!existingReport} />
-          </div>
-        </div>
-
-        <div className="bg-white rounded-xl border border-gray-100 p-4">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Penjualan Hari Ini</p>
-          <div className="grid grid-cols-2 gap-2 mb-3">
-            {PAY_METHODS.map(m => (
-              <div key={m.key} className="bg-gray-50 rounded-lg p-2.5">
-                <p className="text-xs text-gray-400">{m.label}</p>
-                <p className="text-sm font-semibold text-gray-900">
-                  {formatRupiah(existingReport
-                    ? (existingReport[`total_${m.key}`] || 0)
-                    : (todayData?.byMethod[m.key] || 0))}
+        {/* ── MOBILE LAYOUT (default) ── */}
+        <div className="md:hidden p-4 space-y-4">
+          {existingReport && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-2">
+              <Lock size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-amber-800">Close Order sudah disimpan hari ini</p>
+                <p className="text-xs text-amber-600 mt-0.5">
+                  Disimpan pukul {existingReport.submitted_at
+                    ? new Date(existingReport.submitted_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })
+                    : '-'}
                 </p>
               </div>
-            ))}
-          </div>
-          <div className="bg-blue-50 rounded-lg p-2.5 mb-2">
-            <p className="text-xs text-blue-600">Total Non Tunai (QRIS + Transfer + dll)</p>
-            <p className="text-sm font-semibold text-blue-700">
-              {formatRupiah(existingReport
-                ? ((existingReport.total_penjualan||0) - (existingReport.total_cash||0))
-                : (todayData?.totalNonTunai || 0))}
-            </p>
-          </div>
-          <Row label="Total Penjualan" value={existingReport?.total_penjualan ?? totalPenjualan} highlight />
-          <p className="text-xs text-gray-400 mt-1">{todayData?.txCount || 0} transaksi · Auto dari sistem</p>
-        </div>
-
-        {((todayData?.voidCount || 0) > 0 || (todayData?.reqVoidCount || 0) > 0) && (
-          <div className="bg-red-50 border border-red-100 rounded-xl p-4">
-            <p className="text-xs font-semibold text-red-500 uppercase tracking-wide mb-2">Void Hari Ini</p>
-            {(todayData?.voidCount || 0) > 0 && (
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-red-600">Disetujui</span>
-                <span className="font-semibold text-red-700">{todayData?.voidCount} transaksi · {formatRupiah(todayData?.totalVoid || 0)}</span>
-              </div>
-            )}
-            {(todayData?.reqVoidCount || 0) > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-amber-600">Pending Approval</span>
-                <span className="font-semibold text-amber-700">{todayData?.reqVoidCount} transaksi</span>
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="bg-white rounded-xl border border-gray-100 p-4">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Laporan Kas</p>
-          <Row label="Saldo Awal"         value={saldoAwalNum} />
-          <Row label="Saldo Tambahan"     value={saldoTambahanNum} />
-          <Row label="Penjualan Tunai"    value={cashPenjualan} sub="Auto dari sistem" />
-          <Row label="Total Setor"        value={totalSetorNum}  negative />
-          {totalBiaya > 0     && <Row label="Total Biaya"     value={totalBiaya}     negative sub="Auto dari sistem" />}
-          {totalPembelian > 0 && <Row label="Total Pembelian" value={totalPembelian} negative sub="Auto dari sistem" />}
-          <Row label="Saldo Akhir"        value={existingReport?.saldo_akhir ?? saldoAkhir} highlight />
-          <Row label="Uang Fisik di Laci" value={uangFisikNum} />
-          <div className="flex items-center justify-between py-3 border-t border-gray-200 mt-1">
-            <span className="text-sm font-semibold text-gray-900">Selisih</span>
-            <div className="flex items-center gap-1.5">
-              {(existingReport?.selisih ?? selisih) === 0
-                ? <CheckCircle size={14} className="text-green-500" />
-                : <AlertCircle size={14} className="text-red-500" />}
-              <span className={`text-base font-bold ${
-                (existingReport?.selisih ?? selisih) === 0 ? 'text-green-600' :
-                (existingReport?.selisih ?? selisih) > 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                {(existingReport?.selisih ?? selisih) > 0 ? '+' : ''}{formatRupiah(existingReport?.selisih ?? selisih)}
-              </span>
             </div>
-          </div>
+          )}
+          {sectionInputManual}
+          {sectionPenjualan}
+          {sectionVoid}
+          {sectionLaporanKas}
+          {sectionProdukTerjual}
+          {sectionSisaStok}
+          {sectionActions}
+          <div className="h-4" />
         </div>
 
-        {todayData?.soldMap && Object.keys(todayData.soldMap).length > 0 && (
-          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 border-b border-gray-50">Produk Terjual</p>
-            {Object.values(todayData.soldMap).sort((a,b) => b.qty - a.qty).map((item, idx) => (
-              <div key={idx} className={`flex items-center justify-between px-4 py-2.5 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                <p className="text-sm text-gray-800">{item.name}</p>
-                <div className="text-right">
-                  <p className="text-sm font-medium text-gray-900">{item.qty} pcs</p>
-                  <p className="text-xs text-gray-400">{formatRupiah(item.total)}</p>
+        {/* ── DESKTOP LAYOUT (md+) ── */}
+        <div className="hidden md:block p-6">
+          <div className="max-w-6xl mx-auto space-y-4">
+
+            {existingReport && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-2">
+                <Lock size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-amber-800">Close Order sudah disimpan hari ini</p>
+                  <p className="text-xs text-amber-600 mt-0.5">
+                    Disimpan pukul {existingReport.submitted_at
+                      ? new Date(existingReport.submitted_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })
+                      : '-'}
+                  </p>
                 </div>
               </div>
-            ))}
-          </div>
-        )}
+            )}
 
-        {stokSisa && stokSisa.length > 0 && (
-          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 border-b border-gray-50">Sisa Stok</p>
-            {stokSisa.map((s, idx) => (
-              <div key={s.id} className={`flex items-center justify-between px-4 py-2.5 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
-                <p className="text-sm text-gray-800">{s.name}</p>
-                <p className="text-sm font-medium text-gray-900">{s.qty} <span className="text-xs text-gray-400">{s.unit}</span></p>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {!saved ? (
-          <button onClick={handleSave} disabled={saving}
-            className="w-full py-3.5 rounded-xl bg-gray-900 text-white text-sm font-semibold disabled:opacity-50">
-            {saving ? 'Menyimpan...' : 'Simpan Close Order'}
-          </button>
-        ) : (
-          <div className="space-y-3">
-            <div className="bg-green-50 border border-green-100 rounded-xl px-4 py-3 flex items-center gap-2">
-              <CheckCircle size={16} className="text-green-500 flex-shrink-0" />
-              <div>
-                <p className="text-sm text-green-700 font-medium">Close Order sudah tersimpan</p>
-                {existingReport?.submitted_at && (
-                  <p className="text-xs text-green-600">
-                    {new Date(existingReport.submitted_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
-                  </p>
-                )}
-              </div>
+            {/* Row 1: Input Manual | Penjualan Hari Ini */}
+            <div className="grid grid-cols-2 gap-4 items-start">
+              {sectionInputManual}
+              {sectionPenjualan}
             </div>
-            <button onClick={() => shareWhatsApp(savedReport || existingReport)}
-              className="w-full py-3.5 rounded-xl bg-green-600 text-white text-sm font-semibold flex items-center justify-center gap-2">
-              <Share2 size={16} />Share ke WhatsApp
-            </button>
+
+            {/* Row 2: Void (full width, hanya kalau ada) */}
+            {sectionVoid}
+
+            {/* Row 3: Laporan Kas (full width) */}
+            {sectionLaporanKas}
+
+            {/* Row 4: Produk Terjual | Sisa Stok */}
+            {(sectionProdukTerjual || sectionSisaStok) && (
+              <div className="grid grid-cols-2 gap-4 items-start">
+                {sectionProdukTerjual ?? <div />}
+                {sectionSisaStok ?? <div />}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="max-w-sm">{sectionActions}</div>
+            <div className="h-4" />
           </div>
-        )}
-        <div className="h-4" />
+        </div>
+
       </div>
     </div>
   )

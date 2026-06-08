@@ -21,16 +21,16 @@ function groupBy<T>(arr: T[], keyFn: (item: T) => string): { key: string; items:
   }
   return Array.from(map.entries()).map(([key, items]) => ({ key, items }))
 }
-function groupLabel(dateStr: string, mode: 'hari'|'bulan'|'tahun'): string {
+function groupLabel(dateStr: string, mode: 'hari' | 'bulan' | 'tahun'): string {
   const d = new Date(dateStr)
-  if (mode === 'hari')  return d.toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' })
-  if (mode === 'bulan') return d.toLocaleDateString('id-ID', { month:'long', year:'numeric' })
+  if (mode === 'hari') return d.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  if (mode === 'bulan') return d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
   return String(d.getFullYear())
 }
-function groupKey(dateStr: string, mode: 'hari'|'bulan'|'tahun'): string {
-  if (mode === 'hari')  return dateStr.slice(0,10)
-  if (mode === 'bulan') return dateStr.slice(0,7)
-  return dateStr.slice(0,4)
+function groupKey(dateStr: string, mode: 'hari' | 'bulan' | 'tahun'): string {
+  if (mode === 'hari') return dateStr.slice(0, 10)
+  if (mode === 'bulan') return dateStr.slice(0, 7)
+  return dateStr.slice(0, 4)
 }
 
 function GroupHeader({ label, count, expanded, onToggle }: {
@@ -50,7 +50,7 @@ function GroupHeader({ label, count, expanded, onToggle }: {
   )
 }
 
-function GroupSelect({ value, onChange }: { value: 'hari'|'bulan'|'tahun'; onChange: (v: 'hari'|'bulan'|'tahun') => void }) {
+function GroupSelect({ value, onChange }: { value: 'hari' | 'bulan' | 'tahun'; onChange: (v: 'hari' | 'bulan' | 'tahun') => void }) {
   return (
     <div className="relative">
       <select value={value} onChange={e => onChange(e.target.value as any)}
@@ -64,7 +64,7 @@ function GroupSelect({ value, onChange }: { value: 'hari'|'bulan'|'tahun'; onCha
   )
 }
 
-const ToolbarCtx = createContext<(node: React.ReactNode) => void>(() => {})
+const ToolbarCtx = createContext<(node: React.ReactNode) => void>(() => { })
 
 function CopyBtn({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -83,7 +83,7 @@ function LoadingSkeleton() {
         <div className="bg-white rounded-xl border border-gray-100 p-3 h-16" />
         <div className="bg-white rounded-xl border border-gray-100 p-3 h-16" />
       </div>
-      {[1,2,3].map(i => (
+      {[1, 2, 3].map(i => (
         <div key={i} className="bg-white rounded-xl border border-gray-100 p-4 h-20" />
       ))}
     </div>
@@ -95,13 +95,13 @@ type ProduksiTab = 'divisi' | 'toko'
 export default function ProduksiPage() {
   const { user } = useAuthStore()
   const role = user?.role || 'produksi'
-  const isOwnerManager = ['owner','manager'].includes(role)
-  const canSeeToko   = ['owner','manager','kasir'].includes(role)
-  const canSeeDivisi = ['owner','manager','produksi'].includes(role)
+  const isOwnerManager = ['owner', 'manager'].includes(role)
+  const canSeeToko = ['owner', 'manager', 'kasir'].includes(role)
+  const canSeeDivisi = ['owner', 'manager', 'produksi'].includes(role)
   const defaultTab: ProduksiTab = canSeeDivisi ? 'divisi' : 'toko'
-  const [activeTab,      setActiveTab]      = useState<ProduksiTab>(defaultTab)
-  const [isSyncing,      setIsSyncing]      = useState(false)
-  const [isInitialLoad,  setIsInitialLoad]  = useState(true)
+  const [activeTab, setActiveTab] = useState<ProduksiTab>(defaultTab)
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [isInitialLoad, setIsInitialLoad] = useState(true)
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
 
   // auto-sync saat mount tanpa toast
@@ -139,19 +139,19 @@ export default function ProduksiPage() {
       ])
 
       await Promise.all([
-        mats.data?.length         ? db.materials.bulkPut(mats.data)                           : Promise.resolve(),
-        pstock.data !== null      ? (async () => { await db.production_stock.clear();          if (pstock.data?.length)       await db.production_stock.bulkPut(pstock.data)       })() : Promise.resolve(),
-        fgs.data?.length          ? db.finished_goods_stock.bulkPut(fgs.data)                 : Promise.resolve(),
-        recipes.data !== null     ? (async () => { await db.production_recipes.clear();        if (recipes.data?.length)      await db.production_recipes.bulkPut(recipes.data)     })() : Promise.resolve(),
-        recipeItems.data !== null ? (async () => { await db.production_recipe_items.clear();   if (recipeItems.data?.length)  await db.production_recipe_items.bulkPut(recipeItems.data) })() : Promise.resolve(),
-        logs.data !== null        ? (async () => { await db.production_logs.clear();          if (logs.data?.length)    await db.production_logs.bulkPut(logs.data)           })() : Promise.resolve(),
-        logMats.data !== null     ? (async () => { await db.production_log_materials.clear(); if (logMats.data?.length) await db.production_log_materials.bulkPut(logMats.data) })() : Promise.resolve(),
-        mutations.data?.length    ? db.production_mutations.bulkPut(mutations.data)           : Promise.resolve(),
-        mutItems.data?.length     ? db.production_mutation_items.bulkPut(mutItems.data)       : Promise.resolve(),
-        partners.data?.length     ? db.partners.bulkPut(partners.data)                        : Promise.resolve(),
-        products.data?.length     ? db.products.bulkPut(products.data)                        : Promise.resolve(),
-        stores.data?.length       ? db.stores.bulkPut(stores.data)                            : Promise.resolve(),
-        (storeRecipes as any).data?.length     ? db.store_recipes.bulkPut((storeRecipes as any).data)          : Promise.resolve(),
+        mats.data?.length ? db.materials.bulkPut(mats.data) : Promise.resolve(),
+        pstock.data !== null ? (async () => { await db.production_stock.clear(); if (pstock.data?.length) await db.production_stock.bulkPut(pstock.data) })() : Promise.resolve(),
+        fgs.data?.length ? db.finished_goods_stock.bulkPut(fgs.data) : Promise.resolve(),
+        recipes.data !== null ? (async () => { await db.production_recipes.clear(); if (recipes.data?.length) await db.production_recipes.bulkPut(recipes.data) })() : Promise.resolve(),
+        recipeItems.data !== null ? (async () => { await db.production_recipe_items.clear(); if (recipeItems.data?.length) await db.production_recipe_items.bulkPut(recipeItems.data) })() : Promise.resolve(),
+        logs.data !== null ? (async () => { await db.production_logs.clear(); if (logs.data?.length) await db.production_logs.bulkPut(logs.data) })() : Promise.resolve(),
+        logMats.data !== null ? (async () => { await db.production_log_materials.clear(); if (logMats.data?.length) await db.production_log_materials.bulkPut(logMats.data) })() : Promise.resolve(),
+        mutations.data?.length ? db.production_mutations.bulkPut(mutations.data) : Promise.resolve(),
+        mutItems.data?.length ? db.production_mutation_items.bulkPut(mutItems.data) : Promise.resolve(),
+        partners.data?.length ? db.partners.bulkPut(partners.data) : Promise.resolve(),
+        products.data?.length ? db.products.bulkPut(products.data) : Promise.resolve(),
+        stores.data?.length ? db.stores.bulkPut(stores.data) : Promise.resolve(),
+        (storeRecipes as any).data?.length ? db.store_recipes.bulkPut((storeRecipes as any).data) : Promise.resolve(),
         (storeRecipeItems as any).data?.length ? db.store_recipe_items.bulkPut((storeRecipeItems as any).data) : Promise.resolve(),
       ])
 
@@ -188,11 +188,11 @@ export default function ProduksiPage() {
       {canSeeDivisi && canSeeToko && (
         <div className="bg-white border-b border-gray-100 flex flex-shrink-0">
           <button onClick={() => setActiveTab('divisi')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 transition-colors ${activeTab==='divisi'?'border-gray-900 text-gray-900':'border-transparent text-gray-400'}`}>
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 transition-colors ${activeTab === 'divisi' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
             🏭 Divisi Produksi
           </button>
           <button onClick={() => setActiveTab('toko')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 transition-colors ${activeTab==='toko'?'border-gray-900 text-gray-900':'border-transparent text-gray-400'}`}>
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 transition-colors ${activeTab === 'toko' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
             🏪 Produksi Toko
           </button>
         </div>
@@ -236,8 +236,8 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
 // ── DIVISI PRODUKSI ───────────────────────────────────────────
 function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerManager?: boolean }) {
   const setToolbar = useContext(ToolbarCtx)
-  const [showForm,       setShowForm]       = useState(false)
-  const [groupMode,      setGroupMode]      = useState<'hari'|'bulan'|'tahun'>('hari')
+  const [showForm, setShowForm] = useState(false)
+  const [groupMode, setGroupMode] = useState<'hari' | 'bulan' | 'tahun'>('hari')
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
     const today = new Date().toISOString().slice(0, 10)
     return { [today]: true }
@@ -259,25 +259,25 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
 
   // FIX: hanya load log divisi produksi — yang TIDAK punya store_id (bukan log produksi toko)
   const logs = useLiveQuery(async () => {
-    const all     = await db.production_logs.orderBy('created_at').reverse().limit(200).toArray()
-    const l       = all.filter(log => !(log as any).store_id)
+    const all = await db.production_logs.orderBy('created_at').reverse().limit(200).toArray()
+    const l = all.filter(log => !(log as any).store_id)
     const recipes = await db.production_recipes.toArray()
-    const rMap    = Object.fromEntries(recipes.map(r => [r.id, r]))
-    const mats    = await db.production_log_materials.toArray()
+    const rMap = Object.fromEntries(recipes.map(r => [r.id, r]))
+    const mats = await db.production_log_materials.toArray()
     const matDefs = await db.materials.toArray()
-    const mMap    = Object.fromEntries(matDefs.map(m => [m.id, m]))
+    const mMap = Object.fromEntries(matDefs.map(m => [m.id, m]))
     return l.map(log => {
-      const logMats   = mats.filter(m => m.log_id === log.id).map(m => ({ ...m, material: mMap[m.material_id] }))
+      const logMats = mats.filter(m => m.log_id === log.id).map(m => ({ ...m, material: mMap[m.material_id] }))
       const totalCost = logMats.reduce((s, m) => s + m.qty_used * (m.material?.unit_cost || 0), 0)
-      const hpp       = log.total_yield > 0 ? totalCost / log.total_yield : 0
+      const hpp = log.total_yield > 0 ? totalCost / log.total_yield : 0
       return { ...log, recipe: rMap[log.recipe_id], materials: logMats, total_cost: totalCost, hpp_per_unit: hpp }
     })
   }, [])
 
   const todayTotal = useMemo(() => {
     if (!logs) return { count: 0, yield: 0 }
-    const today     = new Date().toISOString().slice(0, 10)
-    const todayLogs = logs.filter(l => l.created_at.slice(0,10) === today)
+    const today = new Date().toISOString().slice(0, 10)
+    const todayLogs = logs.filter(l => l.created_at.slice(0, 10) === today)
     return { count: todayLogs.length, yield: todayLogs.reduce((s, l) => s + l.total_yield, 0) }
   }, [logs])
 
@@ -297,12 +297,12 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400">Produksi Bulan Ini</p>
-          <p className="text-xl font-bold text-gray-900">{logs?.filter(l => l.created_at.slice(0,7) === new Date().toISOString().slice(0,7)).reduce((s,l) => s + l.total_yield, 0) || 0}</p>
-          <p className="text-xs text-gray-400">{logs?.filter(l => l.created_at.slice(0,7) === new Date().toISOString().slice(0,7)).length || 0} batch</p>
+          <p className="text-xl font-bold text-gray-900">{logs?.filter(l => l.created_at.slice(0, 7) === new Date().toISOString().slice(0, 7)).reduce((s, l) => s + l.total_yield, 0) || 0}</p>
+          <p className="text-xs text-gray-400">{logs?.filter(l => l.created_at.slice(0, 7) === new Date().toISOString().slice(0, 7)).length || 0} batch</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-3">
           <p className="text-xs text-gray-400">Total Semua</p>
-          <p className="text-xl font-bold text-gray-900">{logs?.reduce((s,l) => s + l.total_yield, 0) || 0}</p>
+          <p className="text-xl font-bold text-gray-900">{logs?.reduce((s, l) => s + l.total_yield, 0) || 0}</p>
           <p className="text-xs text-gray-400">{logs?.length || 0} produksi</p>
         </div>
       </div>
@@ -319,7 +319,7 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
           </div>
         )
         return grouped.map(({ key, items: grpItems }) => {
-          const today    = new Date().toISOString().slice(0,10)
+          const today = new Date().toISOString().slice(0, 10)
           const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : key === today
           return (
             <div key={key}>
@@ -336,14 +336,14 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-mono text-blue-600 mb-0.5">
-                          {(log as any).log_number || `PROD-${log.created_at.slice(0,10).replace(/-/g,'')}-${log.id.slice(-4).toUpperCase()}`}
+                          {(log as any).log_number || `PROD-${log.created_at.slice(0, 10).replace(/-/g, '')}-${log.id.slice(-4).toUpperCase()}`}
                           <CopyBtn text={log.id} />
                         </p>
                         <p className="text-sm font-medium text-gray-900">{log.recipe?.name || '—'}</p>
                         <p className="text-xs text-gray-400 mt-0.5">
-                          {new Date(log.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })}
+                          {new Date(log.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                           {', '}
-                          {new Date(log.created_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
+                          {new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })}
                           {' · '}{log.batch_count} batch
                           {log.notes && ` · ${log.notes}`}
                         </p>
@@ -392,43 +392,43 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
 function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isOwnerManager?: boolean; onClose: () => void }) {
   const allStores = useLiveQuery(() =>
     isOwnerManager ? db.stores.filter(s => s.is_active).toArray() : Promise.resolve([])
-  , [isOwnerManager])
+    , [isOwnerManager])
 
   const [inputAsStore, setInputAsStore] = useState('')
   const recipes = useLiveQuery(() => db.production_recipes.filter(r => r.is_active).toArray(), [])
 
-  const [recipeId,    setRecipeId]    = useState('')
-  const [batchCount,  setBatch]       = useState('1')
-  const [productName, setProduct]     = useState('')
+  const [recipeId, setRecipeId] = useState('')
+  const [batchCount, setBatch] = useState('1')
+  const [productName, setProduct] = useState('')
   const [actualYield, setActualYield] = useState('')
-  const [notes,       setNotes]       = useState('')
-  const [saving,      setSaving]      = useState(false)
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const selectedRecipe = recipes?.find(r => r.id === recipeId)
   const estimatedYield = selectedRecipe ? selectedRecipe.batch_yield * Number(batchCount) : 0
-  const totalYield     = actualYield && Number(actualYield) > 0 ? Number(actualYield) : estimatedYield
+  const totalYield = actualYield && Number(actualYield) > 0 ? Number(actualYield) : estimatedYield
 
   useEffect(() => {
     if (selectedRecipe) setProduct((selectedRecipe as any).product_name || selectedRecipe.name)
   }, [recipeId])
 
   async function handleSave() {
-    if (!recipeId)               return toast.error('Pilih resep')
-    if (!productName.trim())     return toast.error('Nama produk wajib diisi')
+    if (!recipeId) return toast.error('Pilih resep')
+    if (!productName.trim()) return toast.error('Nama produk wajib diisi')
     if (Number(batchCount) <= 0) return toast.error('Jumlah batch harus lebih dari 0')
     setSaving(true)
     try {
       const recipeItems = await db.production_recipe_items.where('recipe_id').equals(recipeId).toArray()
-      const matDefs     = await db.materials.toArray()
-      const mMap        = Object.fromEntries(matDefs.map(m => [m.id, m]))
-      const finalYield  = actualYield && Number(actualYield) > 0 ? Number(actualYield) : estimatedYield
-      const totalCost   = recipeItems.reduce((s, ri) => s + ri.qty_per_batch * Number(batchCount) * (mMap[ri.material_id]?.unit_cost || 0), 0)
-      const hppPerUnit  = finalYield > 0 ? totalCost / finalYield : 0
+      const matDefs = await db.materials.toArray()
+      const mMap = Object.fromEntries(matDefs.map(m => [m.id, m]))
+      const finalYield = actualYield && Number(actualYield) > 0 ? Number(actualYield) : estimatedYield
+      const totalCost = recipeItems.reduce((s, ri) => s + ri.qty_per_batch * Number(batchCount) * (mMap[ri.material_id]?.unit_cost || 0), 0)
+      const hppPerUnit = finalYield > 0 ? totalCost / finalYield : 0
 
-      const logDate   = new Date().toISOString().slice(0,10).replace(/-/g,'')
+      const logDate = new Date().toISOString().slice(0, 10).replace(/-/g, '')
       const logPrefix = `PROD-${logDate}-`
-      const existing  = await db.production_logs.filter(l => (l as any).log_number?.startsWith(logPrefix)).toArray()
-      const logNumber = `${logPrefix}${String(existing.length + 1).padStart(3,'0')}`
+      const existing = await db.production_logs.filter(l => (l as any).log_number?.startsWith(logPrefix)).toArray()
+      const logNumber = `${logPrefix}${String(existing.length + 1).padStart(3, '0')}`
 
       const logId = generateId()
       const log: any = {
@@ -466,7 +466,7 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
         fgsProductId = existingMat.id
       } else {
         // Buat material baru dengan ID yang konsisten
-        const newMatId = `mat-${generateId().slice(0,8)}`
+        const newMatId = `mat-${generateId().slice(0, 8)}`
         const newMat: any = {
           id: newMatId, name: productName.trim(), unit: selectedRecipe?.yield_unit || 'pcs',
           unit_cost: hppPerUnit, min_stock: 0, category: 'bahan_setengah_jadi',
@@ -486,7 +486,7 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
       const existing2 = await db.finished_goods_stock.filter(f =>
         f.product_name === productName.trim() || f.product_id === fgsProductId
       ).first()
-      const fgsId     = existing2?.id || generateId()
+      const fgsId = existing2?.id || generateId()
       const newFgsQty = (existing2?.qty_on_hand || 0) + finalYield
       const fgsData: any = { id: fgsId, product_id: fgsProductId, product_name: productName.trim(), qty_on_hand: newFgsQty, hpp_per_unit: hppPerUnit, last_updated: now() }
       await db.finished_goods_stock.put(fgsData)
@@ -511,7 +511,7 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
           <select className="input" value={inputAsStore} onChange={e => setInputAsStore(e.target.value)}>
             <option value="">Divisi Produksi</option>
             {allStores.filter(s => !s.id.includes('gudang')).map(s => (
-              <option key={s.id} value={s.id}>{s.name.replace(' Malang','').replace(' Bali','')}</option>
+              <option key={s.id} value={s.id}>{s.name.replace(' Malang', '').replace(' Bali', '')}</option>
             ))}
           </select>
         </div>
@@ -566,14 +566,14 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
 }
 
 function KirimForm({ userId, onClose }: { userId: string; onClose: () => void }) {
-  const stores   = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
+  const stores = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
   const partners = useLiveQuery(() => db.partners.filter(p => p.is_active).toArray(), [])
   const fgStocks = useLiveQuery(() => db.finished_goods_stock.filter(f => f.qty_on_hand > 0).toArray(), [])
 
-  const [type,   setType]   = useState<'to_store'|'to_partner'|'return_from_store'|'adjustment'>('to_store')
+  const [type, setType] = useState<'to_store' | 'to_partner' | 'return_from_store' | 'adjustment'>('to_store')
   const [destId, setDestId] = useState('')
-  const [notes,  setNotes]  = useState('')
-  const [items,  setItems]  = useState<{ product_id: string; qty: string }[]>([{ product_id: '', qty: '' }])
+  const [notes, setNotes] = useState('')
+  const [items, setItems] = useState<{ product_id: string; qty: string }[]>([{ product_id: '', qty: '' }])
   const [saving, setSaving] = useState(false)
 
   const totalQty = items.reduce((s, i) => s + Number(i.qty), 0)
@@ -605,7 +605,7 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
         await supabase.from('production_mutation_items').upsert(mi)
         if (fg) {
           const isReturn = type === 'return_from_store'
-          const newQty   = isReturn ? fg.qty_on_hand + Number(item.qty) : Math.max(0, fg.qty_on_hand - Number(item.qty))
+          const newQty = isReturn ? fg.qty_on_hand + Number(item.qty) : Math.max(0, fg.qty_on_hand - Number(item.qty))
           await db.finished_goods_stock.update(fg.id, { qty_on_hand: newQty, last_updated: now() })
           await supabase.from('finished_goods_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', fg.id)
         }
@@ -621,7 +621,7 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
       <div>
         <Label required>Tujuan</Label>
         <div className="grid grid-cols-2 gap-2">
-          {([{v:'to_store',l:'→ Toko'},{v:'to_partner',l:'→ Franchise'},{v:'return_from_store',l:'← Retur'},{v:'adjustment',l:'Koreksi'}] as const).map(t => (
+          {([{ v: 'to_store', l: '→ Toko' }, { v: 'to_partner', l: '→ Franchise' }, { v: 'return_from_store', l: '← Retur' }, { v: 'adjustment', l: 'Koreksi' }] as const).map(t => (
             <button key={t.v} onClick={() => setType(t.v)}
               className={`py-2.5 rounded-xl text-sm font-medium border transition-colors ${type === t.v ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>{t.l}</button>
           ))}
@@ -654,17 +654,17 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
               return (
                 <div key={i} className="bg-gray-50 rounded-xl p-3 space-y-2">
                   <select className="input text-sm" value={item.product_id}
-                    onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,product_id:e.target.value,qty:''} : x))}>
+                    onChange={e => setItems(p => p.map((x, idx) => idx === i ? { ...x, product_id: e.target.value, qty: '' } : x))}>
                     <option value="">Pilih produk</option>
                     {fgStocks?.map(s => <option key={s.product_id} value={s.product_id}>{s.product_name} (stok: {s.qty_on_hand})</option>)}
                   </select>
                   <input className="input text-sm" type="number" placeholder={fg ? `Qty (max ${fg.qty_on_hand})` : 'Qty'}
-                    value={item.qty} onChange={e => setItems(p => p.map((x,idx) => idx===i ? {...x,qty:e.target.value} : x))} />
-                  {items.length > 1 && <button onClick={() => setItems(p => p.filter((_,idx) => idx!==i))} className="text-xs text-red-500">Hapus</button>}
+                    value={item.qty} onChange={e => setItems(p => p.map((x, idx) => idx === i ? { ...x, qty: e.target.value } : x))} />
+                  {items.length > 1 && <button onClick={() => setItems(p => p.filter((_, idx) => idx !== i))} className="text-xs text-red-500">Hapus</button>}
                 </div>
               )
             })}
-            <button onClick={() => setItems(p => [...p, {product_id:'',qty:''}])} className="text-sm text-blue-600 font-medium">+ Tambah Produk</button>
+            <button onClick={() => setItems(p => [...p, { product_id: '', qty: '' }])} className="text-sm text-blue-600 font-medium">+ Tambah Produk</button>
           </div>
         )}
       </div>
@@ -687,14 +687,14 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
 
 // ── PRODUKSI TOKO ─────────────────────────────────────────────
 function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: string; role: string }) {
-  const isOwnerManager = ['owner','manager'].includes(role)
+  const isOwnerManager = ['owner', 'manager'].includes(role)
   const [isSyncing, setIsSyncing] = useState(false)
 
   const stores = useLiveQuery(() =>
     isOwnerManager
       ? db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray()
       : Promise.resolve([])
-  , [isOwnerManager])
+    , [isOwnerManager])
 
   const setToolbar = useContext(ToolbarCtx)
   const [activeStoreId, setActiveStoreId] = useState(storeId)
@@ -725,8 +725,8 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
         supabase.from('store_recipe_items').select('*'),
         supabase.from('production_log_materials').select('*'),
       ])
-      if (recs?.length)    await db.store_recipes.bulkPut(recs)
-      if (items?.length)   await db.store_recipe_items.bulkPut(items)
+      if (recs?.length) await db.store_recipes.bulkPut(recs)
+      if (items?.length) await db.store_recipe_items.bulkPut(items)
       if (logMats?.length) await db.production_log_materials.bulkPut(logMats)
       console.log('[ProduksiToko] sync done:', recs?.length, 'resep,', items?.length, 'items,', logMats?.length, 'log materials')
     } catch (e) {
@@ -752,13 +752,13 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
     const all = await db.production_logs
       .filter(l => (l as any).store_id === activeStoreId && l.created_at.slice(0, 10) === today)
       .reverse().sortBy('created_at')
-    const rMap    = Object.fromEntries((await db.store_recipes.toArray()).map(r => [r.id, r]))
+    const rMap = Object.fromEntries((await db.store_recipes.toArray()).map(r => [r.id, r]))
     const logMats = await db.production_log_materials.toArray()
     const matDefs = await db.materials.toArray()
-    const mMap    = Object.fromEntries(matDefs.map(m => [m.id, m]))
+    const mMap = Object.fromEntries(matDefs.map(m => [m.id, m]))
     return all.map(l => {
-      const materials  = logMats.filter(m => m.log_id === l.id).map(m => ({ ...m, material: mMap[m.material_id] }))
-      const totalCost  = materials.reduce((s, m) => s + m.qty_used * (m.material?.unit_cost || 0), 0)
+      const materials = logMats.filter(m => m.log_id === l.id).map(m => ({ ...m, material: mMap[m.material_id] }))
+      const totalCost = materials.reduce((s, m) => s + m.qty_used * (m.material?.unit_cost || 0), 0)
       const hppPerUnit = l.total_yield > 0 ? totalCost / l.total_yield : 0
       return { ...l, recipe: rMap[(l as any).recipe_id], materials, total_cost: totalCost, hpp_per_unit: hppPerUnit }
     })
@@ -772,7 +772,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
           {stores.map(s => (
             <button key={s.id} onClick={() => setActiveStoreId(s.id)}
-              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${activeStoreId===s.id?'bg-gray-900 text-white':'bg-gray-100 text-gray-600'}`}>
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${activeStoreId === s.id ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>
               {s.name}
             </button>
           ))}
@@ -816,7 +816,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Produksi Hari Ini</p>
           </div>
           {logs.map((l, idx) => (
-            <div key={l.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
+            <div key={l.id} className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
               <div className="flex items-start justify-between">
                 <div className="flex-1 min-w-0">
                   {(l as any).log_number && (
@@ -828,9 +828,9 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
                   )}
                   <p className="text-sm font-medium text-gray-900">{(l.recipe as any)?.product_name || 'Produksi'}</p>
                   <p className="text-xs text-gray-400">
-                    {new Date(l.created_at).toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' })}
+                    {new Date(l.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                     {', '}
-                    {new Date(l.created_at).toLocaleTimeString('id-ID', {hour:'2-digit',minute:'2-digit',hour12:false})}
+                    {new Date(l.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })}
                     {' · '}{l.batch_count} batch
                   </p>
                 </div>
@@ -856,6 +856,12 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
                         <div className="flex justify-between text-xs text-gray-500">
                           <span>HPP per {(l.recipe as any)?.yield_unit || 'pcs'}</span>
                           <span>{formatRupiah((l as any).hpp_per_unit)}</span>
+                          {(l.recipe as any)?.yield_unit === 'ml' && (l as any).hpp_per_unit > 0 && (
+                            <>
+                              <span className="text-gray-400">HPP per porsi (300ml)</span>
+                              <span className="text-gray-400">{formatRupiah((l as any).hpp_per_unit * 300)}</span>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>
@@ -882,26 +888,26 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
 function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
   userId: string; storeId: string; recipes: any[]; onClose: () => void
 }) {
-  const [recipeId,   setRecipeId]   = useState('')
+  const [recipeId, setRecipeId] = useState('')
   const [batchCount, setBatchCount] = useState('1')
-  const [notes,      setNotes]      = useState('')
-  const [saving,     setSaving]     = useState(false)
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const selectedRecipe = recipes.find(r => r.id === recipeId)
   const batchYield = (selectedRecipe as any)?.batch_yield || 1
-  const yieldUnit  = (selectedRecipe as any)?.yield_unit || 'pcs'
+  const yieldUnit = (selectedRecipe as any)?.yield_unit || 'pcs'
   const finalYield = Number(batchCount) * batchYield
 
   async function handleSave() {
-    if (!recipeId)               return toast.error('Pilih resep')
+    if (!recipeId) return toast.error('Pilih resep')
     if (Number(batchCount) <= 0) return toast.error('Batch harus lebih dari 0')
     setSaving(true)
     try {
-      const logId    = generateId()
-      const ds       = new Date().toISOString().slice(0,10).replace(/-/g,'')
-      const prefix   = `PTOKO-${ds}-`
+      const logId = generateId()
+      const ds = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+      const prefix = `PTOKO-${ds}-`
       const existing = await db.production_logs.filter(l => (l as any).log_number?.startsWith(prefix)).toArray()
-      const logNumber = `${prefix}${String(existing.length + 1).padStart(3,'0')}`
+      const logNumber = `${prefix}${String(existing.length + 1).padStart(3, '0')}`
 
       const logData: any = {
         id: logId, log_number: logNumber, recipe_id: recipeId,
@@ -914,18 +920,18 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
 
       const recipeItems = await db.store_recipe_items.where('recipe_id').equals(recipeId).toArray()
       for (const ri of recipeItems) {
-        const used     = ri.qty_used * Number(batchCount)
+        const used = ri.qty_used * Number(batchCount)
         const existing = await db.stock
           .filter(s => s.store_id === storeId && (s.ingredient_id === ri.material_id || (s as any).material_id === ri.material_id))
           .first()
         if (existing) {
           const newQty = Math.max(0, existing.qty_on_hand - used)
           await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
-          supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', existing.id).then(() => {})
+          supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', existing.id).then(() => { })
         }
         const lm: any = { id: generateId(), log_id: logId, material_id: ri.material_id, qty_used: used }
         await db.production_log_materials.add(lm)
-        supabase.from('production_log_materials').upsert(lm).then(() => {})
+        supabase.from('production_log_materials').upsert(lm).then(() => { })
       }
 
       const productName = (selectedRecipe as any)?.product_name || ''
@@ -938,11 +944,11 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
           const newQty = (existing?.qty_on_hand || 0) + finalYield
           if (existing) {
             await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
-            supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', existing.id).then(() => {})
+            supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', existing.id).then(() => { })
           } else {
             const newStock: any = { id: generateId(), store_id: storeId, ingredient_id: mat.id, material_id: mat.id, qty_on_hand: newQty, avg_cost: 0, last_updated: now() }
             await db.stock.add(newStock)
-            supabase.from('stock').upsert(newStock).then(() => {})
+            supabase.from('stock').upsert(newStock).then(() => { })
           }
         }
       }

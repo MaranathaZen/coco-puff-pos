@@ -191,7 +191,7 @@ export async function pullFromSupabase(storeId?: string) {
       supabase.from('warehouse_expenses').select('*').order('created_at', { ascending: false }).limit(500),
       supabase.from('purchases').select('*').order('created_at', { ascending: false }).limit(500),
       supabase.from('purchase_items').select('*'),
-      supabase.from('store_recipes').select('*').eq('store_id', sid),
+      supabase.from('store_recipes').select('*'),
       supabase.from('store_recipe_items').select('*'),
       supabase.from('production_logs').select('*').order('created_at', { ascending: false }).limit(200),
       supabase.from('production_log_materials').select('*'),

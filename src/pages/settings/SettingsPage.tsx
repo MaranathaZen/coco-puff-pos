@@ -294,7 +294,6 @@ function ProductImageRow({ product, imgUrl, isUploading, onUpload, onRemove }: {
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-gray-900 truncate">{product.name}</p>
-        <p className="text-sm font-medium text-gray-900 truncate">{product.name}</p>
       </div>
       <div className="flex items-center gap-1.5 flex-shrink-0">
         <input ref={fileRef} type="file" accept="image/*" className="hidden"

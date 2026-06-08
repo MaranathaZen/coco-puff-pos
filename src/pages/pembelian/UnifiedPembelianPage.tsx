@@ -275,46 +275,27 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   }), [filtered])
 
   // ── VOID HANDLER: PEMBELIAN ───────────────────────────────
+  // Rollback stok ditangani DB trigger (trigger_rollback_purchase_stock)
+  // Client hanya update status
   async function handleVoidPembelian(purchaseId: string) {
     try {
-      const purchase = await db.purchases.get(purchaseId)
-      if (!purchase) return
-
-      const purchStoreId = (purchase as any).store_id || ''
-      const isGudang = purchStoreId.includes('gudang') || role === 'gudang'
-      const items = await db.purchase_items.where('purchase_id').equals(purchaseId).toArray()
-
-      for (const item of items) {
-        if (isGudang) {
-          // Kurangi warehouse_stock
-          const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
-          if (ws) {
-            const newQty = Math.max(0, ws.qty_on_hand - item.qty)
-            await db.warehouse_stock.update(ws.id, { qty_on_hand: newQty, last_updated: now() })
-            await supabase.from('warehouse_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', ws.id)
-          }
-        } else {
-          // Kurangi stock toko
-          const existing = await db.stock
-            .filter(s => s.store_id === purchStoreId &&
-              (s.ingredient_id === item.material_id || (s as any).material_id === item.material_id))
-            .first()
-          if (existing) {
-            const newQty = Math.max(0, existing.qty_on_hand - item.qty)
-            await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
-            await supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', existing.id)
-          }
-        }
+      // Guard: cek sudah voided belum
+      const { data: existing } = await supabase
+        .from('purchases').select('status').eq('id', purchaseId).single()
+      if (existing?.status === 'voided') {
+        toast.error('Pembelian ini sudah dibatalkan sebelumnya')
+        setVoidTarget(null)
+        return
       }
 
-      // Set status voided
-      await db.purchases.update(purchaseId, { status: 'voided', voided_at: now() } as any)
+      // Update status — DB trigger otomatis rollback stok
       await supabase.from('purchases').update({
         status: 'voided',
         voided_at: new Date().toISOString(),
       }).eq('id', purchaseId)
+      await db.purchases.update(purchaseId, { status: 'voided', voided_at: now() } as any)
 
-      toast.success('Pembelian dibatalkan & stok dikurangi kembali')
+      toast.success('Pembelian dibatalkan')
       setVoidTarget(null)
     } catch (e) {
       console.error('[VoidPembelian]', e)

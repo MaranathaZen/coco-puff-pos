@@ -270,11 +270,20 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
   // ── VOID HANDLER ─────────────────────────────────────────
   async function handleVoidBiaya(expenseId: string) {
     try {
-      await db.warehouse_expenses.update(expenseId, { status: 'voided', voided_at: now() } as any)
+      // Guard: cek sudah voided belum
+      const { data: existing } = await supabase
+        .from('warehouse_expenses').select('status').eq('id', expenseId).single()
+      if (existing?.status === 'voided') {
+        toast.error('Biaya ini sudah dibatalkan sebelumnya')
+        setVoidTarget(null)
+        return
+      }
+
       await supabase.from('warehouse_expenses').update({
         status: 'voided',
         voided_at: new Date().toISOString(),
       }).eq('id', expenseId)
+      await db.warehouse_expenses.update(expenseId, { status: 'voided', voided_at: now() } as any)
 
       toast.success('Biaya dibatalkan')
       setVoidTarget(null)

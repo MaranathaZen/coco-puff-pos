@@ -348,87 +348,25 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
   }, [mutations, isKasir])
 
   // ── VOID HANDLER ─────────────────────────────────────────
+  // Rollback stok ditangani DB trigger (trigger_rollback_mutation_stock)
+  // Client hanya update status
   async function handleVoidMutasi(mutationId: string) {
     try {
-      const mutation = await db.warehouse_mutations.get(mutationId)
-      if (!mutation) return
-
-      const mutType      = mutation.mutation_type
-      const actingStoreId = (mutation as any).acting_store_id || ''
-      const destId        = mutation.destination_id || ''
-      const items         = await db.warehouse_mutation_items.where('mutation_id').equals(mutationId).toArray()
-
-      for (const item of items) {
-        const qty = item.qty
-
-        // ── Kembalikan stok pengirim ──────────────────────
-        if (actingStoreId.includes('gudang') || (!actingStoreId.includes('produksi') && !actingStoreId.match(/store-/))) {
-          // Pengirim = gudang → kembalikan ke warehouse_stock
-          const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
-          if (ws) {
-            const newQty = ws.qty_on_hand + qty
-            await db.warehouse_stock.update(ws.id, { qty_on_hand: newQty, last_updated: now() })
-            await supabase.from('warehouse_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', ws.id)
-          }
-        } else if (actingStoreId.includes('produksi')) {
-          // Pengirim = produksi → kembalikan ke production_stock atau finished_goods_stock
-          const fg = await db.finished_goods_stock.filter((f: any) => (f.product_id ?? f.id) === item.material_id).first()
-          if (fg) {
-            const newQty = fg.qty_on_hand + qty
-            await db.finished_goods_stock.update(fg.id, { qty_on_hand: newQty, last_updated: now() })
-            await supabase.from('finished_goods_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', fg.id)
-          } else {
-            const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
-            if (ps) {
-              const newQty = ps.qty_on_hand + qty
-              await db.production_stock.update(ps.id, { qty_on_hand: newQty, last_updated: now() })
-              await supabase.from('production_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', ps.id)
-            }
-          }
-        } else if (actingStoreId.match(/store-/)) {
-          // Pengirim = toko → kembalikan ke stock toko
-          const ss = await db.stock.filter(s =>
-            s.store_id === actingStoreId && (
-              (s as any).material_id === item.material_id || s.ingredient_id === item.material_id
-            )
-          ).first()
-          if (ss) {
-            const newQty = ss.qty_on_hand + qty
-            await db.stock.update(ss.id, { qty_on_hand: newQty, last_updated: now() })
-            await supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', ss.id)
-          }
-        }
-
-        // ── Kurangi stok penerima ─────────────────────────
-        if (mutType === 'to_production' && destId) {
-          const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
-          if (ps) {
-            const newQty = Math.max(0, ps.qty_on_hand - qty)
-            await db.production_stock.update(ps.id, { qty_on_hand: newQty, last_updated: now() })
-            await supabase.from('production_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', ps.id)
-          }
-        } else if (mutType === 'to_store' && destId) {
-          const ss = await db.stock.filter(s =>
-            s.store_id === destId && (
-              (s as any).material_id === item.material_id || s.ingredient_id === item.material_id
-            )
-          ).first()
-          if (ss) {
-            const newQty = Math.max(0, ss.qty_on_hand - qty)
-            await db.stock.update(ss.id, { qty_on_hand: newQty, last_updated: now() })
-            await supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', ss.id)
-          }
-        }
-        // to_partner, internal_use, adjustment → tidak ada rollback penerima
-        // karena stok penerima di luar sistem (franchise/pemakaian)
+      // Guard: cek sudah voided belum
+      const { data: existing } = await supabase
+        .from('warehouse_mutations').select('status').eq('id', mutationId).single()
+      if (existing?.status === 'voided') {
+        toast.error('Mutasi ini sudah dibatalkan sebelumnya')
+        setVoidTarget(null)
+        return
       }
 
-      // Set status voided
-      await db.warehouse_mutations.update(mutationId, { status: 'voided', voided_at: now() } as any)
+      // Update status — DB trigger otomatis rollback stok
       await supabase.from('warehouse_mutations').update({
         status: 'voided',
         voided_at: new Date().toISOString(),
       }).eq('id', mutationId)
+      await db.warehouse_mutations.update(mutationId, { status: 'voided', voided_at: now() } as any)
 
       toast.success('Mutasi dibatalkan & stok dikembalikan')
       setVoidTarget(null)

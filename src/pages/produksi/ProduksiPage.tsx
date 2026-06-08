@@ -1,6 +1,8 @@
 // src/pages/produksi/ProduksiPage.tsx
-// CHANGELOG v5:
+// CHANGELOG v6:
 // - FEAT: Void produksi divisi — owner/manager bisa void log, stok dikembalikan
+// - FEAT: Realtime subscription production_logs — kasir lihat perubahan otomatis tanpa refresh
+// - FIX: syncStoreRecipes pull logs hari ini dari Supabase saat mount
 // - FEAT: Void produksi toko — owner/manager bisa void log, stok toko dikembalikan
 // - UI: Row voided tampil strikethrough + badge "Dibatalkan"
 
@@ -823,20 +825,61 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
   async function syncStoreRecipes(sid: string) {
     setIsSyncing(true)
     try {
-      const [{ data: recs }, { data: items }, { data: logMats }] = await Promise.all([
+      const today = new Date().toLocaleDateString('sv-SE')
+      const [{ data: recs }, { data: items }, { data: logMats }, { data: logs }] = await Promise.all([
         supabase.from('store_recipes').select('*').eq('store_id', sid),
         supabase.from('store_recipe_items').select('*'),
         supabase.from('production_log_materials').select('*'),
+        // Pull logs hari ini dari Supabase — termasuk yang sudah di-void dari device lain
+        supabase.from('production_logs')
+          .select('*')
+          .eq('store_id', sid)
+          .gte('created_at', `${today}T00:00:00.000Z`),
       ])
       if (recs?.length) await db.store_recipes.bulkPut(recs)
       if (items?.length) await db.store_recipe_items.bulkPut(items)
       if (logMats?.length) await db.production_log_materials.bulkPut(logMats)
+      // Update Dexie dengan data terbaru dari Supabase (termasuk status voided)
+      if (logs?.length) await db.production_logs.bulkPut(logs)
     } catch (e) {
       console.warn('[ProduksiToko] sync gagal:', e)
     } finally {
       setIsSyncing(false)
     }
   }
+
+  // Realtime subscription — update Dexie otomatis saat ada perubahan production_logs
+  useEffect(() => {
+    if (!activeStoreId) return
+
+    const channel = supabase
+      .channel(`production_logs:${activeStoreId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // INSERT, UPDATE, DELETE
+          schema: 'public',
+          table: 'production_logs',
+          filter: `store_id=eq.${activeStoreId}`,
+        },
+        async (payload) => {
+          console.log('[Realtime] production_logs change:', payload.eventType)
+          if (payload.eventType === 'DELETE') {
+            await db.production_logs.delete((payload.old as any).id)
+          } else if (payload.new) {
+            // INSERT atau UPDATE (termasuk saat di-void dari device lain)
+            await db.production_logs.put(payload.new as any)
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('[Realtime] status:', status)
+      })
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [activeStoreId])
 
   useEffect(() => {
     if (!activeStoreId) return

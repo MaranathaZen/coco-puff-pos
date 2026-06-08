@@ -327,7 +327,7 @@ export async function pushToSupabase() {
               continue
             }
             // FIX v9: 409 conflict → mark done, jangan retry
-            if (error.code === '409' || error.message?.includes('409')) {
+            if (error.code === '409' || error.message?.includes('409') || error.code === '400' || String(error.message).includes('400 ')) {
               console.warn(`[SYNC] 409 conflict ${item.table_name} ${item.record_id} — mark done`)
               await db.sync_queue.update(item.id, { status: 'done', synced_at: now(), error_msg: error.message })
               continue

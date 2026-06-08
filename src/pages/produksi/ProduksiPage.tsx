@@ -96,8 +96,11 @@ function VoidConfirmModal({ logNumber, onConfirm, onClose }: {
   logNumber: string; onConfirm: () => void; onClose: () => void
 }) {
   const [loading, setLoading] = useState(false)
+  const [done, setDone] = useState(false)
   async function handleConfirm() {
+    if (loading || done) return  // guard double-click
     setLoading(true)
+    setDone(true)
     await onConfirm()
     setLoading(false)
   }
@@ -913,8 +916,28 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
   // ── VOID HANDLER: TOKO ────────────────────────────────────
   async function handleVoidToko(logId: string, logStoreId: string, recipeId: string, totalYield: number) {
     try {
+      // Guard: cek dulu di Supabase — kalau sudah voided, jangan proses lagi
+      const { data: existingLog } = await supabase
+        .from('production_logs')
+        .select('status')
+        .eq('id', logId)
+        .single()
+      if (existingLog?.status === 'voided') {
+        toast.error('Produksi ini sudah dibatalkan sebelumnya')
+        setVoidTarget(null)
+        return
+      }
       // 1. Kembalikan bahan yang dipakai (tambah kembali ke stok toko)
-      const logMats = await db.production_log_materials.where('log_id').equals(logId).toArray()
+      // FIX: query dari Supabase langsung — Dexie bisa stale (qty_used salah)
+      const { data: logMatsFromSupabase } = await supabase
+        .from('production_log_materials')
+        .select('*')
+        .eq('log_id', logId)
+      const logMats = logMatsFromSupabase?.length
+        ? logMatsFromSupabase
+        : await db.production_log_materials.where('log_id').equals(logId).toArray()
+      // Sync ke Dexie
+      if (logMatsFromSupabase?.length) await db.production_log_materials.bulkPut(logMatsFromSupabase)
       for (const lm of logMats) {
         const existing = await db.stock
           .filter(s => s.store_id === logStoreId &&

@@ -819,6 +819,34 @@ pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;wh
       {/* RIWAYAT */}
       {mainTab === 'riwayat' && (
         <div className="flex-1 overflow-auto bg-gray-50 p-4 space-y-3">
+          {isOwnerManager && transactions?.some(tx => tx.store_id !== STORE_ID && (tx as any).status === 'void_requested') && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-2">
+              <p className="text-xs font-medium text-amber-700 mb-2">⏳ Menunggu Persetujuan Void</p>
+              {transactions?.filter(tx => tx.store_id !== STORE_ID && (tx as any).status === 'void_requested').map(tx => (
+                <div key={tx.id} className="flex items-center justify-between py-1.5 border-t border-amber-100 first:border-0">
+                  <div>
+                    <p className="text-xs font-mono text-gray-800">{tx.receipt_no}</p>
+                    <p className="text-xs text-gray-500">{(tx as any).void_reason}</p>
+                  </div>
+                  <div className="flex gap-1">
+                    <button onClick={async e => {
+                      e.stopPropagation()
+                      await restoreStockFromVoid(tx.id, (tx as any).store_id || STORE_ID)
+                      await db.transactions.put({ ...tx, status: 'voided' } as any)
+                      await supabase.from('transactions').update({ status: 'voided' }).eq('id', tx.id)
+                      toast.success('Void disetujui')
+                    }} className="text-xs text-white bg-red-500 px-2 py-1 rounded-lg">✓ Setuju</button>
+                    <button onClick={async e => {
+                      e.stopPropagation()
+                      await db.transactions.put({ ...tx, status: 'completed' } as any)
+                      await supabase.from('transactions').update({ status: 'completed' }).eq('id', tx.id)
+                      toast.success('Ditolak')
+                    }} className="text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded-lg">✗ Tolak</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           <p className="text-xs text-gray-400">Transaksi hari ini</p>
           <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
             {(['semua', 'cash', 'qris', 'transfer', 'gopay', 'grab', 'shopeefood'] as const).map(pm => (

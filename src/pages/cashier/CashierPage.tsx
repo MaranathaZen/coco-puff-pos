@@ -419,8 +419,8 @@ export default function CashierPage() {
         const recipe = bomRecipes.find(r => r.product_id === txItem.product_id)
         if (!recipe) continue
         const riList = recipeItems.filter(ri => ri.recipe_id === recipe.id)
-        const _prod = await db.products.get(txItem.product_id); 
-        const _pkgQty = _prod?.pkg_qty || 1; 
+        const _prod = await db.products.get(txItem.product_id);
+        const _pkgQty = _prod?.pkg_qty || 1;
         const totalQty = (txItem.qty_eceran || 0) + (txItem.qty_dus || 0) * _pkgQty
         if (totalQty <= 0) continue
         for (const ri of riList) {
@@ -829,62 +829,64 @@ pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;wh
             ))}
           </div>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            {(payFilter === 'semua' ? transactions : transactions?.filter(tx => tx.payment_method === payFilter))?.map((tx, idx) => (
-              <div key={tx.id} className={`${idx !== 0 ? 'border-t border-gray-50' : ''} ${(tx as any).status === 'voided' ? 'opacity-50' : ''}`}>
-                <div onClick={() => setExpandedTxId(expandedTxId === String(tx.id) ? null : String(tx.id))}
-                  className="px-4 py-3 cursor-pointer active:bg-gray-50">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <p className="text-xs font-mono text-gray-900">{tx.receipt_no}</p>
-                        <button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(tx.receipt_no); toast.success('ID disalin') }}
-                          className="text-[10px] text-blue-400 px-1 py-0.5 rounded border border-blue-200">copy</button>
-                        {(tx as any).status === 'voided' && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-medium">VOID</span>}
-                        {(tx as any).status === 'void_requested' && <span className="text-xs bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded-full font-medium">⏳ Req.Void</span>}
-                        <span className={cn('text-xs px-1.5 py-0.5 rounded-full font-medium',
-                          tx.payment_method === 'cash' ? 'bg-gray-100 text-gray-700' : tx.payment_method === 'qris' ? 'bg-blue-100 text-blue-700' :
-                            tx.payment_method === 'transfer' ? 'bg-purple-100 text-purple-700' : tx.payment_method === 'gopay' ? 'bg-green-100 text-green-700' :
-                              tx.payment_method === 'grab' ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700')}>
-                          {tx.payment_method === 'cash' ? 'Tunai' : tx.payment_method === 'qris' ? 'QRIS' : tx.payment_method === 'transfer' ? 'Transfer' : tx.payment_method === 'gopay' ? 'GoPay' : tx.payment_method === 'grab' ? 'GrabPay' : 'ShopeePay'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-400 mt-0.5">{formatDate(tx.created_at)}</p>
-                      {(tx as any).online_order_no && <p className="text-xs text-gray-500 font-mono">#{(tx as any).online_order_no}</p>}
-                      {(tx as any).void_reason && <p className="text-xs text-red-400">Alasan: {(tx as any).void_reason}</p>}
-                    </div>
-                    <div className="flex items-center gap-2 ml-2">
-                      <p className={`text-sm font-semibold ${(tx as any).status === 'voided' ? 'line-through text-gray-400' : 'text-gray-900'}`}>{formatRupiah(tx.total)}</p>
-                      {canVoid && (tx as any).status === 'completed' && (
-                        <button onClick={() => { setVoidTx(tx as any); setVoidReason(''); setShowVoidModal(true) }}
-                          className="text-xs text-red-400 border border-red-200 px-2 py-0.5 rounded-lg">Void</button>
-                      )}
-                      {isOwnerManager && (tx as any).status === 'void_requested' && (
-                        <div className="flex gap-1">
-                          <button onClick={async e => {
-                            e.stopPropagation()
-                            await restoreStockFromVoid(tx.id, STORE_ID)
-                            const { items: _i1, ...upd1 } = { ...tx, status: 'voided' } as any
-                            await db.transactions.put({ ...tx, status: 'voided' } as any)
-                            await supabase.from('transactions').upsert(upd1)
-                            toast.success('Void disetujui & stok dikembalikan')
-                          }} className="text-xs text-white bg-red-500 px-2 py-0.5 rounded-lg">✓</button>
-                          <button onClick={async e => {
-                            e.stopPropagation()
-                            const { items: _i2, ...upd2 } = { ...tx, status: 'completed' } as any
-                            await db.transactions.put({ ...tx, status: 'completed' } as any)
-                            await supabase.from('transactions').upsert(upd2)
-                            toast.success('Ditolak')
-                          }} className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-lg">✗</button>
+            {(payFilter === 'semua' ? transactions : transactions?.filter(tx => tx.payment_method === payFilter))
+              ?.filter(tx => tx.store_id === STORE_ID || (tx as any).status === 'void_requested')
+              ?.map((tx, idx) => (
+                <div key={tx.id} className={`${idx !== 0 ? 'border-t border-gray-50' : ''} ${(tx as any).status === 'voided' ? 'opacity-50' : ''}`}>
+                  <div onClick={() => setExpandedTxId(expandedTxId === String(tx.id) ? null : String(tx.id))}
+                    className="px-4 py-3 cursor-pointer active:bg-gray-50">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-xs font-mono text-gray-900">{tx.receipt_no}</p>
+                          <button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(tx.receipt_no); toast.success('ID disalin') }}
+                            className="text-[10px] text-blue-400 px-1 py-0.5 rounded border border-blue-200">copy</button>
+                          {(tx as any).status === 'voided' && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-medium">VOID</span>}
+                          {(tx as any).status === 'void_requested' && <span className="text-xs bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded-full font-medium">⏳ Req.Void</span>}
+                          <span className={cn('text-xs px-1.5 py-0.5 rounded-full font-medium',
+                            tx.payment_method === 'cash' ? 'bg-gray-100 text-gray-700' : tx.payment_method === 'qris' ? 'bg-blue-100 text-blue-700' :
+                              tx.payment_method === 'transfer' ? 'bg-purple-100 text-purple-700' : tx.payment_method === 'gopay' ? 'bg-green-100 text-green-700' :
+                                tx.payment_method === 'grab' ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700')}>
+                            {tx.payment_method === 'cash' ? 'Tunai' : tx.payment_method === 'qris' ? 'QRIS' : tx.payment_method === 'transfer' ? 'Transfer' : tx.payment_method === 'gopay' ? 'GoPay' : tx.payment_method === 'grab' ? 'GrabPay' : 'ShopeePay'}
+                          </span>
                         </div>
-                      )}
+                        <p className="text-xs text-gray-400 mt-0.5">{formatDate(tx.created_at)}</p>
+                        {(tx as any).online_order_no && <p className="text-xs text-gray-500 font-mono">#{(tx as any).online_order_no}</p>}
+                        {(tx as any).void_reason && <p className="text-xs text-red-400">Alasan: {(tx as any).void_reason}</p>}
+                      </div>
+                      <div className="flex items-center gap-2 ml-2">
+                        <p className={`text-sm font-semibold ${(tx as any).status === 'voided' ? 'line-through text-gray-400' : 'text-gray-900'}`}>{formatRupiah(tx.total)}</p>
+                        {canVoid && (tx as any).status === 'completed' && (
+                          <button onClick={() => { setVoidTx(tx as any); setVoidReason(''); setShowVoidModal(true) }}
+                            className="text-xs text-red-400 border border-red-200 px-2 py-0.5 rounded-lg">Void</button>
+                        )}
+                        {isOwnerManager && (tx as any).status === 'void_requested' && (
+                          <div className="flex gap-1">
+                            <button onClick={async e => {
+                              e.stopPropagation()
+                              await restoreStockFromVoid(tx.id, (tx as any).store_id || STORE_ID)
+                              const { items: _i1, ...upd1 } = { ...tx, status: 'voided' } as any
+                              await db.transactions.put({ ...tx, status: 'voided' } as any)
+                              await supabase.from('transactions').upsert(upd1)
+                              toast.success('Void disetujui & stok dikembalikan')
+                            }} className="text-xs text-white bg-red-500 px-2 py-0.5 rounded-lg">✓</button>
+                            <button onClick={async e => {
+                              e.stopPropagation()
+                              const { items: _i2, ...upd2 } = { ...tx, status: 'completed' } as any
+                              await db.transactions.put({ ...tx, status: 'completed' } as any)
+                              await supabase.from('transactions').upsert(upd2)
+                              toast.success('Ditolak')
+                            }} className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-lg">✗</button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
+                  {expandedTxId === String(tx.id) && (
+                    <TxDetailRow txId={String(tx.id)} total={tx.total} onReprint={(txData) => { setLastTxData(txData); setShowReceipt(true) }} />
+                  )}
                 </div>
-                {expandedTxId === String(tx.id) && (
-                  <TxDetailRow txId={String(tx.id)} total={tx.total} onReprint={(txData) => { setLastTxData(txData); setShowReceipt(true) }} />
-                )}
-              </div>
-            ))}
+              ))}
             {transactions?.length === 0 && <div className="py-12 text-center text-sm text-gray-400">Belum ada transaksi hari ini</div>}
           </div>
         </div>

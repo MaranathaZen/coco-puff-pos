@@ -188,3 +188,6 @@
 [2026-06-07 14:45:00] Raw bytes (first 200): b'\x1b@\x1bC\x00\x1bN\x00======================================\n              Coco Puff               \n            Coco Puff Mog             \n======================================\nNo    :               MOG-20260607-0'
 [2026-06-07 14:45:00] Text sample: '======================================\n              Coco Puff               \n            Coco Puff '
 [2026-06-07 14:45:00] Print OK
+[2026-06-08 17:51:49] === Coco Puff Print Server v2.0 ===
+[2026-06-08 17:51:49] HTTPS mode: https://localhost:5000
+[2026-06-08 17:51:49] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost

@@ -1,11 +1,9 @@
 // src/pages/cashier/EndOfDayPage.tsx
-// CHANGELOG v5:
-// - DESKTOP: Produk Terjual + Sisa Stok side-by-side (kiri-kanan)
-// - DESKTOP: Input Manual + Penjualan Hari Ini side-by-side (kiri-kanan)
+// CHANGELOG v6:
+// - DESKTOP: layout 3 kolom (Input Manual | Penjualan | Laporan Kas) + (Void | Produk | Stok)
+// - DESKTOP: tombol Simpan & Share WhatsApp di pojok kanan atas header
 // - MOBILE: tidak ada perubahan sama sekali
 // - FIX: floating point qty stok (103.400000... → 103.4)
-// - FIX: tombol Simpan full width di desktop
-// - FIX: card Input Manual & Penjualan tidak stretch paksa
 
 import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -499,9 +497,24 @@ export default function EndOfDayPage() {
             {new Date().toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}
           </p>
         </div>
-        <button onClick={syncData} disabled={syncing} className="p-2 text-gray-400">
-          <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Desktop: tombol aksi di header */}
+          {saved && (
+            <button onClick={() => shareWhatsApp(savedReport || existingReport)}
+              className="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-green-600 text-white text-sm font-medium">
+              <Share2 size={14} /> Share WhatsApp
+            </button>
+          )}
+          {!saved && !existingReport && (
+            <button onClick={handleSave} disabled={saving}
+              className="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+              {saving ? 'Menyimpan...' : 'Simpan Close Order'}
+            </button>
+          )}
+          <button onClick={syncData} disabled={syncing} className="p-2 text-gray-400">
+            <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto">
@@ -533,8 +546,9 @@ export default function EndOfDayPage() {
 
         {/* ── DESKTOP LAYOUT (md+) ── */}
         <div className="hidden md:block p-6">
-          <div className="max-w-6xl mx-auto space-y-4">
+          <div className="max-w-7xl mx-auto space-y-3">
 
+            {/* Banner sudah disimpan */}
             {existingReport && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-2">
                 <Lock size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
@@ -549,28 +563,22 @@ export default function EndOfDayPage() {
               </div>
             )}
 
-            {/* Row 1: Input Manual | Penjualan Hari Ini */}
-            <div className="grid grid-cols-2 gap-4 items-start">
+            {/* Row 1: Input Manual | Penjualan Hari Ini | Laporan Kas — 3 kolom */}
+            <div className="grid grid-cols-3 gap-3 items-start">
               {sectionInputManual}
               {sectionPenjualan}
+              {sectionLaporanKas}
             </div>
 
-            {/* Row 2: Void (full width, hanya kalau ada) */}
-            {sectionVoid}
+            {/* Row 2: Void | Produk Terjual | Sisa Stok — 3 kolom */}
+            <div className="grid grid-cols-3 gap-3 items-start">
+              {sectionVoid ?? <div />}
+              {sectionProdukTerjual ?? <div />}
+              {sectionSisaStok ?? <div />}
+            </div>
 
-            {/* Row 3: Laporan Kas (full width) */}
-            {sectionLaporanKas}
-
-            {/* Row 4: Produk Terjual | Sisa Stok */}
-            {(sectionProdukTerjual || sectionSisaStok) && (
-              <div className="grid grid-cols-2 gap-4 items-start">
-                {sectionProdukTerjual ?? <div />}
-                {sectionSisaStok ?? <div />}
-              </div>
-            )}
-
-            {/* Actions */}
-            <div>{sectionActions}</div>
+            {/* Actions — hanya mobile, desktop sudah di header */}
+            <div className="md:hidden">{sectionActions}</div>
             <div className="h-4" />
           </div>
         </div>

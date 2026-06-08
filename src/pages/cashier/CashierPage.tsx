@@ -419,7 +419,9 @@ export default function CashierPage() {
         const recipe = bomRecipes.find(r => r.product_id === txItem.product_id)
         if (!recipe) continue
         const riList = recipeItems.filter(ri => ri.recipe_id === recipe.id)
-        const totalQty = (txItem.qty_eceran || 0) + (txItem.qty_dus || 0)
+        const _prod = await db.products.get(txItem.product_id); const _pkgQty = _prod?.pkg_qty || 1; const _prod = await db.products.get(txItem.product_id)
+        const _pkgQty = _prod?.pkg_qty || 1
+        const totalQty = (txItem.qty_eceran || 0) + (txItem.qty_dus || 0) * _pkgQty * _pkgQty
         if (totalQty <= 0) continue
         for (const ri of riList) {
           const qty = ri.qty_used * totalQty
@@ -469,7 +471,7 @@ export default function CashierPage() {
         const recipe = bomRecipes.find(r => r.product_id === txItem.product_id)
         if (!recipe) continue
         const riList = recipeItems.filter(ri => ri.recipe_id === recipe.id)
-        const totalQty = (txItem.qty_eceran || 0) + (txItem.qty_dus || 0)
+        const _prod = await db.products.get(txItem.product_id); const _pkgQty = _prod?.pkg_qty || 1; const totalQty = (txItem.qty_eceran || 0) + (txItem.qty_dus || 0) * _pkgQty
         if (totalQty <= 0) continue
         for (const ri of riList) {
           const qty = ri.qty_used * totalQty

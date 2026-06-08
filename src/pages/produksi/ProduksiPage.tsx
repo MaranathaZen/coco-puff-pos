@@ -939,14 +939,18 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
       // Sync ke Dexie
       if (logMatsFromSupabase?.length) await db.production_log_materials.bulkPut(logMatsFromSupabase)
       for (const lm of logMats) {
-        const existing = await db.stock
-          .filter(s => s.store_id === logStoreId &&
-            (s.ingredient_id === lm.material_id || (s as any).material_id === lm.material_id))
-          .first()
-        if (existing) {
-          const newQty = existing.qty_on_hand + lm.qty_used
-          await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
-          supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', existing.id).then(() => { })
+        // FIX: baca qty terkini dari Supabase langsung — Dexie bisa tidak akurat
+        // karena Realtime subscription update Dexie secara async
+        const { data: stockRow } = await supabase
+          .from('stock')
+          .select('id, qty_on_hand')
+          .eq('store_id', logStoreId)
+          .or(`ingredient_id.eq.${lm.material_id},material_id.eq.${lm.material_id}`)
+          .single()
+        if (stockRow) {
+          const newQty = stockRow.qty_on_hand + lm.qty_used
+          await supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', stockRow.id)
+          await db.stock.update(stockRow.id, { qty_on_hand: newQty, last_updated: now() })
         }
       }
 

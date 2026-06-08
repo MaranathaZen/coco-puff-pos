@@ -1,9 +1,8 @@
 // src/pages/mutasi/UnifiedMutasiPage.tsx
-// CHANGELOG v7:
-// - FIX: auto-sync saat mount (data tampil tanpa klik refresh)
-// - FIX: 409 conflict stock upsert — pakai upsert dengan onConflict
-// - FIX: produksi lihat mutasi yang diterima (destination_id === storeId)
-// - FIX: owner/manager default ke gudang saat buka form mutasi
+// CHANGELOG v8:
+// - FEAT: Void mutasi — owner/manager bisa void, stok dikembalikan sesuai tipe mutasi
+// - UI: Row voided tampil strikethrough + badge "Dibatalkan"
+// - Total nilai mutasi exclude voided
 
 import { useState, useMemo, useEffect, useContext, createContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -76,12 +75,51 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   )
 }
 
+// ── VOID CONFIRM MODAL ────────────────────────────────────────
+function VoidConfirmModal({ mutNumber, typeLabel, onConfirm, onClose }: {
+  mutNumber: string; typeLabel: string; onConfirm: () => Promise<void>; onClose: () => void
+}) {
+  const [loading, setLoading] = useState(false)
+  async function handleConfirm() {
+    setLoading(true)
+    await onConfirm()
+    setLoading(false)
+  }
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+      <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl p-5 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+            <span className="text-red-600 text-lg">⚠</span>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900">Batalkan Mutasi?</p>
+            <p className="text-xs text-gray-500 mt-0.5">{mutNumber}</p>
+            <p className="text-xs text-gray-700 mt-0.5 font-medium">{typeLabel}</p>
+          </div>
+        </div>
+        <p className="text-xs text-gray-600 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+          Stok pengirim akan dikembalikan dan stok penerima akan dikurangi kembali. Aksi ini tidak bisa diurungkan.
+        </p>
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">
+            Batal
+          </button>
+          <button onClick={handleConfirm} disabled={loading}
+            className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium disabled:opacity-50">
+            {loading ? 'Memproses...' : 'Ya, Batalkan'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function UnifiedMutasiPage() {
   const { user } = useAuthStore()
   const [toolbarActions, setToolbarActions] = useState<React.ReactNode>(null)
   const [syncing, setSyncing] = useState(false)
 
-  // FIX: auto-sync saat mount — tanpa toast
   useEffect(() => {
     async function mountSync() {
       setSyncing(true)
@@ -175,6 +213,7 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
     const today = new Date().toLocaleDateString('sv-SE')
     return { [today]: true }
   })
+  const [voidTarget, setVoidTarget] = useState<{ id: string; mutNumber: string; typeLabel: string } | null>(null)
 
   const isOwnerManager = ['owner','manager'].includes(role)
   const isKasir = role === 'kasir'
@@ -243,6 +282,7 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
   const filtered = useMemo(() => {
     if (!mutations) return []
     let list = mutations
+    // Exclude voided dari list utama filter
     if (filterType !== 'semua') list = list.filter(m => m.mutation_type === filterType)
     if (isOwnerManager && filterStore && filterStore !== 'semua') {
       list = list.filter(m =>
@@ -267,7 +307,8 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
   const { totalNilaiMutasi, totalCountCard } = useMemo(() => {
     const now2 = new Date()
     const todayStr = now2.toLocaleDateString('sv-SE')
-    const baseList = mutations || []
+    // Exclude voided dari total
+    const baseList = (mutations || []).filter(m => (m as any).status !== 'voided')
     if (isKasir) {
       const todayMuts = baseList.filter(m => new Date(m.created_at).toLocaleDateString('sv-SE') === todayStr)
       return {
@@ -286,19 +327,123 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
     }
   }, [mutations, isKasir])
 
+  // ── VOID HANDLER ─────────────────────────────────────────
+  async function handleVoidMutasi(mutationId: string) {
+    try {
+      const mutation = await db.warehouse_mutations.get(mutationId)
+      if (!mutation) return
+
+      const mutType      = mutation.mutation_type
+      const actingStoreId = (mutation as any).acting_store_id || ''
+      const destId        = mutation.destination_id || ''
+      const items         = await db.warehouse_mutation_items.where('mutation_id').equals(mutationId).toArray()
+
+      for (const item of items) {
+        const qty = item.qty
+
+        // ── Kembalikan stok pengirim ──────────────────────
+        if (actingStoreId.includes('gudang') || (!actingStoreId.includes('produksi') && !actingStoreId.match(/store-/))) {
+          // Pengirim = gudang → kembalikan ke warehouse_stock
+          const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
+          if (ws) {
+            const newQty = ws.qty_on_hand + qty
+            await db.warehouse_stock.update(ws.id, { qty_on_hand: newQty, last_updated: now() })
+            await supabase.from('warehouse_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', ws.id)
+          }
+        } else if (actingStoreId.includes('produksi')) {
+          // Pengirim = produksi → kembalikan ke production_stock atau finished_goods_stock
+          const fg = await db.finished_goods_stock.filter((f: any) => (f.product_id ?? f.id) === item.material_id).first()
+          if (fg) {
+            const newQty = fg.qty_on_hand + qty
+            await db.finished_goods_stock.update(fg.id, { qty_on_hand: newQty, last_updated: now() })
+            await supabase.from('finished_goods_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', fg.id)
+          } else {
+            const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
+            if (ps) {
+              const newQty = ps.qty_on_hand + qty
+              await db.production_stock.update(ps.id, { qty_on_hand: newQty, last_updated: now() })
+              await supabase.from('production_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', ps.id)
+            }
+          }
+        } else if (actingStoreId.match(/store-/)) {
+          // Pengirim = toko → kembalikan ke stock toko
+          const ss = await db.stock.filter(s =>
+            s.store_id === actingStoreId && (
+              (s as any).material_id === item.material_id || s.ingredient_id === item.material_id
+            )
+          ).first()
+          if (ss) {
+            const newQty = ss.qty_on_hand + qty
+            await db.stock.update(ss.id, { qty_on_hand: newQty, last_updated: now() })
+            await supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', ss.id)
+          }
+        }
+
+        // ── Kurangi stok penerima ─────────────────────────
+        if (mutType === 'to_production' && destId) {
+          const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
+          if (ps) {
+            const newQty = Math.max(0, ps.qty_on_hand - qty)
+            await db.production_stock.update(ps.id, { qty_on_hand: newQty, last_updated: now() })
+            await supabase.from('production_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', ps.id)
+          }
+        } else if (mutType === 'to_store' && destId) {
+          const ss = await db.stock.filter(s =>
+            s.store_id === destId && (
+              (s as any).material_id === item.material_id || s.ingredient_id === item.material_id
+            )
+          ).first()
+          if (ss) {
+            const newQty = Math.max(0, ss.qty_on_hand - qty)
+            await db.stock.update(ss.id, { qty_on_hand: newQty, last_updated: now() })
+            await supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', ss.id)
+          }
+        }
+        // to_partner, internal_use, adjustment → tidak ada rollback penerima
+        // karena stok penerima di luar sistem (franchise/pemakaian)
+      }
+
+      // Set status voided
+      await db.warehouse_mutations.update(mutationId, { status: 'voided', voided_at: now() } as any)
+      await supabase.from('warehouse_mutations').update({
+        status: 'voided',
+        voided_at: new Date().toISOString(),
+      }).eq('id', mutationId)
+
+      toast.success('Mutasi dibatalkan & stok dikembalikan')
+      setVoidTarget(null)
+    } catch (e) {
+      console.error('[VoidMutasi]', e)
+      toast.error('Gagal membatalkan mutasi')
+    }
+  }
+
   function MutasiItem({ m, idx }: { m: any; idx: number }) {
+    const isVoided   = (m as any).status === 'voided'
     const tc         = TYPE_CONFIG[m.mutation_type] || { label: m.mutation_type, color: 'text-gray-600 bg-gray-100' }
     const totalNilai = m.items.reduce((s: number, i: any) => s + i.qty * i.unit_cost, 0)
     const mutNo      = (m as any).mutation_number
     const pengirim   = storeMap[(m as any).acting_store_id || ''] || (m as any).acting_store_id || ''
     const penerima   = m.destination_name || storeMap[m.destination_id || ''] || TYPE_CONFIG[m.mutation_type]?.label || ''
     return (
-      <div className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
+      <div className={`px-4 py-3 ${idx !== 0 ? 'border-t border-gray-50' : ''} ${isVoided ? 'opacity-50 bg-gray-50' : ''}`}>
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
-            {mutNo && <p className="text-xs font-mono text-blue-600 mb-0.5">{mutNo}<CopyBtn text={mutNo} /></p>}
+            <div className="flex items-center gap-2 mb-0.5">
+              {mutNo && (
+                <p className={`text-xs font-mono text-blue-600 ${isVoided ? 'line-through' : ''}`}>
+                  {mutNo}
+                  {!isVoided && <CopyBtn text={mutNo} />}
+                </p>
+              )}
+              {isVoided && (
+                <span className="text-[10px] font-medium text-red-500 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded-full">
+                  Dibatalkan
+                </span>
+              )}
+            </div>
             {(pengirim || penerima) && (
-              <div className="flex items-center gap-1 text-xs mb-0.5">
+              <div className={`flex items-center gap-1 text-xs mb-0.5 ${isVoided ? 'line-through' : ''}`}>
                 <span className="font-medium text-gray-700">{pengirim || '—'}</span>
                 <span className="text-gray-400">→</span>
                 <span className="font-medium text-gray-700">{penerima || '—'}</span>
@@ -313,9 +458,26 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
             </p>
             {(m as any).notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {(m as any).notes}</p>}
           </div>
-          {totalNilai > 0 && <p className="text-sm font-semibold text-gray-900 flex-shrink-0 ml-3">{formatRupiah(totalNilai)}</p>}
+          <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+            {totalNilai > 0 && (
+              <p className={`text-sm font-semibold text-gray-900 ${isVoided ? 'line-through' : ''}`}>
+                {formatRupiah(totalNilai)}
+              </p>
+            )}
+            {isOwnerManager && !isVoided && (
+              <button
+                onClick={() => setVoidTarget({
+                  id: m.id,
+                  mutNumber: mutNo || m.id,
+                  typeLabel: `${pengirim || '—'} → ${penerima || tc.label}`,
+                })}
+                className="text-[10px] font-medium text-red-400 border border-red-200 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors">
+                Void
+              </button>
+            )}
+          </div>
         </div>
-        {m.items.length > 0 && (
+        {!isVoided && m.items.length > 0 && (
           <div className="mt-2 space-y-0.5 border-t border-gray-50 pt-1.5">
             {m.items.map((i: any) => {
               const mat      = i.material as any
@@ -334,6 +496,8 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
       </div>
     )
   }
+
+  const isOwnerManager = ['owner','manager'].includes(role)
 
   return (
     <div className="p-4 space-y-3">
@@ -387,7 +551,8 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
       ) : (
         <>
           {grouped.map(({ key, items: grpItems }) => {
-            const total    = grpItems.reduce((s, m) => s + m.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0)
+            // Exclude voided dari total per grup
+            const total    = grpItems.filter(m => (m as any).status !== 'voided').reduce((s, m) => s + m.items.reduce((ss, i) => ss + i.qty * i.unit_cost, 0), 0)
             const today    = new Date().toLocaleDateString('sv-SE')
             const isFirst  = grouped[0]?.key === key
             const expanded = expandedGroups[key] !== undefined ? expandedGroups[key] : (key === today || isFirst)
@@ -419,6 +584,15 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
       )}
 
       {showForm && <MutasiForm userId={userId} role={role} storeId={storeId} onClose={() => setShowForm(false)} />}
+
+      {voidTarget && (
+        <VoidConfirmModal
+          mutNumber={voidTarget.mutNumber}
+          typeLabel={voidTarget.typeLabel}
+          onConfirm={() => handleVoidMutasi(voidTarget.id)}
+          onClose={() => setVoidTarget(null)}
+        />
+      )}
     </div>
   )
 }
@@ -654,7 +828,6 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           const newAvg   = newQty > 0 ? (prevQty * prevCost + inQty * snapshotCost) / newQty : snapshotCost
           if (existingStock) {
             await db.stock.update(existingStock.id, { qty_on_hand: newQty, avg_cost: newAvg, last_updated: now() } as any)
-            // FIX: pakai update (bukan upsert) karena row sudah ada — hindari 409
             await supabase.from('stock').update({ qty_on_hand: newQty, avg_cost: newAvg, last_updated: now() }).eq('id', existingStock.id)
           } else {
             const newStock: any = {
@@ -663,7 +836,6 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
               qty_on_hand: inQty, avg_cost: newAvg, last_updated: now(),
             }
             await db.stock.add(newStock)
-            // FIX: pakai upsert dengan onConflict untuk row baru
             await supabase.from('stock').upsert(newStock, { onConflict: 'id' })
           }
         }

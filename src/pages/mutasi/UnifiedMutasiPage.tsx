@@ -517,7 +517,6 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
     )
   }
 
-  const isOwnerManager = ['owner','manager'].includes(role)
 
   return (
     <div className="p-4 space-y-3">

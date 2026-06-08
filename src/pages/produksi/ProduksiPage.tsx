@@ -327,47 +327,28 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
   }, [logs, search])
 
   // ── VOID HANDLER: DIVISI ──────────────────────────────────
+  // Rollback stok ditangani oleh DB trigger (trigger_rollback_production_stock)
+  // Client hanya update status
   async function handleVoidDivisi(logId: string) {
     try {
-      const log = await db.production_logs.get(logId)
-      if (!log) return
-
-      // 1. Kembalikan bahan ke production_stock
-      const logMats = await db.production_log_materials.where('log_id').equals(logId).toArray()
-      for (const lm of logMats) {
-        const ps = await db.production_stock.where('material_id').equals(lm.material_id).first()
-        if (ps) {
-          const newQty = ps.qty_on_hand + lm.qty_used
-          await db.production_stock.update(ps.id, { qty_on_hand: newQty, last_updated: now() })
-          await supabase.from('production_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', ps.id)
-        }
+      // Guard: cek sudah voided belum
+      const { data: existingLog } = await supabase
+        .from('production_logs')
+        .select('status')
+        .eq('id', logId)
+        .single()
+      if (existingLog?.status === 'voided') {
+        toast.error('Produksi ini sudah dibatalkan sebelumnya')
+        setVoidTarget(null)
+        return
       }
 
-      // 2. Kurangi finished_goods_stock
-      const recipeDef = await db.production_recipes.get(log.recipe_id)
-      const productName = (recipeDef as any)?.product_name || recipeDef?.name || ''
-      if (productName) {
-        const mat = await db.materials.filter(m => m.name.toLowerCase() === productName.toLowerCase()).first()
-        if (mat) {
-          const fgs = await db.finished_goods_stock.filter(f => f.product_id === mat.id || f.product_name === productName).first()
-          if (fgs) {
-            const newQty = Math.max(0, fgs.qty_on_hand - log.total_yield)
-            await db.finished_goods_stock.update(fgs.id, { qty_on_hand: newQty, last_updated: now() })
-            await supabase.from('finished_goods_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', fgs.id)
-          }
-        }
-      }
-
-      // 3. Set status voided di production_logs
-      await db.production_logs.update(logId, {
-        status: 'voided',
-        voided_at: now(),
-        voided_by: (await db.production_logs.get(logId) as any)?.created_by,
-      } as any)
+      // Update status voided — DB trigger otomatis rollback stok
       await supabase.from('production_logs').update({
         status: 'voided',
         voided_at: new Date().toISOString(),
       }).eq('id', logId)
+      await db.production_logs.update(logId, { status: 'voided', voided_at: now() } as any)
 
       toast.success('Produksi dibatalkan & stok dikembalikan')
       setVoidTarget(null)
@@ -914,8 +895,9 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
   const totalHariIni = logs?.filter(l => (l as any).status !== 'voided').reduce((s, l) => s + l.total_yield, 0) || 0
 
   // ── VOID HANDLER: TOKO ────────────────────────────────────
+  // Rollback stok ditangani oleh DB trigger (trigger_rollback_production_stock)
+  // Client hanya update status — tidak ada logic stok di sini
   async function handleVoidToko(logId: string, logStoreId: string, recipeId: string, totalYield: number) {
-    console.log('[VOID TOKO] START', logId, new Date().toISOString())
     try {
       // Guard: cek dulu di Supabase — kalau sudah voided, jangan proses lagi
       const { data: existingLog } = await supabase
@@ -928,57 +910,13 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
         setVoidTarget(null)
         return
       }
-      // 1. Kembalikan bahan yang dipakai (tambah kembali ke stok toko)
-      // FIX: query dari Supabase langsung — Dexie bisa stale (qty_used salah)
-      const { data: logMatsFromSupabase } = await supabase
-        .from('production_log_materials')
-        .select('*')
-        .eq('log_id', logId)
-      const logMats = logMatsFromSupabase?.length
-        ? logMatsFromSupabase
-        : await db.production_log_materials.where('log_id').equals(logId).toArray()
-      // Sync ke Dexie
-      if (logMatsFromSupabase?.length) await db.production_log_materials.bulkPut(logMatsFromSupabase)
-      for (const lm of logMats) {
-        // FIX: baca qty terkini dari Supabase langsung — Dexie bisa tidak akurat
-        // karena Realtime subscription update Dexie secara async
-        const { data: stockRow } = await supabase
-          .from('stock')
-          .select('id, qty_on_hand')
-          .eq('store_id', logStoreId)
-          .or(`ingredient_id.eq.${lm.material_id},material_id.eq.${lm.material_id}`)
-          .single()
-        if (stockRow) {
-          const newQty = stockRow.qty_on_hand + lm.qty_used
-          await supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', stockRow.id)
-          await db.stock.update(stockRow.id, { qty_on_hand: newQty, last_updated: now() })
-        }
-      }
 
-      // 2. Kurangi stok produk hasil produksi (teh, fla, dll)
-      const recipe = await db.store_recipes.get(recipeId)
-      const productName = (recipe as any)?.product_name || ''
-      if (productName) {
-        const mat = await db.materials.filter(m => m.name.toLowerCase() === productName.toLowerCase()).first()
-        if (mat) {
-          const existing = await db.stock
-            .filter(s => s.store_id === logStoreId &&
-              (s.ingredient_id === mat.id || (s as any).material_id === mat.id))
-            .first()
-          if (existing) {
-            const newQty = Math.max(0, existing.qty_on_hand - totalYield)
-            await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
-            supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', existing.id).then(() => { })
-          }
-        }
-      }
-
-      // 3. Set status voided
-      await db.production_logs.update(logId, { status: 'voided', voided_at: now() } as any)
+      // Update status voided — DB trigger otomatis rollback stok
       await supabase.from('production_logs').update({
         status: 'voided',
         voided_at: new Date().toISOString(),
       }).eq('id', logId)
+      await db.production_logs.update(logId, { status: 'voided', voided_at: now() } as any)
 
       toast.success('Produksi dibatalkan & stok dikembalikan')
       setVoidTarget(null)

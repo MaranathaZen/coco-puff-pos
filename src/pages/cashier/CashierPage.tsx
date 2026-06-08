@@ -858,7 +858,7 @@ pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;wh
           </div>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             {(payFilter === 'semua' ? transactions : transactions?.filter(tx => tx.payment_method === payFilter))
-              ?.filter(tx => tx.store_id === STORE_ID || (tx as any).status === 'void_requested')
+              ?.filter(tx => tx.store_id === STORE_ID || ((tx as any).status === 'void_requested' && tx.store_id === STORE_ID))
               ?.map((tx, idx) => (
                 <div key={tx.id} className={`${idx !== 0 ? 'border-t border-gray-50' : ''} ${(tx as any).status === 'voided' ? 'opacity-50' : ''}`}>
                   <div onClick={() => setExpandedTxId(expandedTxId === String(tx.id) ? null : String(tx.id))}

@@ -1,13 +1,14 @@
 // src/components/layout/Layout.tsx
 // CHANGELOG v3:
-// - FIX: warning saat logout kalau shift masih open atau ada pending sync
-// - FIX: warning saat logout kalau ada transaksi belum sync
+// - Logo & nama app di sidebar dinamis dari app_settings
+// - Favicon browser diupdate saat login
 
 import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useAuthStore } from '@/store/auth'
 import { db } from '@/lib/db'
+import { useAppSettings, applyFavicon } from '@/hooks/useAppSettings'
 import {
   LogOut, Wifi, WifiOff,
   ShoppingCart, FlaskConical,
@@ -95,13 +96,18 @@ const DEFAULT_MENUS: Record<string, { path: string; label: string }[]> = {
 const MAX_NAV = 4
 
 export default function Layout() {
-  const { user, logout, activeShift } = useAuthStore()
+  const { user, logout } = useAuthStore()
   const navigate   = useNavigate()
   const location   = useLocation()
-  const [showMore,        setShowMore]        = useState(false)
-  const [isOnline,        setIsOnline]        = useState(navigator.onLine)
-  const [showLogoutModal, setShowLogoutModal] = useState(false)
-  const [pendingCount,    setPendingCount]    = useState(0)
+  const [showMore, setShowMore] = useState(false)
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
+  const { settings } = useAppSettings()
+
+  // Apply favicon & title saat settings berubah
+  useEffect(() => {
+    if (settings.app_icon_url) applyFavicon(settings.app_icon_url)
+    if (settings.app_name) document.title = settings.app_name
+  }, [settings])
 
   useEffect(() => {
     const up = () => setIsOnline(true)
@@ -110,26 +116,6 @@ export default function Layout() {
     window.addEventListener('offline', dn)
     return () => { window.removeEventListener('online', up); window.removeEventListener('offline', dn) }
   }, [])
-
-  // FIX: cek pending sync sebelum logout
-  async function checkAndLogout() {
-    try {
-      const count = await db.sync_queue.where('status').anyOf(['pending','failed']).count()
-      setPendingCount(count)
-      const shiftOpen = activeShift?.status === 'open'
-      if (count > 0 || shiftOpen) {
-        setShowLogoutModal(true)
-        return
-      }
-    } catch {}
-    doLogout()
-  }
-
-  function doLogout() {
-    setShowLogoutModal(false)
-    logout()
-    navigate('/login')
-  }
 
   const dbMenus = useLiveQuery(async () => {
     if (!user?.role) return []
@@ -151,6 +137,12 @@ export default function Layout() {
   const moreMenus    = allMenus.slice(MAX_NAV)
   const isMoreActive = moreMenus.some(m => location.pathname.startsWith(m.menu_path))
 
+  function handleLogout() {
+    if (!confirm('Yakin ingin keluar?')) return
+    logout()
+    navigate('/login')
+  }
+
   function NavItem({ menu_path, menu_label, onClick }: { menu_path: string; menu_label: string; onClick?: () => void }) {
     const Icon     = ICON_MAP[menu_path] || Package
     const isActive = location.pathname === menu_path || location.pathname.startsWith(menu_path + '/')
@@ -171,11 +163,20 @@ export default function Layout() {
       <aside className="hidden md:flex flex-col w-56 bg-white border-r border-gray-100 flex-shrink-0">
         <div className="px-4 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-xs font-bold">CP</span>
-            </div>
+            {/* Logo dinamis */}
+            {settings.app_logo_url ? (
+              <img
+                src={settings.app_logo_url}
+                alt={settings.app_name}
+                className="w-8 h-8 rounded-lg object-cover flex-shrink-0"
+              />
+            ) : (
+              <div className="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center flex-shrink-0">
+                <span className="text-white text-xs font-bold">CP</span>
+              </div>
+            )}
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-gray-900 truncate">Coco Puff POS</p>
+              <p className="text-sm font-semibold text-gray-900 truncate">{settings.app_name}</p>
               <p className="text-xs text-gray-400 capitalize truncate">{user?.name}</p>
             </div>
           </div>
@@ -191,7 +192,7 @@ export default function Layout() {
               ? <><Wifi size={14} className="text-green-500" /><span className="text-xs text-green-600">Online</span></>
               : <><WifiOff size={14} className="text-amber-500" /><span className="text-xs text-amber-600">Offline</span></>}
           </div>
-          <button onClick={checkAndLogout}
+          <button onClick={handleLogout}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-red-500 hover:bg-red-50 transition-colors">
             <LogOut size={18} /><span>Keluar</span>
           </button>
@@ -262,55 +263,10 @@ export default function Layout() {
                 })}
               </div>
             )}
-            <button onClick={() => { setShowMore(false); checkAndLogout() }}
+            <button onClick={handleLogout}
               className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-gray-200 text-sm font-medium text-red-500 active:bg-red-50">
               <LogOut size={16} />Keluar
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── MODAL KONFIRMASI LOGOUT ── */}
-      {showLogoutModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-xl">
-            <div className="text-center">
-              <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <span className="text-2xl">⚠️</span>
-              </div>
-              <h3 className="font-semibold text-gray-900 text-lg">Yakin ingin keluar?</h3>
-            </div>
-
-            {/* Warning shift masih open */}
-            {activeShift?.status === 'open' && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-                <p className="text-sm font-medium text-amber-800">🕐 Shift masih terbuka</p>
-                <p className="text-xs text-amber-600 mt-0.5">
-                  Lakukan Close Order terlebih dahulu sebelum keluar agar laporan harian tercatat.
-                </p>
-              </div>
-            )}
-
-            {/* Warning pending sync */}
-            {pendingCount > 0 && (
-              <div className="bg-orange-50 border border-orange-200 rounded-xl p-3">
-                <p className="text-sm font-medium text-orange-800">📤 {pendingCount} transaksi belum tersync</p>
-                <p className="text-xs text-orange-600 mt-0.5">
-                  Data transaksi belum terkirim ke server. Tunggu hingga tersync atau pastikan internet aktif.
-                </p>
-              </div>
-            )}
-
-            <div className="flex gap-3">
-              <button onClick={() => setShowLogoutModal(false)}
-                className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">
-                Batal
-              </button>
-              <button onClick={doLogout}
-                className="flex-1 py-3 rounded-xl bg-red-600 text-white text-sm font-medium">
-                Tetap Keluar
-              </button>
-            </div>
           </div>
         </div>
       )}

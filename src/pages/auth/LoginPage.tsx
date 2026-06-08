@@ -1,25 +1,31 @@
 // src/pages/auth/LoginPage.tsx
-// CHANGELOG:
-// - Setelah login berhasil: sync master data (stores, users) dengan replace strategy
-//   Ini memastikan toko duplikat/lama hilang dari IndexedDB
+// CHANGELOG v2:
+// - Logo & nama app dinamis dari app_settings
+// - Favicon browser diupdate otomatis dari icon_url
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
-import { db } from '@/lib/db'
-import { supabase } from '@/lib/supabase'
 import { syncMasterData } from '@/lib/sync-helpers'
+import { useAppSettings, applyFavicon } from '@/hooks/useAppSettings'
 import toast from 'react-hot-toast'
 
 export default function LoginPage() {
   const navigate  = useNavigate()
   const { login } = useAuthStore()
+  const { settings } = useAppSettings()
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState('')
   const [showPass, setShowPass] = useState(false)
+
+  // Apply favicon & title dari settings
+  useEffect(() => {
+    if (settings.app_icon_url) applyFavicon(settings.app_icon_url)
+    if (settings.app_name) document.title = settings.app_name
+  }, [settings])
 
   async function handleLogin() {
     if (!username.trim()) return setError('Username wajib diisi')
@@ -29,13 +35,8 @@ export default function LoginPage() {
     setError('')
 
     try {
-      // ── Sync master data dengan REPLACE strategy ──────────
-      // Ini hapus toko/user lama dari IndexedDB sebelum login
-      try {
-        await syncMasterData()
-      } catch { /* offline — lanjut dengan data lokal */ }
+      try { await syncMasterData() } catch { /* offline */ }
 
-      // ── Login ─────────────────────────────────────────────
       const loggedInUser = await login(username.trim().toLowerCase(), password)
 
       if (!loggedInUser) {
@@ -55,7 +56,6 @@ export default function LoginPage() {
       }
 
       navigate(redirectMap[loggedInUser.role] ?? '/kasir', { replace: true })
-
     } catch (e) {
       console.error('[LOGIN]', e)
       setError('Login gagal. Coba lagi.')
@@ -69,10 +69,19 @@ export default function LoginPage() {
       <div className="w-full max-w-sm space-y-6">
 
         <div className="text-center space-y-2">
-          <div className="w-16 h-16 bg-gray-900 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <span className="text-white text-2xl font-bold">CP</span>
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900">Coco Puff POS</h1>
+          {/* Logo dinamis */}
+          {settings.app_logo_url ? (
+            <img
+              src={settings.app_logo_url}
+              alt={settings.app_name}
+              className="w-16 h-16 rounded-2xl object-cover mx-auto mb-4"
+            />
+          ) : (
+            <div className="w-16 h-16 bg-gray-900 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <span className="text-white text-2xl font-bold">CP</span>
+            </div>
+          )}
+          <h1 className="text-2xl font-bold text-gray-900">{settings.app_name}</h1>
           <p className="text-sm text-gray-400">Masuk dengan akun Anda</p>
         </div>
 
@@ -123,7 +132,6 @@ export default function LoginPage() {
         <p className="text-center text-xs text-gray-300">
           Belum punya akun? Hubungi admin toko Anda.
         </p>
-
       </div>
     </div>
   )

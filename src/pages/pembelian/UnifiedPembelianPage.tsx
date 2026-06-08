@@ -352,7 +352,15 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
   // FIX: filter bahan — kalau input sebagai gudang tampil semua
   // kalau input sebagai toko, tampil semua material (toko bisa beli bahan apapun)
   // tapi stok masuknya ke stock toko, bukan warehouse_stock
-  const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
+  const materials = useLiveQuery(async () => {
+    if (!activeStoreId || activeStoreId.includes('gudang') || role === 'gudang') {
+      return db.materials.filter(m => m.is_active).toArray()
+    }
+    const stokToko = await db.stock.where('store_id').equals(activeStoreId).toArray()
+    const matIds = new Set(stokToko.map((s: any) => s.ingredient_id || s.material_id).filter(Boolean))
+    if (matIds.size === 0) return db.materials.filter(m => m.is_active).toArray()
+    return db.materials.filter(m => m.is_active && matIds.has(m.id)).toArray()
+  }, [activeStoreId, role])
   const suppliers  = useLiveQuery(() => db.suppliers.filter(s => s.is_active !== false).toArray(), [])
 
   const [supplierId, setSupp]       = useState('')

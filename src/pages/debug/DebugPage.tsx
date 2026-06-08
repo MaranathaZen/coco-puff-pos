@@ -244,7 +244,7 @@ export default function DebugPage() {
     // 9. PAKET
     try {
       const { data: pkgs }     = await supabase.from('packages').select('*').eq('is_active',true)
-      const { data: pkgItems } = await supabase.from('package_items').select('*').catch(()=>({data:[]})) as any
+      const { data: pkgItems } = await supabase.from('package_items').select('*')
       const { data: prods }    = await supabase.from('products').select('id,name').eq('is_active',true)
       const prodMap = Object.fromEntries((prods||[]).map(p=>[p.id,p.name]))
       const paketResult: CheckResult[] = []

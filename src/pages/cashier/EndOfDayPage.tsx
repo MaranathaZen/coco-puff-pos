@@ -545,8 +545,8 @@ export default function EndOfDayPage() {
         </div>
 
         {/* ── DESKTOP LAYOUT (md+) ── */}
-        <div className="hidden md:block p-6">
-          <div className="max-w-7xl mx-auto space-y-3">
+        <div className="hidden md:block px-6 py-4">
+          <div className="space-y-3">
 
             {/* Banner sudah disimpan */}
             {existingReport && (

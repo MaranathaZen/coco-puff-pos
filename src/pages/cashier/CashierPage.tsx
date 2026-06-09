@@ -189,7 +189,7 @@ export default function CashierPage() {
   useEffect(() => {
     const cfg = getPrinterConfig(STORE_ID || userStoreId)
     if (cfg.printMode !== 'server') return
-    const url = cfg.serverUrl || 'https://localhost:5000'
+    const url = cfg.serverUrl || 'https://localhost:7676'
     async function checkPrintServer() {
       try {
         const c = new AbortController()
@@ -700,8 +700,8 @@ export default function CashierPage() {
             const url = (() => {
               try {
                 const cfg = JSON.parse(localStorage.getItem(`printer_config_${STORE_ID}`) || '{}')
-                return cfg.serverUrl || 'https://localhost:5000'
-              } catch { return 'https://localhost:5000' }
+                return cfg.serverUrl || 'https://localhost:7676'
+              } catch { return 'https://localhost:7676' }
             })()
             fetch(`${url}/print`, {
               method: 'POST',
@@ -1398,22 +1398,35 @@ function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () =
     try { return JSON.parse(localStorage.getItem(key) || '{}').autoPrint === true } catch { return false }
   })
   const [serverUrl, setServerUrl] = useState<string>(() => {
-    try { return JSON.parse(localStorage.getItem(key) || '{}').serverUrl || 'https://localhost:5000' } catch { return 'https://localhost:5000' }
+    try { return JSON.parse(localStorage.getItem(key) || '{}').serverUrl || 'https://localhost:7676' } catch { return 'https://localhost:7676' }
   })
   const [serverStatus, setServerStatus] = useState<'unknown' | 'ok' | 'error'>('unknown')
   const [saved, setSaved] = useState(false)
 
   async function testServer() {
+    const wsUrl = serverUrl.replace(/^https?/, 'ws') + '/ws'
     try {
-      const res = await fetch(`${serverUrl}/health`, {
-        signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 3000); return c.signal })()
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(wsUrl)
+        const timer = setTimeout(() => { ws.close(); reject(new Error('timeout')) }, 3000)
+        ws.onopen = () => ws.send(JSON.stringify({ type: 'health' }))
+        ws.onmessage = (e) => {
+          clearTimeout(timer)
+          const d = JSON.parse(e.data)
+          ws.close()
+          if (d.status === 'ok') { setServerStatus('ok'); toast.success(`Terhubung: ${d.printer}`); resolve() }
+          else reject(new Error('not ok'))
+        }
+        ws.onerror = () => { clearTimeout(timer); reject(new Error('ws error')) }
       })
-      const data = await res.json()
-      setServerStatus('ok')
-      toast.success(`Terhubung ke printer: ${data.printer}`)
     } catch {
-      setServerStatus('error')
-      toast.error('Print server tidak ditemukan')
+      try {
+        const res = await fetch(`${serverUrl}/health`, {
+          signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 3000); return c.signal })()
+        })
+        const data = await res.json()
+        setServerStatus('ok'); toast.success(`Terhubung ke printer: ${data.printer}`)
+      } catch { setServerStatus('error'); toast.error('Print server tidak ditemukan') }
     }
   }
 
@@ -1627,22 +1640,32 @@ pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;wh
           localStorage.getItem(`printer_config_${data.storeId}`) ||
           localStorage.getItem(`printer_config_${data.storeName}`) || '{}'
         )
-        return cfg.serverUrl || 'https://localhost:5000'
-      } catch { return 'https://localhost:5000' }
+        return cfg.serverUrl || 'http://localhost:7676'
+      } catch { return 'http://localhost:7676' }
     })()
+    const wsUrl = url.replace(/^https?/, 'ws') + '/ws'
     try {
-      const res = await fetch(`${url}/print`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: txt }),
-        signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 5000); return c.signal })(),
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(wsUrl)
+        const timer = setTimeout(() => { ws.close(); reject(new Error('timeout')) }, 5000)
+        ws.onopen = () => ws.send(JSON.stringify({ type: 'print', text: txt }))
+        ws.onmessage = (e) => {
+          clearTimeout(timer); const d = JSON.parse(e.data); ws.close()
+          if (d.ok) resolve(); else reject(new Error(d.message || 'Print gagal'))
+        }
+        ws.onerror = () => { clearTimeout(timer); reject(new Error('WebSocket error')) }
       })
-      const d = await res.json()
-      if (d.ok) toast.success('Print berhasil!')
-      else toast.error('Print gagal: ' + d.error)
+      toast.success('Print berhasil!')
     } catch {
-      toast.error('Print server tidak merespons.')
-      handlePrint()
+      try {
+        const res = await fetch(`${url}/print`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: txt }),
+          signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 5000); return c.signal })(),
+        })
+        const d = await res.json()
+        if (d.ok) toast.success('Print berhasil!'); else toast.error('Print gagal: ' + d.error)
+      } catch { toast.error('Print server tidak merespons.'); handlePrint() }
     }
   }
 

@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
 import { seedIfEmpty } from '@/lib/seed'
 import { startSyncWorker, stopSyncWorker } from '@/lib/sync'
+import { useAppSettings, applyFavicon } from '@/hooks/useAppSettings'
 
 import LoginPage            from '@/pages/auth/LoginPage'
 import Layout               from '@/components/layout/Layout'
@@ -34,7 +35,6 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 function RequireRole({ roles, children }: { roles: string[]; children: React.ReactNode }) {
   const user      = useAuthStore(s => s.user)
   const hydrated  = useAuthStore.persist?.hasHydrated?.() ?? true
-  // FIX: tunggu hydration selesai dulu sebelum redirect
   if (!hydrated) return null
   if (!user) return <Navigate to="/login" replace />
   if (!roles.includes(user.role)) return <Navigate to="/" replace />
@@ -91,6 +91,22 @@ function UpdateBanner() {
   )
 }
 
+// ── Apply favicon & app name dari settings ────────────────────
+function AppSettingsApplier() {
+  const { settings } = useAppSettings()
+  useEffect(() => {
+    // Apply favicon
+    if (settings.app_icon_url) {
+      applyFavicon(settings.app_icon_url)
+    }
+    // Apply app name di tab browser
+    if (settings.app_name) {
+      document.title = settings.app_name
+    }
+  }, [settings.app_icon_url, settings.app_name])
+  return null
+}
+
 export default function App() {
   const user = useAuthStore(s => s.user)
   useAutoUpdate()
@@ -102,6 +118,7 @@ export default function App() {
 
   return (
     <>
+      <AppSettingsApplier />
       <UpdateBanner />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
@@ -129,7 +146,7 @@ export default function App() {
           <Route path="accounting"    element={<AccountingPage />} />
           <Route path="debug" element={<RequireRole roles={['owner','manager']}><DebugPage /></RequireRole>} />
 
-          {/* Legacy routes — redirect ke halaman baru */}
+          {/* Legacy routes */}
           <Route path="gudang"        element={<Navigate to="/stok" replace />} />
           <Route path="produksi" element={<RequireRole roles={['owner','manager','produksi','kasir']}><ProduksiPage /></RequireRole>} />
         </Route>
@@ -139,12 +156,9 @@ export default function App() {
   )
 }
 
-
 function CloseOrderAllPage() {
   const { user } = useAuthStore()
   const isOwnerManager = ['owner','manager','gudang','produksi'].includes(user?.role || '')
-  // Owner/manager/gudang/produksi → view semua toko
-  // Kasir → EndOfDay untuk toko sendiri
   if (!isOwnerManager) return <EndOfDayPage />
   return <CloseOrderPage />
 }

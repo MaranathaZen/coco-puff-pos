@@ -191,7 +191,7 @@ export default function CashierPage() {
     if (cfg.printMode !== 'server') return
     const url = cfg.serverUrl || 'https://localhost:7676'
     async function checkPrintServer() {
-      const wsUrl = url.replace(/^https?/, 'ws') + '/ws'
+      const wsUrl = url.replace(/^https?/, 'wss') + '/ws'
       try {
         await new Promise<void>((resolve, reject) => {
           const ws = new WebSocket(wsUrl)
@@ -1475,7 +1475,7 @@ function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () =
               <p className="text-xs font-medium text-blue-800">URL Print Server</p>
               <div className="flex gap-2">
                 <input className="input flex-1 text-sm" value={serverUrl}
-                  onChange={e => setServerUrl(e.target.value)} placeholder="https://localhost:5000" />
+                  onChange={e => setServerUrl(e.target.value)} placeholder="https://localhost:7676" />
                 <button onClick={testServer} className="px-3 py-2 text-xs font-medium bg-blue-600 text-white rounded-lg">Test</button>
               </div>
               {serverStatus === 'ok' && <p className="text-xs text-green-600">✓ Terhubung</p>}
@@ -1653,7 +1653,7 @@ pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;wh
         return cfg.serverUrl || 'http://localhost:7676'
       } catch { return 'http://localhost:7676' }
     })()
-    const wsUrl = url.replace(/^https?/, 'ws') + '/ws'
+    const wsUrl = url.replace(/^https?/, 'wss') + '/ws'
     try {
       await new Promise<void>((resolve, reject) => {
         const ws = new WebSocket(wsUrl)

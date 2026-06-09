@@ -707,21 +707,21 @@ export default function CashierPage() {
           if (printModeNow === 'rawbt') {
             window.location.href = `rawbt://${encodeURIComponent(txt)}`
           } else if (printModeNow === 'server') {
-  const url = (() => {
-    try {
-      const cfg = JSON.parse(localStorage.getItem(`printer_config_${STORE_ID}`) || '{}')
-      return cfg.serverUrl || 'https://localhost:7676'
-    } catch { return 'https://localhost:7676' }
-  })()
-  const wsUrl = url.replace(/^https?/, 'wss') + '/ws'
-  const ws = new WebSocket(wsUrl)
-  ws.onopen = () => ws.send(JSON.stringify({ type: 'print', text: txt }))
-  ws.onmessage = (e) => {
-    const d = JSON.parse(e.data)
-    ws.close()
-    if (!d.ok) toast.error('Print gagal: ' + d.message)
-  }
-  ws.onerror = () => { ws.close(); toast.error('Print server tidak merespons') }
+            const url = (() => {
+              try {
+                const cfg = JSON.parse(localStorage.getItem(`printer_config_${STORE_ID}`) || '{}')
+                return cfg.serverUrl || 'https://localhost:7676'
+              } catch { return 'https://localhost:7676' }
+            })()
+            const wsUrl = url.replace(/^https?/, 'wss')
+            const ws = new WebSocket(wsUrl)
+            ws.onopen = () => ws.send(JSON.stringify({ type: 'print', text: txt }))
+            ws.onmessage = (e) => {
+              const d = JSON.parse(e.data)
+              ws.close()
+              if (!d.ok) toast.error('Print gagal: ' + d.message)
+            }
+            ws.onerror = () => { ws.close(); toast.error('Print server tidak merespons') }
           } else {
             // Browser print
             const html = `<html><head><style>

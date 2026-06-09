@@ -713,7 +713,7 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: {
             </div>
             <div className="text-right">
               <p className={`text-sm font-semibold ${s.qty_on_hand <= 0 ? 'text-red-500' : 'text-gray-900'}`}>
-                {s.qty_on_hand} <span className="text-xs font-normal text-gray-400">{s.displayUnit}</span>
+                {Math.round(s.qty_on_hand * 1000) / 1000} <span className="text-xs font-normal text-gray-400">{s.displayUnit}</span>
               </p>
               {s.avg_cost > 0 && <p className="text-xs text-gray-400">{formatRupiah(s.qty_on_hand * s.avg_cost)}</p>}
             </div>

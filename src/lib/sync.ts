@@ -13,12 +13,12 @@ import { logger } from '@/lib/logger'
 import { db, now } from '@/lib/db'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
-let pushInterval:      ReturnType<typeof setInterval> | null = null
-let pullInterval:      ReturnType<typeof setInterval> | null = null
-let realtimeChannel:   RealtimeChannel | null = null
-let isSyncing        = false
-let isPulling        = false
-let currentStoreId   = ''
+let pushInterval: ReturnType<typeof setInterval> | null = null
+let pullInterval: ReturnType<typeof setInterval> | null = null
+let realtimeChannel: RealtimeChannel | null = null
+let isSyncing = false
+let isPulling = false
+let currentStoreId = ''
 let realtimeConnected = false  // FIX v9: guard subscribe loop
 
 export function setCurrentStoreId(storeId: string) {
@@ -32,37 +32,37 @@ const TABLE_PUSH_ORDER = [
 ]
 
 const TABLE_MAP: Record<string, keyof typeof db> = {
-  materials:                 'materials',
-  suppliers:                 'suppliers',
-  partners:                  'partners',
-  stores:                    'stores',
-  users:                     'users',
-  categories:                'categories',
-  products:                  'products',
-  packages:                  'packages',
-  menu_role_config:          'menu_role_config',
-  warehouse_stock:           'warehouse_stock',
-  production_stock:          'production_stock',
-  finished_goods_stock:      'finished_goods_stock',
-  stock:                     'stock',
-  store_product_prices:      'store_product_prices',
-  promotions:                'promotions',
-  warehouse_mutations:       'warehouse_mutations',
-  warehouse_mutation_items:  'warehouse_mutation_items',
-  production_mutations:      'production_mutations',
+  materials: 'materials',
+  suppliers: 'suppliers',
+  partners: 'partners',
+  stores: 'stores',
+  users: 'users',
+  categories: 'categories',
+  products: 'products',
+  packages: 'packages',
+  menu_role_config: 'menu_role_config',
+  warehouse_stock: 'warehouse_stock',
+  production_stock: 'production_stock',
+  finished_goods_stock: 'finished_goods_stock',
+  stock: 'stock',
+  store_product_prices: 'store_product_prices',
+  promotions: 'promotions',
+  warehouse_mutations: 'warehouse_mutations',
+  warehouse_mutation_items: 'warehouse_mutation_items',
+  production_mutations: 'production_mutations',
   production_mutation_items: 'production_mutation_items',
-  production_recipes:        'production_recipes',
-  production_recipe_items:   'production_recipe_items',
-  warehouse_expenses:        'warehouse_expenses',
-  purchases:                 'purchases',
-  purchase_items:            'purchase_items',
-  store_recipes:             'store_recipes',
-  store_recipe_items:        'store_recipe_items',
-  production_logs:           'production_logs',
-  production_log_materials:  'production_log_materials',
-  transactions:              'transactions',
-  transaction_items:         'transaction_items',
-  shifts:                    'shifts',
+  production_recipes: 'production_recipes',
+  production_recipe_items: 'production_recipe_items',
+  warehouse_expenses: 'warehouse_expenses',
+  purchases: 'purchases',
+  purchase_items: 'purchase_items',
+  store_recipes: 'store_recipes',
+  store_recipe_items: 'store_recipe_items',
+  production_logs: 'production_logs',
+  production_log_materials: 'production_log_materials',
+  transactions: 'transactions',
+  transaction_items: 'transaction_items',
+  shifts: 'shifts',
 }
 
 function startRealtime(storeId: string) {
@@ -74,35 +74,35 @@ function startRealtime(storeId: string) {
 
   realtimeChannel = supabase
     .channel(`coco-puff-${storeId}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'materials' },                payload => handleRealtimeChange('materials', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers' },                payload => handleRealtimeChange('suppliers', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'partners' },                 payload => handleRealtimeChange('partners', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'stores' },                   payload => handleRealtimeChange('stores', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'users' },                    payload => handleRealtimeChange('users', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' },               payload => handleRealtimeChange('categories', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'products' },                 payload => handleRealtimeChange('products', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'packages' },                 payload => handleRealtimeChange('packages', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_stock' },          payload => handleRealtimeChange('warehouse_stock', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'production_stock' },         payload => handleRealtimeChange('production_stock', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'finished_goods_stock' },     payload => handleRealtimeChange('finished_goods_stock', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'stock' },                    payload => handleRealtimeChange('stock', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'store_product_prices' },     payload => handleRealtimeChange('store_product_prices', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'promotions' },               payload => handleRealtimeChange('promotions', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_mutations' },      payload => handleRealtimeChange('warehouse_mutations', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'materials' }, payload => handleRealtimeChange('materials', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers' }, payload => handleRealtimeChange('suppliers', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'partners' }, payload => handleRealtimeChange('partners', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'stores' }, payload => handleRealtimeChange('stores', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, payload => handleRealtimeChange('users', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, payload => handleRealtimeChange('categories', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, payload => handleRealtimeChange('products', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'packages' }, payload => handleRealtimeChange('packages', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_stock' }, payload => handleRealtimeChange('warehouse_stock', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'production_stock' }, payload => handleRealtimeChange('production_stock', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'finished_goods_stock' }, payload => handleRealtimeChange('finished_goods_stock', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'stock' }, payload => handleRealtimeChange('stock', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'store_product_prices' }, payload => handleRealtimeChange('store_product_prices', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'promotions' }, payload => handleRealtimeChange('promotions', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_mutations' }, payload => handleRealtimeChange('warehouse_mutations', payload))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_mutation_items' }, payload => handleRealtimeChange('warehouse_mutation_items', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'production_mutations' },     payload => handleRealtimeChange('production_mutations', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'production_recipes' },       payload => handleRealtimeChange('production_recipes', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'production_recipe_items' },  payload => handleRealtimeChange('production_recipe_items', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_expenses' },       payload => handleRealtimeChange('warehouse_expenses', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases' },                payload => handleRealtimeChange('purchases', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_items' },           payload => handleRealtimeChange('purchase_items', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'store_recipes' },            payload => handleRealtimeChange('store_recipes', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'store_recipe_items' },       payload => handleRealtimeChange('store_recipe_items', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'production_logs' },          payload => handleRealtimeChange('production_logs', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'production_mutations' }, payload => handleRealtimeChange('production_mutations', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'production_recipes' }, payload => handleRealtimeChange('production_recipes', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'production_recipe_items' }, payload => handleRealtimeChange('production_recipe_items', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_expenses' }, payload => handleRealtimeChange('warehouse_expenses', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases' }, payload => handleRealtimeChange('purchases', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_items' }, payload => handleRealtimeChange('purchase_items', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'store_recipes' }, payload => handleRealtimeChange('store_recipes', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'store_recipe_items' }, payload => handleRealtimeChange('store_recipe_items', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'production_logs' }, payload => handleRealtimeChange('production_logs', payload))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'production_log_materials' }, payload => handleRealtimeChange('production_log_materials', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' },             payload => handleRealtimeChange('transactions', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'transaction_items' },        payload => handleRealtimeChange('transaction_items', payload))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' },                   payload => handleRealtimeChange('shifts', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, payload => handleRealtimeChange('transactions', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'transaction_items' }, payload => handleRealtimeChange('transaction_items', payload))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, payload => handleRealtimeChange('shifts', payload))
     .subscribe((status) => {
       console.log(`[REALTIME] Status: ${status}`)
 
@@ -159,16 +159,16 @@ export async function pullFromSupabase(storeId?: string) {
       supabase.from('users').select('*').eq('is_active', true),
     ])
 
-    await safeReplace(db.categories,         cats.data)
-    await safeReplace(db.products,           prods.data)
-    await safeReplace(db.materials,          mats.data)
-    await safeReplace(db.suppliers,          sups.data)
-    await safeReplace(db.partners,           parts.data)
-    await safeReplace(db.stores,             stores.data)
+    await safeReplace(db.categories, cats.data)
+    await safeReplace(db.products, prods.data)
+    await safeReplace(db.materials, mats.data)
+    await safeReplace(db.suppliers, sups.data)
+    await safeReplace(db.partners, parts.data)
+    await safeReplace(db.stores, stores.data)
     await safeReplace(db.production_recipes, recipes.data)
-    await safeReplace(db.packages,           pkgs.data)
-    await safeReplace(db.menu_role_config,   menuCfg.data)
-    await safeReplace(db.users,              users.data)
+    await safeReplace(db.packages, pkgs.data)
+    await safeReplace(db.menu_role_config, menuCfg.data)
+    await safeReplace(db.users, users.data)
 
     const [
       prices, promos, stock, wstock, pstock, fgstock,
@@ -197,29 +197,29 @@ export async function pullFromSupabase(storeId?: string) {
       supabase.from('production_log_materials').select('*'),
     ])
 
-    await safeReplace(db.store_product_prices,    prices.data)
-    await safeReplace(db.promotions,              promos.data)
-    await safeReplace(db.stock,                   stock.data)
-    await safeReplace(db.warehouse_stock,         wstock.data)
-    await safeReplace(db.production_stock,        pstock.data)
-    await safeReplace(db.finished_goods_stock,    fgstock.data)
-    if (storeRecipes.data?.length)     await db.store_recipes.bulkPut(storeRecipes.data)
+    await safeReplace(db.store_product_prices, prices.data)
+    await safeReplace(db.promotions, promos.data)
+    await safeReplace(db.stock, stock.data)
+    await safeReplace(db.warehouse_stock, wstock.data)
+    await safeReplace(db.production_stock, pstock.data)
+    await safeReplace(db.finished_goods_stock, fgstock.data)
+    if (storeRecipes.data?.length) await db.store_recipes.bulkPut(storeRecipes.data)
     if (storeRecipeItems.data?.length) await db.store_recipe_items.bulkPut(storeRecipeItems.data)
     await safeReplace(db.production_recipe_items, recipeItems.data)
 
-    const wMutIds  = new Set((wmuts.data     || []).map((m: any) => m.id))
-    const pMutIds  = new Set((pmuts.data     || []).map((m: any) => m.id))
-    const logIds   = new Set((prodLogs.data  || []).map((l: any) => l.id))
+    const wMutIds = new Set((wmuts.data || []).map((m: any) => m.id))
+    const pMutIds = new Set((pmuts.data || []).map((m: any) => m.id))
+    const logIds = new Set((prodLogs.data || []).map((l: any) => l.id))
     const purchIds = new Set((purchases.data || []).map((p: any) => p.id))
 
-    if (wmuts.data?.length)       await db.warehouse_mutations.bulkPut(wmuts.data)
-    if (wmutItems.data?.length)   await db.warehouse_mutation_items.bulkPut((wmutItems.data  || []).filter((i: any) => wMutIds.has(i.mutation_id)))
-    if (pmuts.data?.length)       await db.production_mutations.bulkPut(pmuts.data)
-    if (pmutItems.data?.length)   await db.production_mutation_items.bulkPut((pmutItems.data || []).filter((i: any) => pMutIds.has(i.mutation_id)))
-    if (wexpenses.data?.length)   await db.warehouse_expenses.bulkPut(wexpenses.data)
-    if (purchases.data?.length)   await db.purchases.bulkPut(purchases.data)
-    if (purchItems.data?.length)  await db.purchase_items.bulkPut((purchItems.data || []).filter((i: any) => purchIds.has(i.purchase_id)))
-    if (prodLogs.data?.length)    await db.production_logs.bulkPut(prodLogs.data)
+    if (wmuts.data?.length) await db.warehouse_mutations.bulkPut(wmuts.data)
+    if (wmutItems.data?.length) await db.warehouse_mutation_items.bulkPut((wmutItems.data || []).filter((i: any) => wMutIds.has(i.mutation_id)))
+    if (pmuts.data?.length) await db.production_mutations.bulkPut(pmuts.data)
+    if (pmutItems.data?.length) await db.production_mutation_items.bulkPut((pmutItems.data || []).filter((i: any) => pMutIds.has(i.mutation_id)))
+    if (wexpenses.data?.length) await db.warehouse_expenses.bulkPut(wexpenses.data)
+    if (purchases.data?.length) await db.purchases.bulkPut(purchases.data)
+    if (purchItems.data?.length) await db.purchase_items.bulkPut((purchItems.data || []).filter((i: any) => purchIds.has(i.purchase_id)))
+    if (prodLogs.data?.length) await db.production_logs.bulkPut(prodLogs.data)
     if (prodLogMats.data?.length) await db.production_log_materials.bulkPut((prodLogMats.data || []).filter((i: any) => logIds.has(i.log_id)))
 
     const today = new Date().toLocaleDateString('sv-SE')
@@ -244,8 +244,8 @@ export async function pullFromSupabase(storeId?: string) {
     }
 
     if (shifts.data?.length) await db.shifts.bulkPut(shifts.data)
-    if (txs.data?.length)    await db.transactions.bulkPut(txs.data)
-    if (txItemsData.length)  await db.transaction_items.bulkPut(txItemsData)
+    if (txs.data?.length) await db.transactions.bulkPut(txs.data)
+    if (txItemsData.length) await db.transaction_items.bulkPut(txItemsData)
 
     console.log(`[SYNC] Pull selesai — toko: ${sid}`)
   } catch (e) {
@@ -319,6 +319,10 @@ export async function pushToSupabase() {
             }
             if (error.code === '23503') {
               console.warn(`[SYNC] FK violation ${item.table_name} ${item.record_id} — skip, retry nanti`)
+              await db.sync_queue.update(item.id, {
+                retry_count: item.retry_count + 1,
+                error_msg: 'FK violation: parent record belum sync',
+              })
               continue
             }
             if (error.code === 'PGRST204') {
@@ -376,8 +380,8 @@ export function startSyncWorker(storeId: string) {
 }
 
 export function stopSyncWorker() {
-  if (pushInterval)    { clearInterval(pushInterval);  pushInterval    = null }
-  if (pullInterval)    { clearInterval(pullInterval);  pullInterval    = null }
+  if (pushInterval) { clearInterval(pushInterval); pushInterval = null }
+  if (pullInterval) { clearInterval(pullInterval); pullInterval = null }
   if (realtimeChannel) { supabase.removeChannel(realtimeChannel); realtimeChannel = null }
   realtimeConnected = false  // FIX v9: reset flag
   document.removeEventListener('visibilitychange', handleVisibilityChange)

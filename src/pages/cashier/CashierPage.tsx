@@ -1414,7 +1414,7 @@ function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () =
   const [saved, setSaved] = useState(false)
 
   async function testServer() {
-    const wsUrl = serverUrl.replace(/^https?/, 'ws') + '/ws'
+    const wsUrl = serverurl.replace(/^https?/, 'wss') + '/ws'
     try {
       await new Promise<void>((resolve, reject) => {
         const ws = new WebSocket(wsUrl)

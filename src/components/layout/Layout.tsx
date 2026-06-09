@@ -1,5 +1,6 @@
 // src/components/layout/Layout.tsx
-// CHANGELOG v2:
+// CHANGELOG v3:
+// - Dynamic logo/icon dari useAppSettings
 // - Kasir: urutan Kasir, Stok, Produksi, Mutasi, Close Order, Lainnya(Pembelian+Biaya)
 // - Produksi: hapus menu Biaya
 // - Desktop sidebar + mobile bottom nav
@@ -8,6 +9,7 @@ import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useAuthStore } from '@/store/auth'
+import { useAppSettings, applyFavicon } from '@/hooks/useAppSettings'
 import { db } from '@/lib/db'
 import {
   LogOut, Wifi, WifiOff,
@@ -97,6 +99,7 @@ const MAX_NAV = 4
 
 export default function Layout() {
   const { user, logout } = useAuthStore()
+  const { settings }     = useAppSettings()
   const navigate   = useNavigate()
   const location   = useLocation()
   const [showMore, setShowMore] = useState(false)
@@ -109,6 +112,12 @@ export default function Layout() {
     window.addEventListener('offline', dn)
     return () => { window.removeEventListener('online', up); window.removeEventListener('offline', dn) }
   }, [])
+
+  // Apply favicon & title dari settings
+  useEffect(() => {
+    if (settings.app_icon_url) applyFavicon(settings.app_icon_url)
+    if (settings.app_name)     document.title = settings.app_name
+  }, [settings.app_icon_url, settings.app_name])
 
   const dbMenus = useLiveQuery(async () => {
     if (!user?.role) return []
@@ -129,6 +138,8 @@ export default function Layout() {
   const navMenus     = allMenus.slice(0, MAX_NAV)
   const moreMenus    = allMenus.slice(MAX_NAV)
   const isMoreActive = moreMenus.some(m => location.pathname.startsWith(m.menu_path))
+
+  const appName = settings.app_name || 'Coco Puff POS'
 
   function handleLogout() {
     if (!confirm('Yakin ingin keluar?')) return
@@ -156,11 +167,16 @@ export default function Layout() {
       <aside className="hidden md:flex flex-col w-56 bg-white border-r border-gray-100 flex-shrink-0">
         <div className="px-4 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-xs font-bold">CP</span>
-            </div>
+            {settings.app_logo_url ? (
+              <img src={settings.app_logo_url} alt={appName}
+                className="w-8 h-8 rounded-lg object-cover flex-shrink-0" />
+            ) : (
+              <div className="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center flex-shrink-0">
+                <span className="text-white text-xs font-bold">CP</span>
+              </div>
+            )}
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-gray-900 truncate">Coco Puff POS</p>
+              <p className="text-sm font-semibold text-gray-900 truncate">{appName}</p>
               <p className="text-xs text-gray-400 capitalize truncate">{user?.name}</p>
             </div>
           </div>
@@ -208,7 +224,6 @@ export default function Layout() {
                 </NavLink>
               )
             })}
-            {/* Selalu tampilkan tombol Lainnya — untuk logout + menu overflow */}
             <button onClick={() => setShowMore(true)}
               className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 text-[10px] font-medium transition-colors ${isMoreActive ? 'text-gray-900' : 'text-gray-400'}`}>
               <MoreHorizontal size={20} strokeWidth={isMoreActive ? 2 : 1.5} />

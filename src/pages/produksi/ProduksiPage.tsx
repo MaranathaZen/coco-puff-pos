@@ -207,7 +207,7 @@ export default function ProduksiPage() {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      <div className="px-4 pt-4 pb-0 flex items-center justify-between flex-shrink-0">
+      <div className="px-4 py-3 flex items-center justify-between flex-shrink-0">
         <h1 className="text-lg font-semibold text-gray-900">Produksi</h1>
         <div className="flex items-center gap-2">
           {toolbarActions}

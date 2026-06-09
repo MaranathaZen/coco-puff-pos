@@ -343,7 +343,7 @@ export default function EndOfDayPage() {
   // ── SHARED SECTIONS ───────────────────────────────────────
 
   const sectionInputManual = (
-    <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3">
+    <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3 h-full">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Input Manual</p>
       <div className="grid grid-cols-2 gap-3">
         <NumInput label="Saldo Awal"          value={saldoAwal}     onChange={setSaldoAwal}     disabled={!!existingReport} hint={saldoAwal ? undefined : 'Auto dari kemarin'} />
@@ -564,15 +564,17 @@ export default function EndOfDayPage() {
             )}
 
             {/* Row 1: Input Manual | Penjualan Hari Ini | Laporan Kas — 3 kolom */}
-            <div className="grid grid-cols-3 gap-3 items-start">
+            <div className="grid grid-cols-3 gap-3 items-stretch">
               {sectionInputManual}
               {sectionPenjualan}
               {sectionLaporanKas}
             </div>
 
-            {/* Row 2: Void | Produk Terjual | Sisa Stok — 3 kolom */}
-            <div className="grid grid-cols-3 gap-3 items-start">
-              {sectionVoid ?? <div />}
+            {/* Row 2: Void (kiri) + Produk Terjual | Sisa Stok (kanan full) */}
+            {sectionVoid && (
+              <div>{sectionVoid}</div>
+            )}
+            <div className="grid grid-cols-2 gap-3 items-start">
               {sectionProdukTerjual ?? <div />}
               {sectionSisaStok ?? <div />}
             </div>

@@ -191,11 +191,21 @@ export default function CashierPage() {
     if (cfg.printMode !== 'server') return
     const url = cfg.serverUrl || 'https://localhost:7676'
     async function checkPrintServer() {
+      const wsUrl = url.replace(/^https?/, 'ws') + '/ws'
       try {
-        const c = new AbortController()
-        setTimeout(() => c.abort(), 3000)
-        const res = await fetch(`${url}/health`, { signal: c.signal })
-        setPrintServerOk(res.ok)
+        await new Promise<void>((resolve, reject) => {
+          const ws = new WebSocket(wsUrl)
+          const timer = setTimeout(() => { ws.close(); reject(new Error('timeout')) }, 3000)
+          ws.onopen = () => ws.send(JSON.stringify({ type: 'health' }))
+          ws.onmessage = (e) => {
+            clearTimeout(timer)
+            const d = JSON.parse(e.data)
+            ws.close()
+            setPrintServerOk(d.status === 'ok')
+            resolve()
+          }
+          ws.onerror = () => { clearTimeout(timer); setPrintServerOk(false); resolve() }
+        })
       } catch { setPrintServerOk(false) }
     }
     checkPrintServer()

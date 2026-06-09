@@ -77,7 +77,7 @@ export default function ReportsPage() {
     custom: customFrom && customTo ? `${customFrom} s/d ${customTo}` : 'Custom',
   }
 
-  const stores       = useLiveQuery(() => db.stores.filter(s => s.is_active).toArray(), [])
+  const stores       = useLiveQuery(() => db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray(), [])
   const transactions = useLiveQuery(async () =>
     db.transactions.filter(t =>
       t.status === 'completed' && t.created_at >= dateRange.start && t.created_at <= dateRange.end &&
@@ -248,7 +248,7 @@ export default function ReportsPage() {
             {stores.map(s => (
               <button key={s.id} onClick={() => setStoreFilter(s.id)}
                 className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${storeFilter===s.id?'bg-gray-900 text-white':'bg-white text-gray-600 border border-gray-200'}`}>
-                {s.name}
+                {s.name.replace(/ Malang$/i,'').replace(/ Bali$/i,'')}
               </button>
             ))}
           </div>
@@ -309,7 +309,7 @@ export default function ReportsPage() {
                     <div key={s.store.id} className={`px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
                       <div className="flex items-center justify-between mb-1.5">
                         <div>
-                          <p className="text-sm font-medium text-gray-900">{s.store.name}</p>
+                          <p className="text-sm font-medium text-gray-900">{s.store.name.replace(/ Malang$/i,'').replace(/ Bali$/i,'')}</p>
                           <p className="text-xs text-gray-400">{s.store.city} · {s.count} transaksi</p>
                         </div>
                         <p className="text-sm font-semibold text-gray-900">{formatRupiah(s.omzet)}</p>
@@ -351,7 +351,7 @@ export default function ReportsPage() {
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 border-b border-gray-50">Per Toko</p>
                 {storeStats.map((s,idx)=>(
                   <div key={s.store.id} className={`flex items-center justify-between px-4 py-3 ${idx!==0?'border-t border-gray-50':''}`}>
-                    <div><p className="text-sm font-medium text-gray-900">{s.store.name}</p><p className="text-xs text-gray-400">{s.count} transaksi</p></div>
+                    <div><p className="text-sm font-medium text-gray-900">{s.store.name.replace(/ Malang$/i,'').replace(/ Bali$/i,'')}</p><p className="text-xs text-gray-400">{s.count} transaksi</p></div>
                     <p className="text-sm font-semibold text-gray-900">{formatRupiah(s.omzet)}</p>
                   </div>
                 ))}

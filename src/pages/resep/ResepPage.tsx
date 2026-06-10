@@ -446,6 +446,20 @@ function ResepProduksiTokoForm({ recipe, storeId, onClose }: { recipe: any; stor
     finally { setSaving(false) }
   }
 
+  async function handleDelete() {
+    if (!recipe || !confirm(`Hapus resep "${recipe.product_name}"?`)) return
+    setSaving(true)
+    try {
+      await db.store_recipe_items.where('recipe_id').equals(recipe.id).delete()
+      await db.store_recipes.delete(recipe.id)
+      await supabase.from('store_recipe_items').delete().eq('recipe_id', recipe.id)
+      await supabase.from('store_recipes').delete().eq('id', recipe.id)
+      toast.success('Resep dihapus')
+      onClose()
+    } catch { toast.error('Gagal menghapus') }
+    finally { setSaving(false) }
+  }
+
   if (loading) return <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"><div className="bg-white rounded-2xl p-8 text-sm text-gray-400">Memuat...</div></div>
 
   return (
@@ -488,6 +502,7 @@ function ResepProduksiTokoForm({ recipe, storeId, onClose }: { recipe: any; stor
         </button>
       </div>
       <div className="flex gap-3">
+        {recipe && <button onClick={handleDelete} disabled={saving} className="px-4 py-3 rounded-xl border border-red-200 text-sm font-medium text-red-500">Hapus</button>}
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
       </div>
@@ -529,6 +544,7 @@ function ResepTokoTab({ storeId }: { storeId: string }) {
     const pMap  = Object.fromEntries(prods.map(p => [p.id, p]))
     return r
       .filter(recipe => !(recipe as any).recipe_type || (recipe as any).recipe_type !== 'production')
+      .sort((a, b) => (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0))
       .map(recipe => ({
         ...recipe,
         product: pMap[recipe.product_id],
@@ -662,6 +678,20 @@ function ResepTokoForm({ recipe, storeId, onClose }: { recipe: any; storeId: str
     finally { setSaving(false) }
   }
 
+  async function handleDelete() {
+    if (!recipe || !confirm(`Hapus resep "${recipe.product_name || recipe.product_id}"?`)) return
+    setSaving(true)
+    try {
+      await db.store_recipe_items.where('recipe_id').equals(recipe.id).delete()
+      await db.store_recipes.delete(recipe.id)
+      await supabase.from('store_recipe_items').delete().eq('recipe_id', recipe.id)
+      await supabase.from('store_recipes').delete().eq('id', recipe.id)
+      toast.success('Resep dihapus')
+      onClose()
+    } catch { toast.error('Gagal menghapus') }
+    finally { setSaving(false) }
+  }
+
   if (loading) return <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"><div className="bg-white rounded-2xl p-8 text-sm text-gray-400">Memuat...</div></div>
 
   return (
@@ -709,6 +739,7 @@ function ResepTokoForm({ recipe, storeId, onClose }: { recipe: any; storeId: str
         </button>
       </div>
       <div className="flex gap-3 pt-1 border-t border-gray-100">
+        {recipe && <button onClick={handleDelete} disabled={saving} className="px-4 py-3 rounded-xl border border-red-200 text-sm font-medium text-red-500">Hapus</button>}
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button>
       </div>

@@ -257,8 +257,8 @@ export async function pullFromSupabase(storeId?: string) {
 }
 
 /**
- * safeReplace — hanya replace kalau data valid dan tidak kosong
- * Tidak clear dulu supaya kalau koneksi putus data Dexie tetap ada
+ * safeReplace — replace data + hapus orphan yang tidak ada di server
+ * Untuk master tables: stores, products, categories, materials, users, dll
  */
 async function safeReplace(table: any, data: any[] | null) {
   if (data === null || data === undefined) return
@@ -267,6 +267,21 @@ async function safeReplace(table: any, data: any[] | null) {
     return
   }
   await table.bulkPut(data)
+  // Hapus record lokal yang tidak ada di server (orphan cleanup)
+  try {
+    const serverIds = new Set(data.map((r: any) => r.id).filter(Boolean))
+    const localRecords = await table.toArray()
+    const toDelete = localRecords
+      .filter((r: any) => r.id && !serverIds.has(r.id))
+      .map((r: any) => r.id)
+    if (toDelete.length > 0) {
+      await table.bulkDelete(toDelete)
+      console.log(`[SYNC] Cleaned ${toDelete.length} orphan records from`, table.name || 'table')
+    }
+  } catch (e) {
+    // Orphan cleanup gagal — tidak masalah, data masih valid
+    console.warn('[SYNC] Orphan cleanup failed:', e)
+  }
 }
 
 export async function pushToSupabase() {

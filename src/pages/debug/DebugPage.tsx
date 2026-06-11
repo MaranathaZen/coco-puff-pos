@@ -177,7 +177,7 @@ export default function DebugPage() {
       const today = new Date().toLocaleDateString('sv-SE')
       const [dxTx, dxStock, dxMats, dxRecipes, dxProds, { count: sbTx }, { count: sbStock }, { count: sbMats }, { count: sbRecipes }, { count: sbProds }] = await Promise.all([
         db.transactions.count(), db.stock.count(), db.materials.count(), db.store_recipes.count(), db.products.count(),
-        supabase.from('transactions').select('*', { count: 'exact', head: true }).eq('store_id', storeId).gte('created_at', today + 'T00:00:00+07:00').lt('created_at', today + 'T23:59:59+07:00'),
+        supabase.from('transactions').select('*', { count: 'exact', head: true }).eq('store_id', storeId).gte('created_at', today + 'T00:00:00+07:00').lte('created_at', today + 'T23:59:59+07:00'),
         supabase.from('stock').select('*', { count: 'exact', head: true }).eq('store_id', storeId),
         supabase.from('materials').select('*', { count: 'exact', head: true }),
         supabase.from('store_recipes').select('*', { count: 'exact', head: true }),
@@ -195,11 +195,11 @@ export default function DebugPage() {
     // 6. TRANSAKSI
     try {
       const today = new Date().toLocaleDateString('sv-SE')
-      const { data: txs } = await supabase.from('transactions').select('id, receipt_no, total, status, payment_method, created_at').eq('store_id', storeId).gte('created_at', today + 'T00:00:00+07:00').lt('created_at', today + 'T23:59:59+07:00').order('created_at', { ascending: false })
+      const { data: txs } = await supabase.from('transactions').select('id, receipt_no, total, status, payment_method, created_at').eq('store_id', storeId).gte('created_at', today + 'T00:00:00+07:00').lte('created_at', today + 'T23:59:59+07:00').order('created_at', { ascending: false })
       const completed = (txs || []).filter(t => t.status === 'completed')
       const voided    = (txs || []).filter(t => t.status === 'voided')
       const voidReq   = (txs || []).filter(t => t.status === 'void_requested')
-      const dexieTxs  = await db.transactions.where('store_id').equals(storeId).filter(t => t.created_at.slice(0, 10) === today).toArray()
+      const dexieTxs  = await db.transactions.where('store_id').equals(storeId).filter(t => { const wib = new Date(new Date(t.created_at).getTime() + 7*60*60*1000); return wib.toISOString().slice(0,10) === today }).toArray()
       const sbIds     = new Set((txs || []).map(t => t.id))
       const notSynced = dexieTxs.filter(t => !sbIds.has(t.id))
       setTxChecks([

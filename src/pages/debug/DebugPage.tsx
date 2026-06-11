@@ -78,11 +78,13 @@ function Section({ title, checks, emoji }: { title: string; checks: CheckResult[
 
 export default function DebugPage() {
   const { user } = useAuthStore()
-  const storeId = user?.store_id || ''
   const [running, setRunning] = useState(false)
   const [lastRun, setLastRun] = useState<Date | null>(null)
   const [latency, setLatency] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<'diagnostik' | 'log'>('diagnostik')
+  const [stores, setStores] = useState<{ id: string; name: string }[]>([])
+  const [selectedStoreId, setSelectedStoreId] = useState<string>(user?.store_id || '')
+  const storeId = selectedStoreId || user?.store_id || ''
 
   const [ppnChecks, setPpnChecks] = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
   const [stokChecks, setStokChecks] = useState<CheckResult[]>([{ label: 'Memuat...', status: 'loading' }])
@@ -524,7 +526,15 @@ export default function DebugPage() {
     setRunning(false)
   }
 
-  useEffect(() => { runChecks() }, [storeId])
+  // Load daftar toko untuk owner
+  useEffect(() => {
+    if (user?.role === 'owner') {
+      supabase.from('stores').select('id, name').eq('is_active', true).order('name')
+        .then(({ data }) => { if (data) setStores(data) })
+    }
+  }, [])
+
+  useEffect(() => { if (storeId) runChecks() }, [storeId])
 
   const allChecks = [
     ...ppnChecks, ...stokChecks, ...bomChecks, ...syncChecks,
@@ -539,7 +549,7 @@ export default function DebugPage() {
     <div className="flex flex-col h-full bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
-        <div>
+        <div className="flex-1 min-w-0">
           <h1 className="text-lg font-semibold text-gray-900">Debug & Diagnostik</h1>
           <p className="text-xs text-gray-400 mt-0.5">
             {lastRun
@@ -547,11 +557,23 @@ export default function DebugPage() {
               : 'Belum pernah cek'}
           </p>
         </div>
-        <button onClick={runChecks} disabled={running}
-          className="flex items-center gap-1.5 text-sm font-medium text-gray-700 border border-gray-200 bg-white px-3 py-1.5 rounded-lg disabled:opacity-50">
-          <RefreshCw size={14} className={running ? 'animate-spin' : ''} />
-          {running ? 'Cek...' : 'Cek Ulang'}
-        </button>
+        <div className="flex items-center gap-2 ml-2">
+          {user?.role === 'owner' && stores.length > 0 && (
+            <select
+              value={selectedStoreId}
+              onChange={e => setSelectedStoreId(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 text-gray-700 bg-white">
+              {stores.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          )}
+          <button onClick={runChecks} disabled={running}
+            className="flex items-center gap-1.5 text-sm font-medium text-gray-700 border border-gray-200 bg-white px-3 py-1.5 rounded-lg disabled:opacity-50">
+            <RefreshCw size={14} className={running ? 'animate-spin' : ''} />
+            {running ? 'Cek...' : 'Cek Ulang'}
+          </button>
+        </div>
       </div>
 
       {/* Tab switcher */}

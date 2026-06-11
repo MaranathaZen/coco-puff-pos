@@ -203,8 +203,8 @@ export async function pullFromSupabase(storeId?: string) {
     await safeReplace(db.warehouse_stock, wstock.data)
     await safeReplace(db.production_stock, pstock.data)
     await safeReplace(db.finished_goods_stock, fgstock.data)
-    if (storeRecipes.data?.length) await db.store_recipes.bulkPut(storeRecipes.data)
-    if (storeRecipeItems.data?.length) await db.store_recipe_items.bulkPut(storeRecipeItems.data)
+    await safeReplace(db.store_recipes, storeRecipes.data)
+    await safeReplace(db.store_recipe_items, storeRecipeItems.data)
     await safeReplace(db.production_recipe_items, recipeItems.data)
 
     const wMutIds = new Set((wmuts.data || []).map((m: any) => m.id))

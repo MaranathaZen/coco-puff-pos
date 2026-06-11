@@ -144,16 +144,23 @@ export default function CashierPage() {
   async function syncProducts(showMsg = false) {
     setIsSyncing(true)
     try {
-      const [prodsRes, catsRes, pricesRes, promosRes] = await Promise.all([
+      const [prodsRes, catsRes, pricesRes, promosRes, recipesRes, recipeItemsRes, stockRes] = await Promise.all([
         supabase.from('products').select('*').eq('is_active', true),
         supabase.from('categories').select('*').order('sort_order'),
         supabase.from('store_product_prices').select('*').eq('store_id', STORE_ID),
         supabase.from('promotions').select('*').eq('store_id', STORE_ID).eq('is_active', true),
+        supabase.from('store_recipes').select('*').eq('store_id', STORE_ID),
+        supabase.from('store_recipe_items').select('*'),
+        supabase.from('stock').select('*').eq('store_id', STORE_ID),
       ])
       if (prodsRes.data !== null) { await db.products.clear(); if (prodsRes.data.length) await db.products.bulkPut(prodsRes.data) }
       if (catsRes.data !== null) { await db.categories.clear(); if (catsRes.data.length) await db.categories.bulkPut(catsRes.data) }
       if (pricesRes.data !== null) { await db.store_product_prices.where('store_id').equals(STORE_ID).delete(); if (pricesRes.data.length) await db.store_product_prices.bulkPut(pricesRes.data) }
       if (promosRes.data !== null) { await db.promotions.where('store_id').equals(STORE_ID).delete(); if (promosRes.data.length) await db.promotions.bulkPut(promosRes.data) }
+      // Sync resep BOM dan stok untuk toko ini — penting agar stok berkurang saat penjualan
+      if (recipesRes.data?.length) await db.store_recipes.bulkPut(recipesRes.data)
+      if (recipeItemsRes.data?.length) await db.store_recipe_items.bulkPut(recipeItemsRes.data)
+      if (stockRes.data?.length) await db.stock.bulkPut(stockRes.data)
       if (showMsg) toast.success('Produk diperbarui')
     } catch (e) {
       console.warn('[SYNC PRODUCTS]', e)

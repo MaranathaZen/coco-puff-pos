@@ -1,6 +1,5 @@
 // src/pages/debug/DebugPage.tsx
-// v2 — Diagnostik sistem lengkap
-// Checks: PPN, stok, resep BOM, sync, transaksi, shift, mutasi, paket, user, network
+// v3 — Rewrite bersih, fix syntax errors
 import LogPage from '@/pages/debug/LogPage'
 import { useState, useEffect } from 'react'
 import { db } from '@/lib/db'
@@ -113,7 +112,7 @@ export default function DebugPage() {
     // ── 1. NETWORK ────────────────────────────────────────────
     try {
       const t0 = Date.now()
-      const { data, error } = await supabase.from('stores').select('id').eq('id', storeId).single()
+      const { error } = await supabase.from('stores').select('id').eq('id', storeId).single()
       const ms = Date.now() - t0
       setLatency(ms)
       setNetChecks([
@@ -139,7 +138,6 @@ export default function DebugPage() {
         .select('ppn_enabled, ppn_rate, ppn_mode, name').eq('id', storeId).single()
       const dexieStore = await db.stores.get(storeId)
       const ppnMatch = storeData?.ppn_rate === (dexieStore as any)?.ppn_rate
-
       setPpnChecks([
         {
           label: 'PPN Supabase',
@@ -165,12 +163,10 @@ export default function DebugPage() {
     // ── 3. STOK TOKO ─────────────────────────────────────────
     try {
       const { data: stocks } = await supabase.from('stock').select('ingredient_id, material_id, qty_on_hand').eq('store_id', storeId)
-      const { data: stocksDex } = await Promise.resolve({ data: await db.stock.where('store_id').equals(storeId).toArray() })
+      const stocksDex = await db.stock.where('store_id').equals(storeId).toArray()
       const { data: mats } = await supabase.from('materials').select('id, name, unit')
       const matMap = Object.fromEntries((mats || []).map(m => [m.id, m]))
 
-      const sbIds = new Set((stocks || []).map(s => s.ingredient_id || s.material_id))
-      const dxIds = new Set(stocksDex.map(s => s.ingredient_id || (s as any).material_id))
       const noName = (stocks || []).filter(s => {
         const id = s.ingredient_id || s.material_id || ''
         return !matMap[id]
@@ -196,7 +192,7 @@ export default function DebugPage() {
           status: noName.length === 0 ? 'ok' : 'error',
           value: noName.length === 0 ? 'Semua match ✓' : `${noName.length} item`,
           detail: noName.length > 0
-            ? `Item berikut tidak ada di tabel materials:\n${noName.map(s => s.ingredient_id || s.material_id).join('\n')}\n\nSolusi: tambahkan ke tabel materials`
+            ? `Item berikut tidak ada di tabel materials:\n${noName.map(s => s.ingredient_id || s.material_id).join('\n')}`
             : undefined,
         },
         {
@@ -205,10 +201,10 @@ export default function DebugPage() {
           value: qtyMismatch.length === 0 ? 'Sinkron ✓' : `${qtyMismatch.length} berbeda`,
           detail: qtyMismatch.length > 0
             ? qtyMismatch.map(s => {
-              const id = s.ingredient_id || s.material_id || ''
-              const dxStk = stocksDex.find(d => (d.ingredient_id || (d as any).material_id) === id)
-              return `${matMap[id]?.name || id}: SB=${s.qty_on_hand} | DX=${dxStk?.qty_on_hand}`
-            }).join('\n')
+                const id = s.ingredient_id || s.material_id || ''
+                const dxStk = stocksDex.find(d => (d.ingredient_id || (d as any).material_id) === id)
+                return `${matMap[id]?.name || id}: SB=${s.qty_on_hand} | DX=${dxStk?.qty_on_hand}`
+              }).join('\n')
             : undefined,
         },
       ])
@@ -271,26 +267,16 @@ export default function DebugPage() {
         { count: sbTx }, { count: sbStock }, { count: sbMats },
         { count: sbRecipes }, { count: sbProds },
       ] = await Promise.all([
-        // FIX: filter hari ini + store_id
-        db.transactions
-          .where('store_id').equals(storeId)
-          .filter(t => t.created_at.slice(0, 10) === today)
-          .count(),
-        // FIX: filter per store_id
+        db.transactions.where('store_id').equals(storeId).filter(t => t.created_at.slice(0, 10) === today).count(),
         db.stock.where('store_id').equals(storeId).count(),
         db.materials.count(),
         db.store_recipes.where('store_id').equals(storeId).count(),
         db.products.count(),
-        supabase.from('transactions').select('*', { count: 'exact', head: true })
-          .eq('store_id', storeId)
-          .gte('created_at', today + 'T00:00:00+07:00'),
-        supabase.from('stock').select('*', { count: 'exact', head: true })
-          .eq('store_id', storeId),
+        supabase.from('transactions').select('*', { count: 'exact', head: true }).eq('store_id', storeId).gte('created_at', today + 'T00:00:00+07:00'),
+        supabase.from('stock').select('*', { count: 'exact', head: true }).eq('store_id', storeId),
         supabase.from('materials').select('*', { count: 'exact', head: true }),
-        supabase.from('store_recipes').select('*', { count: 'exact', head: true })
-          .eq('store_id', storeId),
-        supabase.from('products').select('*', { count: 'exact', head: true })
-          .eq('is_active', true),
+        supabase.from('store_recipes').select('*', { count: 'exact', head: true }).eq('store_id', storeId),
+        supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true),
       ])
       setSyncChecks([
         { label: 'Transaksi hari ini', status: Math.abs(dexieTx - (sbTx || 0)) <= 3 ? 'ok' : 'warn', value: `Lokal: ${dexieTx} | Server: ${sbTx}` },
@@ -316,7 +302,6 @@ export default function DebugPage() {
       const voidReq = (txs || []).filter(t => t.status === 'void_requested')
       const totalPenjualan = completed.reduce((s, t) => s + t.total, 0)
 
-      // Cek transaksi yang ada di Dexie tapi tidak di Supabase (gagal sync)
       const dexieTxs = await db.transactions.where('store_id').equals(storeId)
         .filter(t => t.created_at.slice(0, 10) === today).toArray()
       const sbIds = new Set((txs || []).map(t => t.id))
@@ -344,7 +329,7 @@ export default function DebugPage() {
           status: notSynced.length === 0 ? 'ok' : 'error',
           value: notSynced.length === 0 ? 'Semua tersync ✓' : `${notSynced.length} belum sync`,
           detail: notSynced.length > 0
-            ? notSynced.map(t => `${t.receipt_no} | ${formatRupiah(t.total)} | ${t.status}`).join('\n')
+            ? notSynced.map(t => `${(t as any).receipt_no} | ${formatRupiah(t.total)} | ${t.status}`).join('\n')
             : undefined,
         },
       ])
@@ -361,7 +346,6 @@ export default function DebugPage() {
         .limit(10)
       const { data: users } = await supabase.from('users').select('id, name').eq('store_id', storeId)
       const uMap = Object.fromEntries((users || []).map(u => [u.id, u.name]))
-
       const openShifts = (shifts || []).filter(s => s.status === 'open')
       const today = new Date().toLocaleDateString('sv-SE')
       const oldOpenShifts = openShifts.filter(s => s.opened_at.slice(0, 10) < today)
@@ -401,8 +385,7 @@ export default function DebugPage() {
         .or(`destination_id.eq.${storeId},acting_store_id.eq.${storeId}`)
         .order('created_at', { ascending: false })
         .limit(20)
-      const { data: mutItems } = await supabase.from('warehouse_mutation_items')
-        .select('mutation_id')
+      const { data: mutItems } = await supabase.from('warehouse_mutation_items').select('mutation_id')
       const mutWithItems = new Set((mutItems || []).map(m => m.mutation_id))
       const emptyMuts = (mutations || []).filter(m => !mutWithItems.has(m.id))
 
@@ -420,7 +403,7 @@ export default function DebugPage() {
           status: emptyMuts.length === 0 ? 'ok' : 'error',
           value: emptyMuts.length === 0 ? 'Semua lengkap ✓' : `${emptyMuts.length} mutasi kosong`,
           detail: emptyMuts.length > 0
-            ? `Mutasi berikut tidak punya items:\n${emptyMuts.map(m => `${m.mutation_number || m.id} | ${m.mutation_type} | ${new Date(m.created_at).toLocaleString('id-ID')}`).join('\n')}\n\nSolusi: hapus dan buat ulang mutasi ini`
+            ? `Mutasi berikut tidak punya items:\n${emptyMuts.map(m => `${m.mutation_number || m.id} | ${m.mutation_type} | ${new Date(m.created_at).toLocaleString('id-ID')}`).join('\n')}`
             : undefined,
         },
       ])
@@ -463,7 +446,6 @@ export default function DebugPage() {
       const { data: users } = await supabase.from('users').select('id, name, role, is_active').eq('store_id', storeId)
       const active = (users || []).filter(u => u.is_active)
       const inactive = (users || []).filter(u => !u.is_active)
-
       setUserChecks([
         {
           label: 'User aktif di toko ini',
@@ -488,7 +470,6 @@ export default function DebugPage() {
       try { syncQueue = await (db as any).sync_queue?.toArray() ?? [] } catch { }
       const pending = syncQueue.filter(q => q.status === 'pending' || !q.status)
       const failed = syncQueue.filter(q => q.status === 'failed' || (q.retry_count || 0) >= 3)
-
       setSyncQChecks([
         {
           label: 'Antrian sync pending',
@@ -556,105 +537,96 @@ export default function DebugPage() {
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
-      {activeTab === 'log' ? <LogPage /> : null}
-      {activeTab === 'diagnostik' ? <div className="flex flex-col h-full">
-        <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
-          <div>
-            <h1 className="text-lg font-semibold text-gray-900">Debug & Diagnostik</h1>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {lastRun
-                ? `Terakhir: ${lastRun.toLocaleTimeString('id-ID')}${latency ? ` · Latensi: ${latency}ms` : ''}`
-                : 'Belum pernah cek'}
-            </p>
-          </div>
-          <button onClick={runChecks} disabled={running}
-            className="flex items-center gap-1.5 text-sm font-medium text-gray-700 border border-gray-200 bg-white px-3 py-1.5 rounded-lg disabled:opacity-50">
-            <RefreshCw size={14} className={running ? 'animate-spin' : ''} />
-            {running ? 'Cek...' : 'Cek Ulang'}
-          </button>
+      {/* Header */}
+      <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900">Debug & Diagnostik</h1>
+          <p className="text-xs text-gray-400 mt-0.5">
+            {lastRun
+              ? `Terakhir: ${lastRun.toLocaleTimeString('id-ID')}${latency ? ` · Latensi: ${latency}ms` : ''}`
+              : 'Belum pernah cek'}
+          </p>
         </div>
+        <button onClick={runChecks} disabled={running}
+          className="flex items-center gap-1.5 text-sm font-medium text-gray-700 border border-gray-200 bg-white px-3 py-1.5 rounded-lg disabled:opacity-50">
+          <RefreshCw size={14} className={running ? 'animate-spin' : ''} />
+          {running ? 'Cek...' : 'Cek Ulang'}
+        </button>
+      </div>
 
-        {/* Tab switcher */}
-        <div className="bg-white border-b border-gray-100 flex flex-shrink-0 px-4">
-          <button onClick={() => setActiveTab('diagnostik')}
-            className={`py-2.5 mr-5 text-sm font-medium border-b-2 transition-colors ${activeTab === 'diagnostik' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
-            Diagnostik
-          </button>
-          <button onClick={() => setActiveTab('log')}
-            className={`py-2.5 mr-5 text-sm font-medium border-b-2 transition-colors ${activeTab === 'log' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
-            Log Error
-          </button>
-        </div>
-        {activeTab === 'log' && <LogPage />}
-        {activeTab === 'diagnostik' && <div className="flex flex-col flex-1 overflow-hidden">}
-          {/* Tab switcher */}
-          <div className="bg-white border-b border-gray-100 flex flex-shrink-0 px-4">
-            <button onClick={() => setActiveTab('diagnostik')}
-              className={`py-2.5 mr-5 text-sm font-medium border-b-2 transition-colors ${activeTab === 'diagnostik' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
-              Diagnostik
-            </button>
-            <button onClick={() => setActiveTab('log')}
-              className={`py-2.5 mr-5 text-sm font-medium border-b-2 transition-colors ${activeTab === 'log' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
-              Log Error
-            </button>
-          </div>
-          {activeTab === 'log' && <LogPage />}
-          {activeTab === 'diagnostik' && <div className="flex flex-col flex-1 overflow-hidden">}
-            {/* Summary */}
-            <div className="bg-white border-b border-gray-100 px-4 py-2 flex gap-4 flex-shrink-0">
-              <div className="flex items-center gap-1.5">
-                <XCircle size={13} className="text-red-500" />
-                <span className="text-sm font-medium text-red-600">{errorCount} error</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <AlertCircle size={13} className="text-amber-500" />
-                <span className="text-sm font-medium text-amber-600">{warnCount} warning</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <CheckCircle size={13} className="text-green-500" />
-                <span className="text-sm font-medium text-green-600">{okCount} ok</span>
-              </div>
-              <div className="flex items-center gap-1.5 ml-auto">
-                {navigator.onLine
-                  ? <><Wifi size={13} className="text-green-500" /><span className="text-xs text-green-600">Online</span></>
-                  : <><WifiOff size={13} className="text-red-500" /><span className="text-xs text-red-600">Offline</span></>}
-              </div>
+      {/* Tab switcher */}
+      <div className="bg-white border-b border-gray-100 flex flex-shrink-0 px-4">
+        <button onClick={() => setActiveTab('diagnostik')}
+          className={`py-2.5 mr-5 text-sm font-medium border-b-2 transition-colors ${activeTab === 'diagnostik' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
+          Diagnostik
+        </button>
+        <button onClick={() => setActiveTab('log')}
+          className={`py-2.5 mr-5 text-sm font-medium border-b-2 transition-colors ${activeTab === 'log' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
+          Log Error
+        </button>
+      </div>
+
+      {/* Tab content */}
+      {activeTab === 'log' && <LogPage />}
+
+      {activeTab === 'diagnostik' && (
+        <div className="flex flex-col flex-1 overflow-hidden">
+          {/* Summary */}
+          <div className="bg-white border-b border-gray-100 px-4 py-2 flex gap-4 flex-shrink-0">
+            <div className="flex items-center gap-1.5">
+              <XCircle size={13} className="text-red-500" />
+              <span className="text-sm font-medium text-red-600">{errorCount} error</span>
             </div>
+            <div className="flex items-center gap-1.5">
+              <AlertCircle size={13} className="text-amber-500" />
+              <span className="text-sm font-medium text-amber-600">{warnCount} warning</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <CheckCircle size={13} className="text-green-500" />
+              <span className="text-sm font-medium text-green-600">{okCount} ok</span>
+            </div>
+            <div className="flex items-center gap-1.5 ml-auto">
+              {navigator.onLine
+                ? <><Wifi size={13} className="text-green-500" /><span className="text-xs text-green-600">Online</span></>
+                : <><WifiOff size={13} className="text-red-500" /><span className="text-xs text-red-600">Offline</span></>}
+            </div>
+          </div>
 
-            <div className="flex-1 overflow-auto p-4 space-y-3">
-              <Section emoji="🌐" title="Network & Koneksi" checks={netChecks} />
-              <Section emoji="💰" title="PPN & Pajak" checks={ppnChecks} />
-              <Section emoji="📦" title="Stok Toko" checks={stokChecks} />
-              <Section emoji="🧾" title="Resep BOM (Kasir)" checks={bomChecks} />
-              <Section emoji="🎁" title="Paket & Diskon" checks={paketChecks} />
-              <Section emoji="💳" title="Transaksi Hari Ini" checks={txChecks} />
-              <Section emoji="⏱️" title="Shift Kasir" checks={shiftChecks} />
-              <Section emoji="🔄" title="Mutasi Stok" checks={mutasiChecks} />
-              <Section emoji="👥" title="User & Akses" checks={userChecks} />
-              <Section emoji="🔁" title="Sinkronisasi Dexie/Server" checks={syncChecks} />
-              <Section emoji="⚡" title="Antrian Sync" checks={syncQChecks} />
-              <Section emoji="📊" title="Performa Database" checks={perfChecks} />
+          <div className="flex-1 overflow-auto p-4 space-y-3">
+            <Section emoji="🌐" title="Network & Koneksi" checks={netChecks} />
+            <Section emoji="💰" title="PPN & Pajak" checks={ppnChecks} />
+            <Section emoji="📦" title="Stok Toko" checks={stokChecks} />
+            <Section emoji="🧾" title="Resep BOM (Kasir)" checks={bomChecks} />
+            <Section emoji="🎁" title="Paket & Diskon" checks={paketChecks} />
+            <Section emoji="💳" title="Transaksi Hari Ini" checks={txChecks} />
+            <Section emoji="⏱️" title="Shift Kasir" checks={shiftChecks} />
+            <Section emoji="🔄" title="Mutasi Stok" checks={mutasiChecks} />
+            <Section emoji="👥" title="User & Akses" checks={userChecks} />
+            <Section emoji="🔁" title="Sinkronisasi Dexie/Server" checks={syncChecks} />
+            <Section emoji="⚡" title="Antrian Sync" checks={syncQChecks} />
+            <Section emoji="📊" title="Performa Database" checks={perfChecks} />
 
-              {/* Quick Actions */}
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-50 bg-gray-50">
-                  <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">⚡ Quick Fix</p>
-                </div>
-                <div className="p-4 space-y-2">
-                  <button onClick={async () => {
-                    const { data } = await supabase.from('stores').select('*').eq('id', storeId).single()
-                    if (data) { await db.stores.put(data); alert('Store sync berhasil! PPN terbaru sudah diload.') }
-                  }} className="w-full py-2 text-sm text-left px-3 bg-blue-50 text-blue-700 rounded-lg border border-blue-100">
-                    🔄 Sync store data (PPN) dari Supabase ke Dexie
-                  </button>
-                  <button onClick={async () => {
-                    const [recs, items, mats, stocks, pkgs, pkgItems] = await Promise.all([
-                      supabase.from('store_recipes').select('*').eq('store_id', storeId),
-                      supabase.from('store_recipe_items').select('*'),
-                      supabase.from('materials').select('*'),
-                      supabase.from('stock').select('*').eq('store_id', storeId),
-                      supabase.from('packages').select('*').eq('is_active', true),
-                      await supabase.from('package_items').select('*') => ({data: [] })),
+            {/* Quick Actions */}
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-50 bg-gray-50">
+                <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">⚡ Quick Fix</p>
+              </div>
+              <div className="p-4 space-y-2">
+                <button onClick={async () => {
+                  const { data } = await supabase.from('stores').select('*').eq('id', storeId).single()
+                  if (data) { await db.stores.put(data); alert('Store sync berhasil! PPN terbaru sudah diload.') }
+                }} className="w-full py-2 text-sm text-left px-3 bg-blue-50 text-blue-700 rounded-lg border border-blue-100">
+                  🔄 Sync store data (PPN) dari Supabase ke Dexie
+                </button>
+
+                <button onClick={async () => {
+                  const [recs, items, mats, stocks, pkgs, pkgItems] = await Promise.all([
+                    supabase.from('store_recipes').select('*').eq('store_id', storeId),
+                    supabase.from('store_recipe_items').select('*'),
+                    supabase.from('materials').select('*'),
+                    supabase.from('stock').select('*').eq('store_id', storeId),
+                    supabase.from('packages').select('*').eq('is_active', true),
+                    supabase.from('package_items').select('*').catch(() => ({ data: [] })),
                   ])
                   if (recs.data?.length) await db.store_recipes.bulkPut(recs.data)
                   if (items.data?.length) await db.store_recipe_items.bulkPut(items.data)
@@ -663,9 +635,10 @@ export default function DebugPage() {
                   if (pkgs.data?.length) await db.promotions.bulkPut(pkgs.data as any)
                   alert(`Sync selesai:\n- ${recs.data?.length} resep\n- ${mats.data?.length} material\n- ${stocks.data?.length} stok`)
                   runChecks()
-                  }} className="w-full py-2 text-sm text-left px-3 bg-green-50 text-green-700 rounded-lg border border-green-100">
+                }} className="w-full py-2 text-sm text-left px-3 bg-green-50 text-green-700 rounded-lg border border-green-100">
                   🔄 Sync resep, material, stok & paket dari Supabase
                 </button>
+
                 <button onClick={async () => {
                   const { data: txs } = await supabase.from('transactions')
                     .select('*').eq('store_id', storeId)
@@ -679,6 +652,7 @@ export default function DebugPage() {
                 }} className="w-full py-2 text-sm text-left px-3 bg-purple-50 text-purple-700 rounded-lg border border-purple-100">
                   🔄 Sync transaksi hari ini dari Supabase
                 </button>
+
                 <button onClick={async () => {
                   const { data } = await supabase.from('stock').select('ingredient_id, material_id, qty_on_hand').eq('store_id', storeId)
                   const { data: mats } = await supabase.from('materials').select('id, name, unit')
@@ -691,6 +665,7 @@ export default function DebugPage() {
                 }} className="w-full py-2 text-sm text-left px-3 bg-gray-50 text-gray-700 rounded-lg border border-gray-200">
                   👁 Lihat stok toko saat ini (real-time dari server)
                 </button>
+
                 <button onClick={() => {
                   const info = [
                     `User: ${user?.name} (${user?.role})`,
@@ -703,26 +678,27 @@ export default function DebugPage() {
                   ].join('\n')
                   navigator.clipboard.writeText(info).then(() => alert('Info debug disalin ke clipboard!'))
                 }} className="w-full py-2 text-sm text-left px-3 bg-amber-50 text-amber-700 rounded-lg border border-amber-100">
-
-
-                  <button onClick={async () => {
-                    try {
-                      const stuck = await (db as any).sync_queue?.filter((q: any) => (q.retry_count || 0) >= 5).toArray() ?? []
-                      for (const item of stuck) await (db as any).sync_queue?.update(item.id, { status: 'abandoned' })
-                      await (db as any).sync_queue?.where('status').anyOf(['abandoned']).delete()
-                      alert('Berhasil! ' + stuck.length + ' item stuck dihapus')
-                      runChecks()
-                    } catch (e) { alert('Gagal: ' + String(e)) }
-                  }} className="w-full py-2 text-sm text-left px-3 bg-red-50 text-red-700 rounded-lg border border-red-100">
-                    Bersihkan antrian sync yang stuck
-                  </button>
                   📋 Copy info debug ke clipboard (untuk laporan)
+                </button>
+
+                <button onClick={async () => {
+                  try {
+                    const stuck = await (db as any).sync_queue?.filter((q: any) => (q.retry_count || 0) >= 5).toArray() ?? []
+                    for (const item of stuck) await (db as any).sync_queue?.update(item.id, { status: 'abandoned' })
+                    await (db as any).sync_queue?.where('status').anyOf(['abandoned']).delete()
+                    alert('Berhasil! ' + stuck.length + ' item stuck dihapus')
+                    runChecks()
+                  } catch (e) { alert('Gagal: ' + String(e)) }
+                }} className="w-full py-2 text-sm text-left px-3 bg-red-50 text-red-700 rounded-lg border border-red-100">
+                  🗑 Bersihkan antrian sync yang stuck
                 </button>
               </div>
             </div>
 
             <div className="h-4" />
           </div>
-          </div>
+        </div>
+      )}
+    </div>
   )
 }

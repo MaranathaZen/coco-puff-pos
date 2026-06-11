@@ -194,3 +194,190 @@
 [2026-06-09 18:11:55] === Coco Puff Print Server v2.0 ===
 [2026-06-09 18:11:55] HTTPS mode: https://localhost:5000
 [2026-06-09 18:11:55] Buka https://localhost:5000/health di browser, klik Advanced > Proceed to localhost
+[2026-06-11 12:52:15] === Coco Puff Print Server v6.0 ===
+[2026-06-11 12:52:15] WSS WebSocket : wss://localhost:7676
+[2026-06-11 12:52:15] HTTPS Health  : https://localhost:7677/health
+[2026-06-11 12:52:15] 
+[2026-06-11 12:52:15] PENTING - Lakukan SEKALI di Chrome:
+[2026-06-11 12:52:15] Buka https://localhost:7677/health
+[2026-06-11 12:52:15] Klik Advanced > Proceed to localhost
+[2026-06-11 12:52:15] HTTP health: https://localhost:7677/health
+[2026-06-11 12:52:15] WSS server: wss://localhost:7676/ws
+[2026-06-11 12:52:43] WSS client terhubung: ('127.0.0.1', 54057)
+[2026-06-11 12:52:43] WSS client disconnect
+[2026-06-11 12:52:45] WSS client terhubung: ('127.0.0.1', 54061)
+[2026-06-11 12:52:45] WSS client disconnect
+[2026-06-11 12:52:49] WSS client terhubung: ('127.0.0.1', 54067)
+[2026-06-11 12:52:49] Print OK
+[2026-06-11 12:52:49] WSS client disconnect
+[2026-06-11 12:52:55] WSS client terhubung: ('127.0.0.1', 54071)
+[2026-06-11 12:52:55] Print OK
+[2026-06-11 12:52:55] WSS client disconnect
+[2026-06-11 12:53:15] WSS client terhubung: ('127.0.0.1', 54086)
+[2026-06-11 12:53:15] WSS client disconnect
+[2026-06-11 12:53:45] WSS client terhubung: ('127.0.0.1', 54103)
+[2026-06-11 12:53:45] WSS client disconnect
+[2026-06-11 12:54:15] WSS client terhubung: ('127.0.0.1', 54113)
+[2026-06-11 12:54:15] WSS client disconnect
+[2026-06-11 12:54:45] WSS client terhubung: ('127.0.0.1', 54121)
+[2026-06-11 12:54:45] WSS client disconnect
+[2026-06-11 12:55:15] WSS client terhubung: ('127.0.0.1', 54178)
+[2026-06-11 12:55:15] WSS client disconnect
+[2026-06-11 12:55:45] WSS client terhubung: ('127.0.0.1', 54194)
+[2026-06-11 12:55:45] WSS client disconnect
+[2026-06-11 12:56:15] WSS client terhubung: ('127.0.0.1', 54208)
+[2026-06-11 12:56:15] WSS client disconnect
+[2026-06-11 12:56:45] WSS client terhubung: ('127.0.0.1', 54221)
+[2026-06-11 12:56:45] WSS client disconnect
+[2026-06-11 12:56:45] WSS client terhubung: ('127.0.0.1', 54223)
+[2026-06-11 12:56:45] Print OK
+[2026-06-11 12:56:45] WSS client disconnect
+[2026-06-11 12:57:15] WSS client terhubung: ('127.0.0.1', 54249)
+[2026-06-11 12:57:15] WSS client disconnect
+[2026-06-11 12:57:45] WSS client terhubung: ('127.0.0.1', 54275)
+[2026-06-11 12:57:45] WSS client disconnect
+[2026-06-11 12:58:15] WSS client terhubung: ('127.0.0.1', 54299)
+[2026-06-11 12:58:15] WSS client disconnect
+[2026-06-11 12:58:17] WSS client terhubung: ('127.0.0.1', 54303)
+[2026-06-11 12:58:17] Print OK
+[2026-06-11 12:58:17] WSS client disconnect
+[2026-06-11 12:58:46] WSS client terhubung: ('127.0.0.1', 54315)
+[2026-06-11 12:58:46] WSS client disconnect
+[2026-06-11 12:59:05] WSS client terhubung: ('127.0.0.1', 54327)
+[2026-06-11 12:59:05] Print OK
+[2026-06-11 12:59:05] WSS client disconnect
+[2026-06-11 12:59:15] WSS client terhubung: ('127.0.0.1', 54339)
+[2026-06-11 12:59:15] WSS client disconnect
+[2026-06-11 12:59:26] WSS client terhubung: ('127.0.0.1', 54347)
+[2026-06-11 12:59:26] Print OK
+[2026-06-11 12:59:26] WSS client disconnect
+[2026-06-11 12:59:46] WSS client terhubung: ('127.0.0.1', 54356)
+[2026-06-11 12:59:46] WSS client disconnect
+[2026-06-11 13:00:16] WSS client terhubung: ('127.0.0.1', 54367)
+[2026-06-11 13:00:16] WSS client disconnect
+[2026-06-11 13:00:45] WSS client terhubung: ('127.0.0.1', 54379)
+[2026-06-11 13:00:45] WSS client disconnect
+[2026-06-11 13:01:15] WSS client terhubung: ('127.0.0.1', 54403)
+[2026-06-11 13:01:15] WSS client disconnect
+[2026-06-11 13:01:28] WSS client terhubung: ('127.0.0.1', 54409)
+[2026-06-11 13:01:28] Print OK
+[2026-06-11 13:01:28] WSS client disconnect
+[2026-06-11 13:01:45] WSS client terhubung: ('127.0.0.1', 54416)
+[2026-06-11 13:01:45] WSS client disconnect
+[2026-06-11 13:02:16] WSS client terhubung: ('127.0.0.1', 54441)
+[2026-06-11 13:02:16] WSS client disconnect
+[2026-06-11 13:02:46] WSS client terhubung: ('127.0.0.1', 54452)
+[2026-06-11 13:02:46] WSS client disconnect
+[2026-06-11 13:03:10] WSS client terhubung: ('127.0.0.1', 54475)
+[2026-06-11 13:03:10] Print OK
+[2026-06-11 13:03:10] WSS client disconnect
+[2026-06-11 13:03:15] WSS client terhubung: ('127.0.0.1', 54485)
+[2026-06-11 13:03:15] WSS client disconnect
+[2026-06-11 13:03:46] WSS client terhubung: ('127.0.0.1', 54498)
+[2026-06-11 13:03:46] WSS client disconnect
+[2026-06-11 13:04:16] WSS client terhubung: ('127.0.0.1', 54510)
+[2026-06-11 13:04:16] WSS client disconnect
+[2026-06-11 13:05:12] WSS client terhubung: ('127.0.0.1', 54527)
+[2026-06-11 13:05:12] WSS client disconnect
+[2026-06-11 13:05:16] WSS client terhubung: ('127.0.0.1', 54532)
+[2026-06-11 13:05:16] WSS client disconnect
+[2026-06-11 13:05:46] WSS client terhubung: ('127.0.0.1', 54552)
+[2026-06-11 13:05:46] WSS client disconnect
+[2026-06-11 13:07:12] WSS client terhubung: ('127.0.0.1', 54582)
+[2026-06-11 13:07:12] WSS client disconnect
+[2026-06-11 13:08:12] WSS client terhubung: ('127.0.0.1', 54598)
+[2026-06-11 13:08:12] WSS client disconnect
+[2026-06-11 13:09:12] WSS client terhubung: ('127.0.0.1', 54615)
+[2026-06-11 13:09:12] WSS client disconnect
+[2026-06-11 13:10:12] WSS client terhubung: ('127.0.0.1', 54636)
+[2026-06-11 13:10:12] WSS client disconnect
+[2026-06-11 13:11:12] WSS client terhubung: ('127.0.0.1', 54653)
+[2026-06-11 13:11:12] WSS client disconnect
+[2026-06-11 13:12:12] WSS client terhubung: ('127.0.0.1', 54680)
+[2026-06-11 13:12:12] WSS client disconnect
+[2026-06-11 13:13:12] WSS client terhubung: ('127.0.0.1', 54701)
+[2026-06-11 13:13:12] WSS client disconnect
+[2026-06-11 13:14:12] WSS client terhubung: ('127.0.0.1', 54722)
+[2026-06-11 13:14:12] WSS client disconnect
+[2026-06-11 13:15:12] WSS client terhubung: ('127.0.0.1', 54739)
+[2026-06-11 13:15:12] WSS client disconnect
+[2026-06-11 13:16:12] WSS client terhubung: ('127.0.0.1', 54768)
+[2026-06-11 13:16:12] WSS client disconnect
+[2026-06-11 13:17:12] WSS client terhubung: ('127.0.0.1', 54794)
+[2026-06-11 13:17:12] WSS client disconnect
+[2026-06-11 13:18:12] WSS client terhubung: ('127.0.0.1', 54810)
+[2026-06-11 13:18:12] WSS client disconnect
+[2026-06-11 13:19:12] WSS client terhubung: ('127.0.0.1', 54831)
+[2026-06-11 13:19:12] WSS client disconnect
+[2026-06-11 13:20:12] WSS client terhubung: ('127.0.0.1', 54854)
+[2026-06-11 13:20:12] WSS client disconnect
+[2026-06-11 13:21:12] WSS client terhubung: ('127.0.0.1', 54872)
+[2026-06-11 13:21:12] WSS client disconnect
+[2026-06-11 13:22:12] WSS client terhubung: ('127.0.0.1', 54892)
+[2026-06-11 13:22:12] WSS client disconnect
+[2026-06-11 13:23:12] WSS client terhubung: ('127.0.0.1', 54911)
+[2026-06-11 13:23:12] WSS client disconnect
+[2026-06-11 13:24:12] WSS client terhubung: ('127.0.0.1', 54926)
+[2026-06-11 13:24:12] WSS client disconnect
+[2026-06-11 13:25:12] WSS client terhubung: ('127.0.0.1', 54947)
+[2026-06-11 13:25:12] WSS client disconnect
+[2026-06-11 13:26:12] WSS client terhubung: ('127.0.0.1', 54981)
+[2026-06-11 13:26:12] WSS client disconnect
+[2026-06-11 13:27:12] WSS client terhubung: ('127.0.0.1', 55001)
+[2026-06-11 13:27:12] WSS client disconnect
+[2026-06-11 13:28:12] WSS client terhubung: ('127.0.0.1', 55020)
+[2026-06-11 13:28:12] WSS client disconnect
+[2026-06-11 13:29:12] WSS client terhubung: ('127.0.0.1', 55036)
+[2026-06-11 13:29:12] WSS client disconnect
+[2026-06-11 13:30:12] WSS client terhubung: ('127.0.0.1', 55050)
+[2026-06-11 13:30:12] WSS client disconnect
+[2026-06-11 13:31:12] WSS client terhubung: ('127.0.0.1', 55081)
+[2026-06-11 13:31:12] WSS client disconnect
+[2026-06-11 13:32:12] WSS client terhubung: ('127.0.0.1', 55100)
+[2026-06-11 13:32:12] WSS client disconnect
+[2026-06-11 13:33:12] WSS client terhubung: ('127.0.0.1', 55128)
+[2026-06-11 13:33:12] WSS client disconnect
+[2026-06-11 13:34:12] WSS client terhubung: ('127.0.0.1', 55153)
+[2026-06-11 13:34:12] WSS client disconnect
+[2026-06-11 13:34:31] WSS client terhubung: ('127.0.0.1', 55168)
+[2026-06-11 13:34:31] WSS client disconnect
+[2026-06-11 13:34:46] WSS client terhubung: ('127.0.0.1', 55191)
+[2026-06-11 13:34:46] WSS client disconnect
+[2026-06-11 13:35:16] WSS client terhubung: ('127.0.0.1', 55215)
+[2026-06-11 13:35:16] WSS client disconnect
+[2026-06-11 13:35:46] WSS client terhubung: ('127.0.0.1', 55241)
+[2026-06-11 13:35:46] WSS client disconnect
+[2026-06-11 13:36:16] WSS client terhubung: ('127.0.0.1', 55260)
+[2026-06-11 13:36:16] WSS client disconnect
+[2026-06-11 13:36:46] WSS client terhubung: ('127.0.0.1', 55274)
+[2026-06-11 13:36:46] WSS client disconnect
+[2026-06-11 13:37:16] WSS client terhubung: ('127.0.0.1', 55308)
+[2026-06-11 13:37:16] WSS client disconnect
+[2026-06-11 13:37:46] WSS client terhubung: ('127.0.0.1', 55322)
+[2026-06-11 13:37:46] WSS client disconnect
+[2026-06-11 13:38:16] WSS client terhubung: ('127.0.0.1', 55339)
+[2026-06-11 13:38:16] WSS client disconnect
+[2026-06-11 13:38:46] WSS client terhubung: ('127.0.0.1', 55357)
+[2026-06-11 13:38:46] WSS client disconnect
+[2026-06-11 13:40:12] WSS client terhubung: ('127.0.0.1', 55396)
+[2026-06-11 13:40:12] WSS client disconnect
+[2026-06-11 13:40:35] WSS client terhubung: ('127.0.0.1', 55403)
+[2026-06-11 13:40:35] WSS client disconnect
+[2026-06-11 13:40:46] WSS client terhubung: ('127.0.0.1', 55411)
+[2026-06-11 13:40:46] WSS client disconnect
+[2026-06-11 13:41:16] WSS client terhubung: ('127.0.0.1', 55473)
+[2026-06-11 13:41:16] WSS client disconnect
+[2026-06-11 13:41:46] WSS client terhubung: ('127.0.0.1', 55487)
+[2026-06-11 13:41:46] WSS client disconnect
+[2026-06-11 13:43:12] WSS client terhubung: ('127.0.0.1', 55530)
+[2026-06-11 13:43:12] WSS client disconnect
+[2026-06-11 13:44:12] WSS client terhubung: ('127.0.0.1', 55549)
+[2026-06-11 13:44:12] WSS client disconnect
+[2026-06-11 13:45:12] WSS client terhubung: ('127.0.0.1', 55568)
+[2026-06-11 13:45:12] WSS client disconnect
+[2026-06-11 13:46:12] WSS client terhubung: ('127.0.0.1', 55598)
+[2026-06-11 13:46:12] WSS client disconnect
+[2026-06-11 13:47:12] WSS client terhubung: ('127.0.0.1', 55626)
+[2026-06-11 13:47:12] WSS client disconnect
+[2026-06-11 13:47:25] WSS client terhubung: ('127.0.0.1', 55636)
+[2026-06-11 13:47:25] WSS client disconnect

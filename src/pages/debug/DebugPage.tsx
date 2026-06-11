@@ -72,7 +72,9 @@ function Section({ title, checks, emoji }: { title: string; checks: CheckResult[
 
 export default function DebugPage() {
   const { user } = useAuthStore()
-  const storeId = user?.store_id || ''
+  const [selectedStoreId, setSelectedStoreId] = useState(user?.store_id || '')
+  const storeId = selectedStoreId || user?.store_id || ''
+  const [allStores, setAllStores] = useState<any[]>([])
   const [running,   setRunning]   = useState(false)
   const [lastRun,   setLastRun]   = useState<Date | null>(null)
   const [latency,   setLatency]   = useState<number | null>(null)
@@ -287,6 +289,13 @@ export default function DebugPage() {
     setRunning(false)
   }
 
+  useEffect(() => {
+    supabase.from('stores').select('id, name').eq('is_active', true)
+      .then(({ data }) => {
+        if (data) setAllStores(data.filter((s: any) => !s.id.includes('gudang') && !s.id.includes('produksi')))
+      })
+  }, [])
+
   useEffect(() => { runChecks() }, [storeId])
 
   const allChecks = [...ppnChecks, ...stokChecks, ...bomChecks, ...syncChecks, ...txChecks, ...shiftChecks, ...mutasiChecks, ...paketChecks, ...userChecks, ...netChecks, ...perfChecks, ...syncQChecks]
@@ -335,6 +344,16 @@ export default function DebugPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {allStores.length > 1 && (
+            <select
+              value={selectedStoreId}
+              onChange={e => setSelectedStoreId(e.target.value)}
+              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 outline-none">
+              {allStores.map(s => (
+                <option key={s.id} value={s.id}>{s.name.replace(/ Malang$/,'').replace(/ Bali$/,'')}</option>
+              ))}
+            </select>
+          )}
           <button onClick={exportJSON}
             className="flex items-center gap-1.5 text-sm font-medium text-green-700 border border-green-200 bg-green-50 px-3 py-1.5 rounded-lg">
             <Download size={14} /> Export JSON

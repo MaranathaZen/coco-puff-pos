@@ -180,7 +180,7 @@ export default function DebugPage() {
         supabase.from('transactions').select('*', { count: 'exact', head: true }).eq('store_id', storeId).gte('created_at', today + 'T00:00:00+07:00'),
         supabase.from('stock').select('*', { count: 'exact', head: true }).eq('store_id', storeId),
         supabase.from('materials').select('*', { count: 'exact', head: true }),
-        supabase.from('store_recipes').select('*', { count: 'exact', head: true }).eq('store_id', storeId),
+        supabase.from('store_recipes').select('*', { count: 'exact', head: true }),
         supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true),
       ])
       setSyncChecks([

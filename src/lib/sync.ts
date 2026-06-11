@@ -197,9 +197,10 @@ export async function pullFromSupabase(storeId?: string) {
       supabase.from('production_log_materials').select('*'),
     ])
 
-    await safeReplace(db.store_product_prices, prices.data)
-    await safeReplace(db.promotions, promos.data)
-    await safeReplace(db.stock, stock.data)
+    // stock, prices, promotions: bulkPut saja (pull per store_id, orphan cleanup tidak relevan)
+    if (prices.data?.length) await db.store_product_prices.bulkPut(prices.data)
+    if (promos.data?.length) await db.promotions.bulkPut(promos.data)
+    if (stock.data?.length) await db.stock.bulkPut(stock.data)
     await safeReplace(db.warehouse_stock, wstock.data)
     await safeReplace(db.production_stock, pstock.data)
     await safeReplace(db.finished_goods_stock, fgstock.data)
@@ -274,12 +275,12 @@ async function safeReplace(table: any, data: any[] | null) {
     const toDelete = localRecords
       .filter((r: any) => r.id && !serverIds.has(r.id))
       .map((r: any) => r.id)
-    if (toDelete.length > 0) {
+    // Guard: jangan hapus kalau server data terlalu sedikit (kemungkinan partial pull)
+    if (toDelete.length > 0 && data.length >= 3) {
       await table.bulkDelete(toDelete)
       console.log(`[SYNC] Cleaned ${toDelete.length} orphan records from`, table.name || 'table')
     }
   } catch (e) {
-    // Orphan cleanup gagal — tidak masalah, data masih valid
     console.warn('[SYNC] Orphan cleanup failed:', e)
   }
 }

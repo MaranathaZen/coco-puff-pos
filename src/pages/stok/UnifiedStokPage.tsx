@@ -759,11 +759,7 @@ function StokAwalTokoForm({ storeId, onClose }: { storeId: string; onClose: () =
           last_updated: now(),
         }
         await db.stock.put(data)
-        if (existing) {
-          await supabase.from('stock').update({ qty_on_hand: data.qty_on_hand, avg_cost: data.avg_cost }).eq('id', existing.id)
-        } else {
-          await supabase.from('stock').upsert(data)
-        }
+        await supabase.from('stock').upsert(data, { onConflict: 'store_id,ingredient_id' })
       }
       toast.success(`${valid.length} item stok toko disimpan`)
       onClose()

@@ -1,9 +1,9 @@
-/**
- * Sync offline-first — v9
- * FIX v9: infinite pull loop — guard realtimeConnected di subscribe callback
+﻿/**
+ * Sync offline-first â€” v9
+ * FIX v9: infinite pull loop â€” guard realtimeConnected di subscribe callback
  * FIX v9: startSyncWorker guard lebih ketat (cek realtimeChannel juga)
- * FIX: replaceTable pakai bulkPut saja (tidak clear dulu) — hindari data kosong kalau putus
- * FIX: retry_count >= 5 → mark abandoned bukan stuck (banner hilang)
+ * FIX: replaceTable pakai bulkPut saja (tidak clear dulu) â€” hindari data kosong kalau putus
+ * FIX: retry_count >= 5 â†’ mark abandoned bukan stuck (banner hilang)
  * FIX: push interval 5s
  * FIX: pull interval 30s
  */
@@ -109,15 +109,15 @@ function startRealtime(storeId: string) {
       if (status === 'SUBSCRIBED') {
         // FIX v9: hanya pull saat pertama connect, bukan setiap kali SUBSCRIBED
         if (!realtimeConnected) {
-          console.log('[REALTIME] Connected — pull ulang (pertama kali)')
+          console.log('[REALTIME] Connected â€” pull ulang (pertama kali)')
           pullFromSupabase(storeId)
         }
         realtimeConnected = true
       }
 
-      // FIX v9: reset flag saat disconnect — pull lagi saat reconnect
+      // FIX v9: reset flag saat disconnect â€” pull lagi saat reconnect
       if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        console.log(`[REALTIME] Disconnected (${status}) — akan pull ulang saat reconnect`)
+        console.log(`[REALTIME] Disconnected (${status}) â€” akan pull ulang saat reconnect`)
         realtimeConnected = false
       }
     })
@@ -251,7 +251,7 @@ export async function pullFromSupabase(storeId?: string) {
     if (txs.data?.length) await db.transactions.bulkPut(txs.data)
     if (txItemsData.length) await db.transaction_items.bulkPut(txItemsData)
 
-    console.log(`[SYNC] Pull selesai — toko: ${sid}`)
+    console.log(`[SYNC] Pull selesai â€” toko: ${sid}`)
   } catch (e) {
     console.warn('[SYNC] Pull gagal (offline?):', e)
     if (navigator.onLine) logger.warn('sync', 'Pull gagal', { error: String(e) })
@@ -261,7 +261,7 @@ export async function pullFromSupabase(storeId?: string) {
 }
 
 /**
- * safeReplace — replace data + hapus orphan yang tidak ada di server
+ * safeReplace â€” replace data + hapus orphan yang tidak ada di server
  * Untuk master tables: stores, products, categories, materials, users, dll
  */
 async function safeReplace(table: any, data: any[] | null) {
@@ -303,7 +303,7 @@ export async function pushToSupabase() {
       .filter(q => q.retry_count >= 5)
       .toArray()
     for (const item of abandoned) {
-      console.warn(`[SYNC] Abandoned ${item.table_name} ${item.record_id} — retry_count >= 5`)
+      console.warn(`[SYNC] Abandoned ${item.table_name} ${item.record_id} â€” retry_count >= 5`)
       await db.sync_queue.update(item.id, { status: 'abandoned', error_msg: 'Max retry reached' })
     }
 
@@ -332,12 +332,12 @@ export async function pushToSupabase() {
 
           if (error) {
             if (error.code === '23505') {
-              console.log(`[SYNC] Unique conflict ${item.table_name} ${item.record_id} — mark done`)
+              console.log(`[SYNC] Unique conflict ${item.table_name} ${item.record_id} â€” mark done`)
               await db.sync_queue.update(item.id, { status: 'done', synced_at: now(), error_msg: undefined })
               continue
             }
             if (error.code === '23503') {
-              console.warn(`[SYNC] FK violation ${item.table_name} ${item.record_id} — skip, retry nanti`)
+              console.warn(`[SYNC] FK violation ${item.table_name} ${item.record_id} â€” skip, retry nanti`)
               await db.sync_queue.update(item.id, {
                 retry_count: item.retry_count + 1,
                 error_msg: 'FK violation: parent record belum sync',
@@ -345,13 +345,13 @@ export async function pushToSupabase() {
               continue
             }
             if (error.code === 'PGRST204') {
-              console.warn(`[SYNC] Schema mismatch ${item.table_name} — mark done, cek kolom DB`)
+              console.warn(`[SYNC] Schema mismatch ${item.table_name} â€” mark done, cek kolom DB`)
               await db.sync_queue.update(item.id, { status: 'done', synced_at: now(), error_msg: error.message })
               continue
             }
-            // FIX v9: 409 conflict → mark done, jangan retry
+            // FIX v9: 409 conflict â†’ mark done, jangan retry
             if (error.code === '409' || error.message?.includes('409') || error.code === '400' || String(error.message).includes('400 ')) {
-              console.warn(`[SYNC] 409 conflict ${item.table_name} ${item.record_id} — mark done`)
+              console.warn(`[SYNC] 409 conflict ${item.table_name} ${item.record_id} â€” mark done`)
               await db.sync_queue.update(item.id, { status: 'done', synced_at: now(), error_msg: error.message })
               continue
             }
@@ -378,9 +378,9 @@ export async function pushToSupabase() {
 export function startSyncWorker(storeId: string) {
   setCurrentStoreId(storeId)
 
-  // FIX v9: guard lebih ketat — cek semua komponen aktif
+  // FIX v9: guard lebih ketat â€” cek semua komponen aktif
   if (pushInterval && pullInterval && realtimeChannel && currentStoreId === storeId) {
-    console.log(`[SYNC] Worker sudah berjalan untuk toko: ${storeId} — skip`)
+    console.log(`[SYNC] Worker sudah berjalan untuk toko: ${storeId} â€” skip`)
     return
   }
 
@@ -395,7 +395,7 @@ export function startSyncWorker(storeId: string) {
   document.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('online', handleOnline)
 
-  console.log(`[SYNC] Worker started — toko: ${storeId}`)
+  console.log(`[SYNC] Worker started â€” toko: ${storeId}`)
 }
 
 export function stopSyncWorker() {
@@ -417,7 +417,7 @@ function handleVisibilityChange() {
 }
 
 function handleOnline() {
-  console.log('[SYNC] Kembali online — push pending segera')
+  console.log('[SYNC] Kembali online â€” push pending segera')
   setTimeout(() => {
     pullFromSupabase(currentStoreId || undefined)
     pushToSupabase()

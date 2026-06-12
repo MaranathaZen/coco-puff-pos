@@ -160,7 +160,10 @@ export default function CashierPage() {
       // Sync resep BOM dan stok untuk toko ini — penting agar stok berkurang saat penjualan
       if (recipesRes.data?.length) await db.store_recipes.bulkPut(recipesRes.data)
       if (recipeItemsRes.data?.length) await db.store_recipe_items.bulkPut(recipeItemsRes.data)
-      if (stockRes.data) {`n        await db.stock.where('store_id').equals(STORE_ID).delete()`n        if (stockRes.data.length) await db.stock.bulkPut(stockRes.data)`n      }
+      if (stockRes.data) {
+        await db.stock.where('store_id').equals(STORE_ID).delete()
+        if (stockRes.data.length) await db.stock.bulkPut(stockRes.data)
+      }
       if (showMsg) toast.success('Produk diperbarui')
     } catch (e) {
       console.warn('[SYNC PRODUCTS]', e)

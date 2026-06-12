@@ -160,7 +160,7 @@ export default function CashierPage() {
       // Sync resep BOM dan stok untuk toko ini — penting agar stok berkurang saat penjualan
       if (recipesRes.data?.length) await db.store_recipes.bulkPut(recipesRes.data)
       if (recipeItemsRes.data?.length) await db.store_recipe_items.bulkPut(recipeItemsRes.data)
-      if (stockRes.data?.length) await db.stock.bulkPut(stockRes.data)
+      if (stockRes.data) {`n        await db.stock.where('store_id').equals(STORE_ID).delete()`n        if (stockRes.data.length) await db.stock.bulkPut(stockRes.data)`n      }
       if (showMsg) toast.success('Produk diperbarui')
     } catch (e) {
       console.warn('[SYNC PRODUCTS]', e)
@@ -449,16 +449,12 @@ export default function CashierPage() {
                 (s as any).material_id === ri.material_id
               )
             ).first()
+            // FIX: compound index
             if (!storeStock) {
-              const matName = matMap[ri.material_id]?.name?.toLowerCase()
-              if (matName) {
-                const allStocks = await db.stock.where('store_id').equals(storeId).toArray()
-                for (const s of allStocks) {
-                  const sMatId = s.ingredient_id || (s as any).material_id || ''
-                  const sMat = matMap[sMatId]
-                  if (sMat?.name?.toLowerCase() === matName) { storeStock = s; break }
-                }
-              }
+              storeStock = await (db.stock as any)
+                .where('[store_id+material_id]')
+                .equals([storeId, ri.material_id])
+                .first()
             }
             if (storeStock) {
               const newQty = Math.max(0, storeStock.qty_on_hand - qty)
@@ -501,16 +497,12 @@ export default function CashierPage() {
                 (s as any).material_id === ri.material_id
               )
             ).first()
+            // FIX: compound index
             if (!storeStock) {
-              const matName = matMap[ri.material_id]?.name?.toLowerCase()
-              if (matName) {
-                const allStocks = await db.stock.where('store_id').equals(storeId).toArray()
-                for (const s of allStocks) {
-                  const sMatId = s.ingredient_id || (s as any).material_id || ''
-                  const sMat = matMap[sMatId]
-                  if (sMat?.name?.toLowerCase() === matName) { storeStock = s; break }
-                }
-              }
+              storeStock = await (db.stock as any)
+                .where('[store_id+material_id]')
+                .equals([storeId, ri.material_id])
+                .first()
             }
             if (storeStock) {
               const newQty = storeStock.qty_on_hand + qty

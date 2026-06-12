@@ -200,7 +200,7 @@ export async function pullFromSupabase(storeId?: string) {
     // stock, prices, promotions: bulkPut saja (pull per store_id, orphan cleanup tidak relevan)
     if (prices.data?.length) await db.store_product_prices.bulkPut(prices.data)
     if (promos.data?.length) await db.promotions.bulkPut(promos.data)
-    if (stock.data?.length) await db.stock.bulkPut(stock.data)
+    if (stock.data) {`n      await db.stock.where('store_id').equals(sid).delete()`n      if (stock.data.length) await db.stock.bulkPut(stock.data)`n    }
     await safeReplace(db.warehouse_stock, wstock.data)
     await safeReplace(db.production_stock, pstock.data)
     await safeReplace(db.finished_goods_stock, fgstock.data)

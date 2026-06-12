@@ -1,9 +1,9 @@
-// src/pages/cashier/EndOfDayPage.tsx
+﻿// src/pages/cashier/EndOfDayPage.tsx
 // CHANGELOG v6:
 // - DESKTOP: layout 3 kolom (Input Manual | Penjualan | Laporan Kas) + (Void | Produk | Stok)
 // - DESKTOP: tombol Simpan & Share WhatsApp di pojok kanan atas header
 // - MOBILE: tidak ada perubahan sama sekali
-// - FIX: floating point qty stok (103.400000... → 103.4)
+// - FIX: floating point qty stok (103.400000... â†’ 103.4)
 
 import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -213,7 +213,7 @@ export default function EndOfDayPage() {
   const totalSetorNum = Number(totalSetor) || 0
   const uangFisikNum = Number(uangFisik) || 0
   const cashPenjualan = todayData?.byMethod['cash'] || 0
-  const saldoAkhir = saldoAwalNum + saldoTambahanNum + cashPenjualan - totalSetorNum - totalBiaya - totalPembelian - totalPembelian
+  const saldoAkhir = saldoAwalNum + saldoTambahanNum + cashPenjualan - totalSetorNum - totalBiaya - totalPembelian
   const selisih = uangFisikNum - saldoAkhir
 
   function generateWAText(report: any): string {
@@ -311,7 +311,7 @@ export default function EndOfDayPage() {
             store_id: storeId,
             amount: totalSetorNum,
             deposit_date: today,
-            notes: `Auto dari Close Order ${today} — ${storeName}`,
+            notes: `Auto dari Close Order ${today} â€” ${storeName}`,
             status: 'pending',
             created_by: user?.id,
             created_at: now(),
@@ -340,7 +340,7 @@ export default function EndOfDayPage() {
     )
   }
 
-  // ── SHARED SECTIONS ───────────────────────────────────────
+  // â”€â”€ SHARED SECTIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const sectionInputManual = (
     <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3 h-full">
@@ -385,7 +385,7 @@ export default function EndOfDayPage() {
         </p>
       </div>
       <Row label="Total Penjualan" value={existingReport?.total_penjualan ?? totalPenjualan} highlight />
-      <p className="text-xs text-gray-400 mt-1">{todayData?.txCount || 0} transaksi · Auto dari sistem</p>
+      <p className="text-xs text-gray-400 mt-1">{todayData?.txCount || 0} transaksi Â· Auto dari sistem</p>
     </div>
   )
 
@@ -450,7 +450,7 @@ export default function EndOfDayPage() {
       {(todayData?.voidCount || 0) > 0 && (
         <div className="flex justify-between text-sm mb-1">
           <span className="text-red-600">Disetujui</span>
-          <span className="font-semibold text-red-700">{todayData?.voidCount} transaksi · {formatRupiah(todayData?.totalVoid || 0)}</span>
+          <span className="font-semibold text-red-700">{todayData?.voidCount} transaksi Â· {formatRupiah(todayData?.totalVoid || 0)}</span>
         </div>
       )}
       {(todayData?.reqVoidCount || 0) > 0 && (
@@ -518,7 +518,7 @@ export default function EndOfDayPage() {
 
       <div className="flex-1 overflow-auto">
 
-        {/* ── MOBILE LAYOUT (default) ── */}
+        {/* â”€â”€ MOBILE LAYOUT (default) â”€â”€ */}
         <div className="md:hidden p-4 space-y-4">
           {existingReport && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-2">
@@ -543,7 +543,7 @@ export default function EndOfDayPage() {
           <div className="h-4" />
         </div>
 
-        {/* ── DESKTOP LAYOUT (md+) ── */}
+        {/* â”€â”€ DESKTOP LAYOUT (md+) â”€â”€ */}
         <div className="hidden md:block px-6 py-4">
           <div className="space-y-3">
 
@@ -562,7 +562,7 @@ export default function EndOfDayPage() {
               </div>
             )}
 
-            {/* Row 1: Input Manual | Penjualan Hari Ini | Laporan Kas — 3 kolom */}
+            {/* Row 1: Input Manual | Penjualan Hari Ini | Laporan Kas â€” 3 kolom */}
             <div className="grid grid-cols-3 gap-3 items-stretch">
               {sectionInputManual}
               {sectionPenjualan}
@@ -578,7 +578,7 @@ export default function EndOfDayPage() {
               {sectionSisaStok ?? <div />}
             </div>
 
-            {/* Actions — hanya mobile, desktop sudah di header */}
+            {/* Actions â€” hanya mobile, desktop sudah di header */}
             <div className="md:hidden">{sectionActions}</div>
             <div className="h-4" />
           </div>

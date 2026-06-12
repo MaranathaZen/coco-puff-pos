@@ -15,12 +15,12 @@ import { RefreshCw, CheckCircle, AlertCircle, Share2, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const PAY_METHODS = [
-  { key: 'cash',       label: 'Tunai'        },
-  { key: 'qris',       label: 'QRIS'         },
-  { key: 'transfer',   label: 'Transfer'     },
-  { key: 'gopay',      label: 'GoPay/GoFood' },
-  { key: 'grab',       label: 'GrabFood'     },
-  { key: 'shopeefood', label: 'ShopeeFood'   },
+  { key: 'cash', label: 'Tunai' },
+  { key: 'qris', label: 'QRIS' },
+  { key: 'transfer', label: 'Transfer' },
+  { key: 'gopay', label: 'GoPay/GoFood' },
+  { key: 'grab', label: 'GrabFood' },
+  { key: 'shopeefood', label: 'ShopeeFood' },
 ]
 
 function NumInput({ label, value, onChange, placeholder, hint, disabled }: {
@@ -58,22 +58,22 @@ function Row({ label, value, highlight, negative, sub }: {
 
 export default function EndOfDayPage() {
   const { user, store } = useAuthStore()
-  const storeId   = user?.store_id || ''
+  const storeId = user?.store_id || ''
   const storeName = store?.name || 'Toko'
-  const today     = new Date().toLocaleDateString('sv-SE')
+  const today = new Date().toLocaleDateString('sv-SE')
 
-  const [syncing,  setSyncing]  = useState(false)
-  const [saving,   setSaving]   = useState(false)
-  const [saved,    setSaved]    = useState(false)
-  const [savedReport,      setSavedReport]      = useState<any>(null)
-  const [existingReport,   setExistingReport]   = useState<any>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [savedReport, setSavedReport] = useState<any>(null)
+  const [existingReport, setExistingReport] = useState<any>(null)
   const [checkingExisting, setCheckingExisting] = useState(true)
 
-  const [saldoAwal,     setSaldoAwal]     = useState('')
+  const [saldoAwal, setSaldoAwal] = useState('')
   const [saldoTambahan, setSaldoTambahan] = useState('')
-  const [totalSetor,    setTotalSetor]    = useState('')
-  const [uangFisik,     setUangFisik]     = useState('')
-  const [notes,         setNotes]         = useState('')
+  const [totalSetor, setTotalSetor] = useState('')
+  const [uangFisik, setUangFisik] = useState('')
+  const [notes, setNotes] = useState('')
 
   useEffect(() => {
     async function checkExisting() {
@@ -99,7 +99,7 @@ export default function EndOfDayPage() {
             toast.success(`Saldo awal Rp ${prev.saldo_akhir.toLocaleString('id-ID')} dari ${prev.report_date}`, { duration: 3000 })
           }
         }
-      } catch {}
+      } catch { }
       setCheckingExisting(false)
     }
     checkExisting()
@@ -117,13 +117,13 @@ export default function EndOfDayPage() {
         supabase.from('warehouse_expenses').select('*').eq('store_id', storeId),
         supabase.from('purchases').select('*').eq('store_id', storeId),
       ])
-      if (txRes.data?.length)    await db.transactions.bulkPut(txRes.data)
-      if (tiRes.data?.length)    await db.transaction_items.bulkPut(tiRes.data)
-      if (prodRes.data?.length)  await db.products.bulkPut(prodRes.data)
+      if (txRes.data?.length) await db.transactions.bulkPut(txRes.data)
+      if (tiRes.data?.length) await db.transaction_items.bulkPut(tiRes.data)
+      if (prodRes.data?.length) await db.products.bulkPut(prodRes.data)
       if (stockRes.data?.length) await db.stock.bulkPut(stockRes.data)
-      if (matsRes.data?.length)  await db.materials.bulkPut(matsRes.data)
-      if (expRes.data?.length)   await db.warehouse_expenses.bulkPut(expRes.data)
-      if (purRes.data?.length)   await db.purchases.bulkPut(purRes.data)
+      if (matsRes.data?.length) await db.materials.bulkPut(matsRes.data)
+      if (expRes.data?.length) await db.warehouse_expenses.bulkPut(expRes.data)
+      if (purRes.data?.length) await db.purchases.bulkPut(purRes.data)
       toast.success('Data diperbarui')
     } catch { toast.error('Gagal sync') }
     finally { setSyncing(false) }
@@ -134,11 +134,11 @@ export default function EndOfDayPage() {
       .filter(t => t.store_id === storeId && new Date(t.created_at).toLocaleDateString('sv-SE') === today)
       .toArray()
     const completedTxs = allTxs.filter(t => t.status === 'completed')
-    const voidedTxs    = allTxs.filter(t => t.status === 'voided')
-    const reqVoidTxs   = allTxs.filter(t => (t as any).status === 'void_requested')
-    const allItems     = await db.transaction_items.toArray()
-    const prods        = await db.products.toArray()
-    const pMap         = Object.fromEntries(prods.map(p => [p.id, p]))
+    const voidedTxs = allTxs.filter(t => t.status === 'voided')
+    const reqVoidTxs = allTxs.filter(t => (t as any).status === 'void_requested')
+    const allItems = await db.transaction_items.toArray()
+    const prods = await db.products.toArray()
+    const pMap = Object.fromEntries(prods.map(p => [p.id, p]))
 
     const byMethod: Record<string, number> = {}
     PAY_METHODS.forEach(m => { byMethod[m.key] = 0 })
@@ -152,14 +152,14 @@ export default function EndOfDayPage() {
         const prod = pMap[item.product_id]; if (!prod) continue
         if (!soldMap[item.product_id]) soldMap[item.product_id] = { name: prod.name, qty: 0, total: 0 }
         const qty = (item as any).qty ?? ((item as any).qty_eceran ?? 0) + ((item as any).qty_dus ?? 0)
-        soldMap[item.product_id].qty   += qty
+        soldMap[item.product_id].qty += qty
         soldMap[item.product_id].total += item.subtotal ?? (qty * ((item as any).unit_price ?? 0))
       }
     }
 
     const totalPenjualan = completedTxs.reduce((s, t) => s + t.total, 0)
-    const totalNonTunai  = totalPenjualan - (byMethod['cash'] || 0)
-    const totalVoid      = voidedTxs.reduce((s, t) => s + t.total, 0)
+    const totalNonTunai = totalPenjualan - (byMethod['cash'] || 0)
+    const totalVoid = voidedTxs.reduce((s, t) => s + t.total, 0)
 
     return {
       txs: completedTxs, byMethod, soldMap,
@@ -191,33 +191,33 @@ export default function EndOfDayPage() {
 
   const stokSisa = useLiveQuery(async () => {
     const stocks = await db.stock.where('store_id').equals(storeId).toArray()
-    const prods  = await db.products.toArray()
-    const mats   = await db.materials.toArray()
+    const prods = await db.products.toArray()
+    const mats = await db.materials.toArray()
     let fgList: any[] = []
-    try { fgList = await (db as any).finished_goods_stock?.toArray() ?? [] } catch {}
-    const pMap  = Object.fromEntries(prods.map(p => [p.id, p.name]))
-    const mMap  = Object.fromEntries(mats.map(m => [m.id, m.name]))
+    try { fgList = await (db as any).finished_goods_stock?.toArray() ?? [] } catch { }
+    const pMap = Object.fromEntries(prods.map(p => [p.id, p.name]))
+    const mMap = Object.fromEntries(mats.map(m => [m.id, m.name]))
     const fgMap = Object.fromEntries(fgList.map((f: any) => [f.product_id ?? f.id, f.product_name ?? f.name]))
-    const uMap  = Object.fromEntries([...prods.map(p => [p.id, p.unit]), ...mats.map(m => [m.id, m.unit])])
+    const uMap = Object.fromEntries([...prods.map(p => [p.id, p.unit]), ...mats.map(m => [m.id, m.unit])])
     return stocks
       .filter(s => { const id = s.ingredient_id || (s as any).product_id || ''; return !!(pMap[id] || mMap[id] || fgMap[id]) })
       .map(s => { const id = s.ingredient_id || (s as any).product_id || ''; return { id: s.id, name: pMap[id] || mMap[id] || fgMap[id] || id, qty: Math.round(s.qty_on_hand * 100) / 100, unit: uMap[id] || 'pcs' } })
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [storeId])
 
-  const totalPenjualan   = todayData?.totalPenjualan || 0
-  const totalBiaya       = biayaHariIni || 0
-  const totalPembelian   = pembelianHariIni || 0
-  const saldoAwalNum     = Number(saldoAwal)     || 0
+  const totalPenjualan = todayData?.totalPenjualan || 0
+  const totalBiaya = biayaHariIni || 0
+  const totalPembelian = pembelianHariIni || 0
+  const saldoAwalNum = Number(saldoAwal) || 0
   const saldoTambahanNum = Number(saldoTambahan) || 0
-  const totalSetorNum    = Number(totalSetor)    || 0
-  const uangFisikNum     = Number(uangFisik)     || 0
-  const cashPenjualan    = todayData?.byMethod['cash'] || 0
-  const saldoAkhir       = saldoAwalNum + saldoTambahanNum + cashPenjualan - totalSetorNum - totalBiaya
-  const selisih          = uangFisikNum - saldoAkhir
+  const totalSetorNum = Number(totalSetor) || 0
+  const uangFisikNum = Number(uangFisik) || 0
+  const cashPenjualan = todayData?.byMethod['cash'] || 0
+  const saldoAkhir = saldoAwalNum + saldoTambahanNum + cashPenjualan - totalSetorNum - totalBiaya - totalPembelian - totalPembelian
+  const selisih = uangFisikNum - saldoAkhir
 
   function generateWAText(report: any): string {
-    const tgl = new Date(today).toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' })
+    const tgl = new Date(today).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
     const lines = [
       `*CLOSE ORDER ${storeName.toUpperCase()}*`,
       `_${tgl}_`,
@@ -229,7 +229,7 @@ export default function EndOfDayPage() {
       `GoPay/GF   : ${formatRupiah(report.total_gopay)}`,
       `GrabFood   : ${formatRupiah(report.total_grab)}`,
       `ShopeeFood : ${formatRupiah(report.total_shopeefood)}`,
-      `Non Tunai  : ${formatRupiah((report.total_penjualan||0)-(report.total_cash||0))}`,
+      `Non Tunai  : ${formatRupiah((report.total_penjualan || 0) - (report.total_cash || 0))}`,
       `*Total     : ${formatRupiah(report.total_penjualan)}*`,
       `(${todayData?.txCount || 0} transaksi)`,
       todayData?.voidCount ? `*Void: ${todayData.voidCount} transaksi (${formatRupiah(todayData.totalVoid)})*` : '',
@@ -271,30 +271,30 @@ export default function EndOfDayPage() {
     setSaving(true)
     try {
       const reportData = {
-        id:               generateId(),
-        store_id:         storeId,
-        report_date:      today,
-        saldo_awal:       saldoAwalNum,
-        saldo_tambahan:   saldoTambahanNum,
-        total_penjualan:  totalPenjualan,
-        total_cash:       cashPenjualan,
-        total_non_tunai:  todayData?.totalNonTunai || 0,
-        total_qris:       todayData?.byMethod['qris']       || 0,
-        total_gopay:      todayData?.byMethod['gopay']      || 0,
-        total_grab:       todayData?.byMethod['grab']       || 0,
+        id: generateId(),
+        store_id: storeId,
+        report_date: today,
+        saldo_awal: saldoAwalNum,
+        saldo_tambahan: saldoTambahanNum,
+        total_penjualan: totalPenjualan,
+        total_cash: cashPenjualan,
+        total_non_tunai: todayData?.totalNonTunai || 0,
+        total_qris: todayData?.byMethod['qris'] || 0,
+        total_gopay: todayData?.byMethod['gopay'] || 0,
+        total_grab: todayData?.byMethod['grab'] || 0,
         total_shopeefood: todayData?.byMethod['shopeefood'] || 0,
-        total_transfer:   todayData?.byMethod['transfer']   || 0,
-        total_setor:      totalSetorNum,
-        total_biaya:      totalBiaya,
-        total_pembelian:  totalPembelian,
-        voided_count:     todayData?.voidCount || 0,
-        voided_amount:    todayData?.totalVoid || 0,
-        saldo_akhir:      saldoAkhir,
-        uang_fisik:       uangFisikNum,
+        total_transfer: todayData?.byMethod['transfer'] || 0,
+        total_setor: totalSetorNum,
+        total_biaya: totalBiaya,
+        total_pembelian: totalPembelian,
+        voided_count: todayData?.voidCount || 0,
+        voided_amount: todayData?.totalVoid || 0,
+        saldo_akhir: saldoAkhir,
+        uang_fisik: uangFisikNum,
         selisih,
-        notes:            notes || undefined,
-        submitted_by:     user?.id,
-        submitted_at:     now(),
+        notes: notes || undefined,
+        submitted_by: user?.id,
+        submitted_at: now(),
       }
       const { error } = await supabase.from('close_order_reports').insert(reportData)
       if (error) {
@@ -307,14 +307,14 @@ export default function EndOfDayPage() {
       if (totalSetorNum > 0) {
         try {
           await supabase.from('cash_deposits').insert({
-            id:           generateId(),
-            store_id:     storeId,
-            amount:       totalSetorNum,
+            id: generateId(),
+            store_id: storeId,
+            amount: totalSetorNum,
             deposit_date: today,
-            notes:        `Auto dari Close Order ${today} — ${storeName}`,
-            status:       'pending',
-            created_by:   user?.id,
-            created_at:   now(),
+            notes: `Auto dari Close Order ${today} — ${storeName}`,
+            status: 'pending',
+            created_by: user?.id,
+            created_at: now(),
           })
         } catch (e) {
           console.warn('[CLOSE ORDER] Gagal buat setoran otomatis:', e)
@@ -346,11 +346,11 @@ export default function EndOfDayPage() {
     <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3 h-full">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Input Manual</p>
       <div className="grid grid-cols-2 gap-3">
-        <NumInput label="Saldo Awal"          value={saldoAwal}     onChange={setSaldoAwal}     disabled={!!existingReport} hint={saldoAwal ? undefined : 'Auto dari kemarin'} />
-        <NumInput label="Saldo Tambahan"       value={saldoTambahan} onChange={setSaldoTambahan} disabled={!!existingReport} />
-        <NumInput label="Total Setor ke Pusat" value={totalSetor}    onChange={setTotalSetor}    disabled={!!existingReport}
+        <NumInput label="Saldo Awal" value={saldoAwal} onChange={setSaldoAwal} disabled={!!existingReport} hint={saldoAwal ? undefined : 'Auto dari kemarin'} />
+        <NumInput label="Saldo Tambahan" value={saldoTambahan} onChange={setSaldoTambahan} disabled={!!existingReport} />
+        <NumInput label="Total Setor ke Pusat" value={totalSetor} onChange={setTotalSetor} disabled={!!existingReport}
           hint={!existingReport ? 'Otomatis masuk ke Setoran Kas' : undefined} />
-        <NumInput label="Uang Fisik di Laci"   value={uangFisik}     onChange={setUangFisik}     disabled={!!existingReport} />
+        <NumInput label="Uang Fisik di Laci" value={uangFisik} onChange={setUangFisik} disabled={!!existingReport} />
       </div>
       <div>
         <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Catatan</label>
@@ -380,7 +380,7 @@ export default function EndOfDayPage() {
         <p className="text-xs text-blue-600">Total Non Tunai (QRIS + Transfer + dll)</p>
         <p className="text-sm font-semibold text-blue-700">
           {formatRupiah(existingReport
-            ? ((existingReport.total_penjualan||0) - (existingReport.total_cash||0))
+            ? ((existingReport.total_penjualan || 0) - (existingReport.total_cash || 0))
             : (todayData?.totalNonTunai || 0))}
         </p>
       </div>
@@ -392,7 +392,7 @@ export default function EndOfDayPage() {
   const sectionProdukTerjual = todayData?.soldMap && Object.keys(todayData.soldMap).length > 0 ? (
     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden h-full">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 border-b border-gray-50">Produk Terjual</p>
-      {Object.values(todayData.soldMap).sort((a,b) => b.qty - a.qty).map((item, idx) => (
+      {Object.values(todayData.soldMap).sort((a, b) => b.qty - a.qty).map((item, idx) => (
         <div key={idx} className={`flex items-center justify-between px-4 py-2.5 ${idx !== 0 ? 'border-t border-gray-50' : ''}`}>
           <p className="text-sm text-gray-800">{item.name}</p>
           <div className="text-right">
@@ -421,13 +421,13 @@ export default function EndOfDayPage() {
   const sectionLaporanKas = (
     <div className="bg-white rounded-xl border border-gray-100 p-4">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Laporan Kas</p>
-      <Row label="Saldo Awal"         value={saldoAwalNum} />
-      <Row label="Saldo Tambahan"     value={saldoTambahanNum} />
-      <Row label="Penjualan Tunai"    value={cashPenjualan} sub="Auto dari sistem" />
-      <Row label="Total Setor"        value={totalSetorNum}  negative />
-      {totalBiaya > 0     && <Row label="Total Biaya"     value={totalBiaya}     negative sub="Auto dari sistem" />}
+      <Row label="Saldo Awal" value={saldoAwalNum} />
+      <Row label="Saldo Tambahan" value={saldoTambahanNum} />
+      <Row label="Penjualan Tunai" value={cashPenjualan} sub="Auto dari sistem" />
+      <Row label="Total Setor" value={totalSetorNum} negative />
+      {totalBiaya > 0 && <Row label="Total Biaya" value={totalBiaya} negative sub="Auto dari sistem" />}
       {totalPembelian > 0 && <Row label="Total Pembelian" value={totalPembelian} negative sub="Auto dari sistem" />}
-      <Row label="Saldo Akhir"        value={existingReport?.saldo_akhir ?? saldoAkhir} highlight />
+      <Row label="Saldo Akhir" value={existingReport?.saldo_akhir ?? saldoAkhir} highlight />
       <Row label="Uang Fisik di Laci" value={uangFisikNum} />
       <div className="flex items-center justify-between py-3 border-t border-gray-200 mt-1">
         <span className="text-sm font-semibold text-gray-900">Selisih</span>
@@ -435,8 +435,7 @@ export default function EndOfDayPage() {
           {(existingReport?.selisih ?? selisih) === 0
             ? <CheckCircle size={14} className="text-green-500" />
             : <AlertCircle size={14} className="text-red-500" />}
-          <span className={`text-base font-bold ${
-            (existingReport?.selisih ?? selisih) === 0 ? 'text-green-600' :
+          <span className={`text-base font-bold ${(existingReport?.selisih ?? selisih) === 0 ? 'text-green-600' :
             (existingReport?.selisih ?? selisih) > 0 ? 'text-blue-600' : 'text-red-600'}`}>
             {(existingReport?.selisih ?? selisih) > 0 ? '+' : ''}{formatRupiah(existingReport?.selisih ?? selisih)}
           </span>
@@ -476,7 +475,7 @@ export default function EndOfDayPage() {
           <p className="text-sm text-green-700 font-medium">Close Order sudah tersimpan</p>
           {existingReport?.submitted_at && (
             <p className="text-xs text-green-600">
-              {new Date(existingReport.submitted_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })}
+              {new Date(existingReport.submitted_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })}
             </p>
           )}
         </div>
@@ -494,7 +493,7 @@ export default function EndOfDayPage() {
         <div>
           <h1 className="text-lg font-semibold text-gray-900">Close Order</h1>
           <p className="text-xs text-gray-400">
-            {new Date().toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}
+            {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -528,7 +527,7 @@ export default function EndOfDayPage() {
                 <p className="text-sm font-medium text-amber-800">Close Order sudah disimpan hari ini</p>
                 <p className="text-xs text-amber-600 mt-0.5">
                   Disimpan pukul {existingReport.submitted_at
-                    ? new Date(existingReport.submitted_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })
+                    ? new Date(existingReport.submitted_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })
                     : '-'}
                 </p>
               </div>
@@ -556,7 +555,7 @@ export default function EndOfDayPage() {
                   <p className="text-sm font-medium text-amber-800">Close Order sudah disimpan hari ini</p>
                   <p className="text-xs text-amber-600 mt-0.5">
                     Disimpan pukul {existingReport.submitted_at
-                      ? new Date(existingReport.submitted_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit', hour12: false })
+                      ? new Date(existingReport.submitted_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })
                       : '-'}
                   </p>
                 </div>

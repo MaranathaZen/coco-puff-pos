@@ -659,7 +659,7 @@ export default function CashierPage() {
           ]
 
           // Items + diskon per item
-          for (const item of txItems) {
+          for (const item of [...txItems, ...txPakets]) {
             const qty = (item.qty_eceran || 0) + (item.qty_dus || 0)
             const totalFmt = fmtA(item.unit_price * qty)
             const leftPart = `${qty}x ${item.product_name}`.substring(0, AW - totalFmt.length - 1)

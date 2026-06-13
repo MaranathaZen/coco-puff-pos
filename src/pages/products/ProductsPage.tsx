@@ -110,7 +110,7 @@ function ProductForm({ product, onClose, storeId }: {
   const [saving,     setSaving]  = useState(false)
 
   async function handleSave() {
-    if (!name.trim() || !basePrice) return toast.error('Nama dan harga wajib diisi')
+    if (!name.trim() || basePrice === '' || basePrice === null || basePrice === undefined) return toast.error('Nama wajib diisi')
     setSaving(true)
     try {
       const isNew = !product

@@ -87,6 +87,25 @@ export default function CashierPage() {
   }, [STORE_ID])
 
   const [mainTab, setMainTab] = useState<MainTab>('pos')
+  const today = new Date().toLocaleDateString('sv-SE')
+  const [selectedDate, setSelectedDate] = useState<string>(today)
+  // Pull transaksi dari server saat owner ganti tanggal
+  useEffect(() => {
+    if (!isOwnerManager) return
+    async function pullByDate() {
+      const { data } = await supabase.from('transactions').select('*')
+        .eq('store_id', STORE_ID)
+        .gte('created_at', selectedDate + 'T00:00:00+07:00')
+        .lte('created_at', selectedDate + 'T23:59:59+07:00')
+      if (data?.length) {
+        await db.transactions.bulkPut(data)
+        const ids = data.map((t: any) => t.id)
+        const { data: items } = await supabase.from('transaction_items').select('*').in('transaction_id', ids)
+        if (items?.length) await db.transaction_items.bulkPut(items)
+      }
+    }
+    pullByDate()
+  }, [selectedDate, isOwnerManager, STORE_ID])
   const [orderType, setOrderType] = useState<OrderType>('take_away')
   const [selectedCat, setSelectedCat] = useState<string>('all')
   const [showCheckout, setShowCheckout] = useState(false)
@@ -861,7 +880,15 @@ pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;wh
               ))}
             </div>
           )}
-          <p className="text-xs text-gray-400">Transaksi hari ini</p>
+          {isOwnerManager && (
+            <div className="flex items-center gap-2 mb-2">
+              <label className="text-xs text-gray-500">Tanggal:</label>
+              <input type="date" value={selectedDate}
+                onChange={e => setSelectedDate(e.target.value)}
+                className="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-700" />
+            </div>
+          )}
+          <p className="text-xs text-gray-400">{isOwnerManager ? `Transaksi ${selectedDate}` : "Transaksi hari ini"}</p>
           <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
             {(['semua', 'cash', 'qris', 'transfer', 'gopay', 'grab', 'shopeefood'] as const).map(pm => (
               <button key={pm} onClick={() => setPayFilter(pm)}

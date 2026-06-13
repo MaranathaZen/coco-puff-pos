@@ -146,7 +146,7 @@ export default function UnifiedMutasiPage() {
         if (fgStock.data?.length)  await db.finished_goods_stock.bulkPut(fgStock.data)
         if (wstock.data?.length)   await db.warehouse_stock.bulkPut(wstock.data)
         if (pstock.data?.length)   await db.production_stock.bulkPut(pstock.data)
-        if (stock.data !== null)   { await db.stock.clear(); if (stock.data.length) await db.stock.bulkPut(stock.data) }
+        if (stock.data?.length)    await db.stock.bulkPut(stock.data)
       } catch (e) { console.warn('[Mutasi mount sync]', e) }
       finally { setSyncing(false) }
     }
@@ -177,7 +177,7 @@ export default function UnifiedMutasiPage() {
       if (fgStock.data?.length)  await db.finished_goods_stock.bulkPut(fgStock.data)
       if (wstock.data?.length)   await db.warehouse_stock.bulkPut(wstock.data)
       if (pstock.data?.length)   await db.production_stock.bulkPut(pstock.data)
-      if (stock.data !== null)   { await db.stock.clear(); if (stock.data.length) await db.stock.bulkPut(stock.data) }
+      if (stock.data?.length)    await db.stock.bulkPut(stock.data)
       toast.success('Data diperbarui')
     } catch { toast.error('Gagal sync') }
     finally { setSyncing(false) }

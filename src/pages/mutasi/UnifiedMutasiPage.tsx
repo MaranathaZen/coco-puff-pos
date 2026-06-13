@@ -773,11 +773,15 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
         }
 
         if (type === 'to_store' && destId) {
-          const existingStock = await db.stock.filter(s =>
+          let existingStock = await db.stock.filter(s =>
             s.store_id === destId && (
               (s as any).material_id === item.material_id || s.ingredient_id === item.material_id
             )
           ).first()
+          if (!existingStock) {
+            const { data: sv } = await supabase.from('stock').select('*').eq('store_id', destId).eq('material_id', item.material_id).maybeSingle()
+            if (sv) { await db.stock.put(sv); existingStock = sv }
+          }
           const prevQty  = existingStock?.qty_on_hand || 0
           const prevCost = (existingStock as any)?.avg_cost ?? 0
           const inQty    = Number(item.qty)

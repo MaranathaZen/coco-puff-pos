@@ -420,7 +420,7 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
   async function handleSave() {
     if (!name.trim())                 return toast.error('Nama produk wajib diisi')
     if (!categoryId)                  return toast.error('Pilih kategori')
-    if (!price || Number(price) <= 0) return toast.error('Harga wajib diisi')
+    if (price === '' || price === null || price === undefined) return toast.error('Harga wajib diisi')
     setSaving(true)
     try {
       const prodId = product?.id || generateId()
@@ -642,7 +642,7 @@ function PaketForm({ paket, onClose, onSaved }: { paket: any; onClose: () => voi
 
   async function handleSave() {
     if (!name.trim())                 return toast.error('Nama paket wajib diisi')
-    if (!price||Number(price)<=0)     return toast.error('Harga wajib diisi')
+    if (price===''||price===null||price===undefined) return toast.error('Harga wajib diisi')
     if (Number(qtyTotal)<=0)          return toast.error('Jumlah pcs wajib diisi')
     setSaving(true)
     try {

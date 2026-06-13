@@ -332,7 +332,7 @@ export default function CashierPage() {
     }
     const txItems = await db.transaction_items.toArray()
     return txs.map(t => ({ ...t, items: txItems.filter(i => i.transaction_id === t.id) }))
-  }, [mainTab, STORE_ID, isOwnerManager])
+  }, [mainTab, STORE_ID, isOwnerManager, selectedDate])
 
   useEffect(() => {
     if (!isOwnerManager || !STORE_ID) return

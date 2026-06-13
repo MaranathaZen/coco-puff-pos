@@ -636,15 +636,17 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: {
     const pMap = Object.fromEntries(prods.map(p => [p.id, p]))
     const cMap = Object.fromEntries(cats.map(c => [c.id, c]))
     const mMap = Object.fromEntries(mats.map(m => [m.id, m]))
+    const fgsList = await db.finished_goods_stock.toArray()
+    const fgsMap = Object.fromEntries(fgsList.map((f: any) => [f.product_id ?? f.id, f]))
     return stocks.map(s => {
       const id = (s as any).material_id || s.ingredient_id || ''
-      const prod = pMap[id]; const mat = mMap[id]
-      if (!prod && !mat) return null
+      const prod = pMap[id]; const mat = mMap[id]; const fgs = fgsMap[id]
+      if (!prod && !mat && !fgs) return null
       return {
         id: s.id, stockId: s.id, ingredient_id: id,
         qty_on_hand: s.qty_on_hand,
         avg_cost: (s as any).avg_cost || 0,
-        displayName: prod?.name || mat?.name || '',
+        displayName: prod?.name || mat?.name || fgs?.product_name || '',
         displayUnit: prod?.unit || mat?.unit || 'pcs',
         categoryName: prod ? (cMap[prod.category_id || '']?.name || 'Produk') : formatKategori(mat?.category),
         categoryRaw: prod ? '' : (mat?.category || ''),

@@ -648,9 +648,9 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: {
         avg_cost: (s as any).avg_cost || 0,
         displayName: prod?.name || mat?.name || fgs?.product_name || '',
         displayUnit: prod?.unit || mat?.unit || 'pcs',
-        categoryName: prod ? (cMap[prod.category_id || '']?.name || 'Produk') : formatKategori(mat?.category),
-        categoryRaw: prod ? '' : (mat?.category || ''),
-        isProduk: !!prod,
+        categoryName: prod ? (cMap[prod.category_id || '']?.name || 'Produk') : fgs ? 'Produk Jadi' : formatKategori(mat?.category),
+        categoryRaw: prod ? '' : fgs ? 'produk_jadi' : (mat?.category || ''),
+        isProduk: !!(prod || fgs),
       }
     }).filter(Boolean) as any[]
   }, [storeId])

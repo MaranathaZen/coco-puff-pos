@@ -93,10 +93,12 @@ export default function CashierPage() {
   useEffect(() => {
     if (!isOwnerManager) return
     async function pullByDate() {
+      console.log('[PULL BY DATE]', selectedDate, STORE_ID)
       const { data } = await supabase.from('transactions').select('*')
         .eq('store_id', STORE_ID)
         .gte('created_at', selectedDate + 'T00:00:00+07:00')
         .lte('created_at', selectedDate + 'T23:59:59+07:00')
+      console.log('[PULL BY DATE] result:', data?.length)
       if (data?.length) {
         await db.transactions.bulkPut(data)
         const ids = data.map((t: any) => t.id)

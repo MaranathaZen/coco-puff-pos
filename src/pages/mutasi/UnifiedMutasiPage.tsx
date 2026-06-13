@@ -801,19 +801,6 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           }
         }
       }
-      // FIX: update stok toko untuk FGS setelah items insert
-      if (type === 'to_store' && destId && effectiveRole === 'produksi') {
-        for (const item of valid) {
-          const isFgsItem = (fgStocks || []).some((f: any) => (f.product_id ?? f.id) === item.material_id)
-          if (!isFgsItem) continue
-          const { data: sv } = await supabase.from('stock').select('*').eq('store_id', destId).eq('material_id', item.material_id).maybeSingle()
-          if (sv) {
-            const newQty = (sv.qty_on_hand || 0) + Number(item.qty)
-            await supabase.from('stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', sv.id)
-            await db.stock.put({ ...sv, qty_on_hand: newQty, last_updated: now() })
-          }
-        }
-      }
       toast.success('Mutasi berhasil dicatat')
       onClose()
     } catch (e) {

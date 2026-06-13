@@ -89,6 +89,7 @@ export default function CashierPage() {
   const [mainTab, setMainTab] = useState<MainTab>('pos')
   const today = new Date().toLocaleDateString('sv-SE')
   const [selectedDate, setSelectedDate] = useState<string>(today)
+  const [refreshKey, setRefreshKey] = useState(0)
   // Pull transaksi dari server saat owner ganti tanggal
   useEffect(() => {
     if (!isOwnerManager) return
@@ -105,6 +106,7 @@ export default function CashierPage() {
         const { data: items } = await supabase.from('transaction_items').select('*').in('transaction_id', ids)
         if (items?.length) await db.transaction_items.bulkPut(items)
       }
+      setRefreshKey(k => k + 1)
     }
     pullByDate()
   }, [selectedDate, isOwnerManager, STORE_ID])
@@ -334,7 +336,7 @@ export default function CashierPage() {
     }
     const txItems = await db.transaction_items.toArray()
     return txs.map(t => ({ ...t, items: txItems.filter(i => i.transaction_id === t.id) }))
-  }, [mainTab, STORE_ID, isOwnerManager, selectedDate])
+  }, [mainTab, STORE_ID, isOwnerManager, selectedDate, refreshKey])
 
   useEffect(() => {
     if (!isOwnerManager || !STORE_ID) return

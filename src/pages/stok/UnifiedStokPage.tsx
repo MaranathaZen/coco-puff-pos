@@ -1114,14 +1114,24 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
 }
 
 function EditStokGudangForm({ item, onClose }: { item: any; onClose: () => void }) {
+  const [name, setName] = useState(item.name || '')
+  const [category, setCategory] = useState(item.category || 'bahan_baku')
+  const [unit, setUnit] = useState(item.unit || '')
+  const [unitCost, setUnitCost] = useState(String(item.unit_cost || item.avg_cost || 0))
+  const [minStock, setMinStock] = useState(String(item.min_stock || 0))
   const [qty, setQty] = useState(String(item.qty || 0))
+  const [avg, setAvg] = useState(String(item.avg_cost || 0))
   const [saving, setSaving] = useState(false)
   async function handleSave() {
-    if (Number(qty) < 0) return toast.error('Qty tidak valid')
+    if (!name.trim()) return toast.error('Nama wajib diisi')
+    if (!unit) return toast.error('Satuan wajib diisi')
+    if (Number(qty) < 0) return toast.error('Qty tidak boleh negatif')
     setSaving(true)
     try {
+      await db.materials.update(item.id, { name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock), updated_at: now() })
+      await supabase.from('materials').update({ name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock) }).eq('id', item.id)
       const ws = await db.warehouse_stock.where('material_id').equals(item.id).first()
-      const wsd: any = { id: ws?.id || generateId(), material_id: item.id, qty_on_hand: Number(qty), last_updated: now() }
+      const wsd: any = { id: ws?.id || generateId(), material_id: item.id, qty_on_hand: Number(qty), avg_cost: Number(avg) || Number(unitCost) || 0, last_updated: now() }
       await db.warehouse_stock.put(wsd)
       await supabase.from('warehouse_stock').upsert(wsd)
       toast.success('Stok gudang diperbarui')
@@ -1129,15 +1139,20 @@ function EditStokGudangForm({ item, onClose }: { item: any; onClose: () => void 
     } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }
     finally { setSaving(false) }
   }
+  const CATS = ['bahan_baku','bahan_setengah_jadi','packaging','non_produksi']
   return (
-    <Modal title={`Edit Stok: ${item.name}`} onClose={onClose}>
-      <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
-        <p className="text-xs text-blue-700 font-medium">Edit qty stok gudang langsung</p>
-        <p className="text-xs text-blue-500 mt-0.5">Nilai akan di-set langsung ke angka yang dimasukkan.</p>
+    <Modal title="Edit: Bahan" onClose={onClose}>
+      <div><Label required>Nama Bahan</Label><input className="input" value={name} onChange={e => setName(e.target.value)} /></div>
+      <div><Label required>Kategori</Label>
+        <div className="grid grid-cols-2 gap-2">
+          {CATS.map(k => <button key={k} onClick={() => setCategory(k)} className={`py-2 px-3 rounded-xl text-xs font-medium border ${category===k?'bg-gray-900 text-white':'bg-white text-gray-600 border-gray-200'}`}>{k.replace(/_/g,' ')}</button>)}
+        </div>
       </div>
-      <div>
-        <label className="text-sm font-medium text-gray-700 mb-1 block">Qty ({item.unit})</label>
-        <input className="input" type="number" value={qty} onChange={e => setQty(e.target.value)} placeholder="0" />
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label required>QTY Stok</Label><input className="input" type="number" value={qty} onChange={e => setQty(e.target.value)} /></div>
+        <div><Label>Avg Cost (Rp)</Label><input className="input" type="number" value={avg} onChange={e => setAvg(e.target.value)} /></div>
+        <div><Label>Harga Default (Rp)</Label><input className="input" type="number" value={unitCost} onChange={e => setUnitCost(e.target.value)} /></div>
+        <div><Label>Min. Stok</Label><input className="input" type="number" value={minStock} onChange={e => setMinStock(e.target.value)} /></div>
       </div>
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>

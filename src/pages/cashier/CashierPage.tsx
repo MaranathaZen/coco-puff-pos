@@ -463,6 +463,8 @@ export default function CashierPage() {
       for (const txItem of txItems) {
         const recipe = bomRecipes.find(r => r.product_id === txItem.product_id)
         console.log('[BOM] product:', txItem.product_id, 'recipe:', recipe?.id)
+        const riListDebug = recipeItems.filter(ri => ri.recipe_id === recipe.id)
+        console.log('[BOM] recipe items:', riListDebug.length, riListDebug.map(r => r.material_id))
         if (!recipe) continue
         const riList = recipeItems.filter(ri => ri.recipe_id === recipe.id)
         const _prod = await db.products.get(txItem.product_id);
@@ -516,6 +518,8 @@ export default function CashierPage() {
       for (const txItem of txItems) {
         const recipe = bomRecipes.find(r => r.product_id === txItem.product_id)
         console.log('[BOM] product:', txItem.product_id, 'recipe:', recipe?.id)
+        const riListDebug = recipeItems.filter(ri => ri.recipe_id === recipe.id)
+        console.log('[BOM] recipe items:', riListDebug.length, riListDebug.map(r => r.material_id))
         if (!recipe) continue
         const riList = recipeItems.filter(ri => ri.recipe_id === recipe.id)
         const _prod2 = await db.products.get(txItem.product_id)

@@ -450,6 +450,7 @@ export default function CashierPage() {
 
   async function deductStockFromRecipes(txItems: any[], storeId: string) {
     try {
+      console.log('[BOM] START', txItems.length, 'items store:', storeId)
       const allRecipes = await db.store_recipes.where('store_id').equals(storeId).filter(r => r.is_active).toArray()
       const bomRecipes = allRecipes.filter(r =>
         (r as any).recipe_type !== 'production' && !r.product_id?.startsWith('prod-toko-')

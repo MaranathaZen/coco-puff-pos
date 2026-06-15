@@ -183,7 +183,7 @@ export class CocoPuffDB extends Dexie {
       recipes:              'id, product_id, ingredient_id, [product_id+ingredient_id]',
       transactions:         'id, store_id, shift_id, cashier_id, receipt_no, status, created_at',
       transaction_items:    'id, transaction_id, product_id',
-      stock:                'id, store_id, ingredient_id, [store_id+ingredient_id]',
+      stock:                'id, store_id, ingredient_id, material_id, [store_id+ingredient_id], [store_id+material_id]',
       stock_mutations:      'id, store_id, ingredient_id, mutation_type, created_at',
       sync_queue:           'id, store_id, table_name, status, created_at',
     }
@@ -250,6 +250,16 @@ export class CocoPuffDB extends Dexie {
       store_recipes:       'id, store_id, product_id, [store_id+product_id], is_active',
       store_recipe_items:  'id, recipe_id, material_id',
       stock:               'id, store_id, ingredient_id, [store_id+ingredient_id], material_id, [store_id+material_id]',
+      finished_goods_stock: 'id, product_id, product_name',
+    })
+    this.version(9).stores({
+      ...base, ...v3v4shared,
+      warehouse_expenses:  'id, category, expense_date, created_at',
+      menu_role_config:    'id, role, menu_path, [role+menu_path]',
+      purchases:           'id, supplier_id, status, created_at, po_number',
+      store_recipes:       'id, store_id, product_id, [store_id+product_id], is_active',
+      store_recipe_items:  'id, recipe_id, material_id',
+      stock:               'id, store_id, ingredient_id, material_id, [store_id+ingredient_id], [store_id+material_id]',
       finished_goods_stock: 'id, product_id, product_name',
     })
   }

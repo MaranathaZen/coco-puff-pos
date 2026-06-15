@@ -248,7 +248,7 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: {
               <p className={`text-sm font-semibold ${item.qty <= item.min_stock && item.min_stock > 0 ? 'text-red-600' : 'text-gray-900'}`}>
                 {item.qty} <span className="text-xs font-normal text-gray-400">{item.unit}</span>
               </p>
-              <p class="text-xs text-gray-400">{formatRupiah(item.qty * item.avg_cost)}</p>
+              <p className="text-xs text-gray-400">{formatRupiah(item.qty * item.avg_cost)}</p>
             </div>
             {isOwnerManager && (
               <button onClick={e => { e.stopPropagation(); setEditStokItem(item); setShowEditStok(true) }}

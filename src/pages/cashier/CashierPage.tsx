@@ -451,6 +451,7 @@ export default function CashierPage() {
   async function deductStockFromRecipes(txItems: any[], storeId: string) {
     try {
       console.log('[BOM] START', txItems.length, 'items store:', storeId)
+      console.log('[BOM] txItems:', txItems.map(t => t.product_id))
       const allRecipes = await db.store_recipes.where('store_id').equals(storeId).filter(r => r.is_active).toArray()
       const bomRecipes = allRecipes.filter(r =>
         (r as any).recipe_type !== 'production' && !r.product_id?.startsWith('prod-toko-')
@@ -461,6 +462,7 @@ export default function CashierPage() {
 
       for (const txItem of txItems) {
         const recipe = bomRecipes.find(r => r.product_id === txItem.product_id)
+        console.log('[BOM] product:', txItem.product_id, 'recipe:', recipe?.id)
         if (!recipe) continue
         const riList = recipeItems.filter(ri => ri.recipe_id === recipe.id)
         const _prod = await db.products.get(txItem.product_id);
@@ -513,6 +515,7 @@ export default function CashierPage() {
 
       for (const txItem of txItems) {
         const recipe = bomRecipes.find(r => r.product_id === txItem.product_id)
+        console.log('[BOM] product:', txItem.product_id, 'recipe:', recipe?.id)
         if (!recipe) continue
         const riList = recipeItems.filter(ri => ri.recipe_id === recipe.id)
         const _prod2 = await db.products.get(txItem.product_id)

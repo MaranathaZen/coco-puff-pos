@@ -163,6 +163,8 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: {
   const [showForm, setShowForm] = useState(false)
   const [showOpening, setShowOpening] = useState(false)
   const [editMat, setEditMat] = useState<Material | null>(null)
+  const [showEditStok, setShowEditStok] = useState(false)
+  const [editStokItem, setEditStokItem] = useState<any>(null)
 
   useEffect(() => {
     if (!isOwnerManager) { setHeaderActions(null); return }
@@ -246,8 +248,14 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: {
               <p className={`text-sm font-semibold ${item.qty <= item.min_stock && item.min_stock > 0 ? 'text-red-600' : 'text-gray-900'}`}>
                 {item.qty} <span className="text-xs font-normal text-gray-400">{item.unit}</span>
               </p>
-              <p className="text-xs text-gray-400">{formatRupiah(item.qty * item.avg_cost)}</p>
+              <p class="text-xs text-gray-400">{formatRupiah(item.qty * item.avg_cost)}</p>
             </div>
+            {isOwnerManager && (
+              <button onClick={e => { e.stopPropagation(); setEditStokItem(item); setShowEditStok(true) }}
+                className="ml-2 p-1.5 rounded-lg bg-blue-50 text-blue-600 flex-shrink-0">
+                <Edit size={12} />
+              </button>
+            )}
           </button>
         ))}
         {filteredItems.length === 0 && (
@@ -257,6 +265,7 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: {
         )}
       </div>
       {showForm && isOwnerManager && <MaterialForm material={editMat} isOwner={isOwner} onClose={() => { setShowForm(false); setEditMat(null) }} />}
+      {showEditStok && editStokItem && <EditStokGudangForm item={editStokItem} onClose={() => { setShowEditStok(false); setEditStokItem(null) }} />}
       {showOpening && isOwnerManager && <OpeningStockForm onClose={() => setShowOpening(false)} />}
     </div>
   )
@@ -1099,6 +1108,40 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
       <div className="flex gap-3 pt-1 border-t border-gray-100">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan Stok Awal'}</button>
+      </div>
+    </Modal>
+  )
+}
+
+function EditStokGudangForm({ item, onClose }: { item: any; onClose: () => void }) {
+  const [qty, setQty] = useState(String(item.qty || 0))
+  const [saving, setSaving] = useState(false)
+  async function handleSave() {
+    if (Number(qty) < 0) return toast.error('Qty tidak valid')
+    setSaving(true)
+    try {
+      const ws = await db.warehouse_stock.where('material_id').equals(item.id).first()
+      const wsd: any = { id: ws?.id || generateId(), material_id: item.id, qty_on_hand: Number(qty), last_updated: now() }
+      await db.warehouse_stock.put(wsd)
+      await supabase.from('warehouse_stock').upsert(wsd)
+      toast.success('Stok gudang diperbarui')
+      onClose()
+    } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }
+    finally { setSaving(false) }
+  }
+  return (
+    <Modal title={`Edit Stok: ${item.name}`} onClose={onClose}>
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
+        <p className="text-xs text-blue-700 font-medium">Edit qty stok gudang langsung</p>
+        <p className="text-xs text-blue-500 mt-0.5">Nilai akan di-set langsung ke angka yang dimasukkan.</p>
+      </div>
+      <div>
+        <label className="text-sm font-medium text-gray-700 mb-1 block">Qty ({item.unit})</label>
+        <input className="input" type="number" value={qty} onChange={e => setQty(e.target.value)} placeholder="0" />
+      </div>
+      <div className="flex gap-3">
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
       </div>
     </Modal>
   )

@@ -482,10 +482,14 @@ export default function CashierPage() {
                 .equals([storeId, ri.material_id])
                 .first()
             }
+            if (!storeStock) {
+              const { data: sv } = await supabase.from('stock').select('*').eq('store_id', storeId).eq('material_id', ri.material_id).maybeSingle()
+              if (sv) { await db.stock.put(sv); storeStock = sv }
+            }
             if (storeStock) {
               const newQty = Math.max(0, storeStock.qty_on_hand - qty)
               await db.stock.update(storeStock.id, { qty_on_hand: newQty, last_updated: now() })
-              supabase.from('stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', storeStock.id).then(() => { })
+              await supabase.from('stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', storeStock.id)
             } else {
               console.warn('[BOM] Stok tidak ditemukan untuk:', matMap[ri.material_id]?.name || ri.material_id)
             }

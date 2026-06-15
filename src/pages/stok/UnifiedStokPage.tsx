@@ -238,7 +238,7 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: {
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         {filteredItems.sort((a, b) => (b.qty * b.avg_cost) - (a.qty * a.avg_cost)).map((item, idx) => (
           <button key={item.id}
-            onClick={() => isOwnerManager && (setEditMat(item as any), setShowForm(true))}
+            onClick={() => isOwnerManager && (setEditStokItem(item), setShowEditStok(true))}
             className={`w-full flex items-center px-4 py-3 text-left ${idx !== 0 ? 'border-t border-gray-50' : ''} ${item.qty <= item.min_stock && item.min_stock > 0 ? 'bg-red-50/30' : ''} ${isOwnerManager ? 'active:bg-gray-50' : ''}`}>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>

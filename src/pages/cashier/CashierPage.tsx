@@ -474,7 +474,7 @@ export default function CashierPage() {
         for (const ri of riList) {
           const qty = ri.qty_used * totalQty
           console.log('[BOM] processing material:', ri.material_id, 'qty:', qty, 'source:', (ri as any).source)
-          if ((ri as any).source === 'store' || !(ri as any).source) {
+          if ((ri as any).source !== 'production') {
             let storeStock = await db.stock.filter(s =>
               s.store_id === storeId && (
                 s.ingredient_id === ri.material_id ||
@@ -530,7 +530,7 @@ export default function CashierPage() {
         for (const ri of riList) {
           const qty = ri.qty_used * totalQty
           console.log('[BOM] processing material:', ri.material_id, 'qty:', qty, 'source:', (ri as any).source)
-          if ((ri as any).source === 'store' || !(ri as any).source) {
+          if ((ri as any).source !== 'production') {
             let storeStock = await db.stock.filter(s =>
               s.store_id === storeId && (
                 s.ingredient_id === ri.material_id ||

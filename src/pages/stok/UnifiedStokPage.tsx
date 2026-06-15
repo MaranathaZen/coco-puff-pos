@@ -250,12 +250,7 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: {
               </p>
               <p className="text-xs text-gray-400">{formatRupiah(item.qty * item.avg_cost)}</p>
             </div>
-            {isOwnerManager && (
-              <button onClick={e => { e.stopPropagation(); setEditStokItem(item); setShowEditStok(true) }}
-                className="ml-2 p-1.5 rounded-lg bg-blue-50 text-blue-600 flex-shrink-0">
-                <Edit size={12} />
-              </button>
-            )}
+
           </button>
         ))}
         {filteredItems.length === 0 && (

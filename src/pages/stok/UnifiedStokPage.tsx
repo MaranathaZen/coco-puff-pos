@@ -8,7 +8,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now, type Material, type WarehouseStock } from '@/lib/db'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
-import { Warehouse, FlaskConical, Store, RefreshCw, AlertCircle, Plus, Package, X, Trash2 } from 'lucide-react'
+import { Warehouse, FlaskConical, Store, RefreshCw, AlertCircle, Plus, Package, X, Trash2, Edit } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 

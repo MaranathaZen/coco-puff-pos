@@ -534,9 +534,7 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
       await db.production_logs.add(log)
       await supabase.from('production_logs').upsert(log)
 
-      console.log('[PTOKO] recipeItems:', recipeItems.length)
       for (const ri of recipeItems) {
-        console.log('[PTOKO] material:', ri.material_id, 'qty_used:', ri.qty_used)
         const qtyUsed = ri.qty_per_batch * Number(batchCount)
         const logMat: any = { id: generateId(), log_id: logId, material_id: ri.material_id, qty_used: qtyUsed }
         await db.production_log_materials.add(logMat)
@@ -1134,9 +1132,7 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
       // Sync hasil Supabase ke Dexie supaya konsisten ke depannya
       if (riFromSupabase?.length) await db.store_recipe_items.bulkPut(riFromSupabase)
 
-      console.log('[PTOKO] recipeItems:', recipeItems.length)
       for (const ri of recipeItems) {
-        console.log('[PTOKO] material:', ri.material_id, 'qty_used:', ri.qty_used)
         const used = ri.qty_used * Number(batchCount)
         const existing = await db.stock
           .filter(s => s.store_id === storeId && (s.ingredient_id === ri.material_id || (s as any).material_id === ri.material_id))

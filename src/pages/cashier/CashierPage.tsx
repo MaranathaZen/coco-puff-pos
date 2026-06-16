@@ -320,13 +320,13 @@ export default function CashierPage() {
   }, [STORE_ID])
 
   const transactions = useLiveQuery(async () => {
-    const today = new Date().toLocaleDateString('sv-SE')
+    const filterDate = isOwnerManager ? selectedDate : new Date().toLocaleDateString('sv-SE')
     let txs = await db.transactions.where('store_id').equals(STORE_ID)
-      .filter(t => t.created_at.slice(0, 10) === today)
+      .filter(t => t.created_at.slice(0, 10) === filterDate)
       .reverse().sortBy('created_at')
     if (isOwnerManager) {
       const voidTxs = await db.transactions
-        .filter(t => (t as any).status === 'void_requested' && t.created_at.slice(0, 10) === today && t.store_id !== STORE_ID)
+        .filter(t => (t as any).status === 'void_requested' && t.created_at.slice(0, 10) === filterDate && t.store_id !== STORE_ID)
         .reverse().sortBy('created_at')
       const existingIds = new Set(txs.map(t => t.id))
       for (const vt of voidTxs) {

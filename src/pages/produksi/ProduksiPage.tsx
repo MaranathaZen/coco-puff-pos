@@ -1,9 +1,9 @@
 // src/pages/produksi/ProduksiPage.tsx
 // CHANGELOG v6:
-// - FEAT: Void produksi divisi â owner/manager bisa void log, stok dikembalikan
-// - FEAT: Realtime subscription production_logs â kasir lihat perubahan otomatis tanpa refresh
+// - FEAT: Void produksi divisi — owner/manager bisa void log, stok dikembalikan
+// - FEAT: Realtime subscription production_logs — kasir lihat perubahan otomatis tanpa refresh
 // - FIX: syncStoreRecipes pull logs hari ini dari Supabase saat mount
-// - FEAT: Void produksi toko â owner/manager bisa void log, stok toko dikembalikan
+// - FEAT: Void produksi toko — owner/manager bisa void log, stok toko dikembalikan
 // - UI: Row voided tampil strikethrough + badge "Dibatalkan"
 
 import { useState, useEffect, useMemo, createContext, useContext } from 'react'
@@ -343,7 +343,7 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
         return
       }
 
-      // Update status voided â DB trigger otomatis rollback stok
+      // Update status voided — DB trigger otomatis rollback stok
       await supabase.from('production_logs').update({
         status: 'voided',
         voided_at: new Date().toISOString(),
@@ -415,7 +415,7 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
                               </span>
                             )}
                           </div>
-                          <p className={`text-sm font-medium text-gray-900 ${isVoided ? 'line-through' : ''}`}>{log.recipe?.name || 'â'}</p>
+                          <p className={`text-sm font-medium text-gray-900 ${isVoided ? 'line-through' : ''}`}>{log.recipe?.name || '—'}</p>
                           <p className="text-xs text-gray-400 mt-0.5">
                             {new Date(log.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                             {', '}
@@ -441,7 +441,7 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
                         <div className="mt-1.5 border-t border-gray-50 pt-1.5 space-y-0.5">
                           {log.materials.map(m => (
                             <div key={m.id} className="flex justify-between text-xs text-gray-400">
-                              <span>{m.material?.name} Ã {m.qty_used} {m.material?.unit} @ {formatRupiah(m.material?.unit_cost || 0)}</span>
+                              <span>{m.material?.name} × {m.qty_used} {m.material?.unit} @ {formatRupiah(m.material?.unit_cost || 0)}</span>
                               <span>{formatRupiah(m.qty_used * (m.material?.unit_cost || 0))}</span>
                             </div>
                           ))}
@@ -710,7 +710,7 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
       <div>
         <Label required>Tujuan</Label>
         <div className="grid grid-cols-2 gap-2">
-          {([{ v: 'to_store', l: 'â Toko' }, { v: 'to_partner', l: 'â Franchise' }, { v: 'return_from_store', l: 'â Retur' }, { v: 'adjustment', l: 'Koreksi' }] as const).map(t => (
+          {([{ v: 'to_store', l: '→ Toko' }, { v: 'to_partner', l: '→ Franchise' }, { v: 'return_from_store', l: 'â Retur' }, { v: 'adjustment', l: 'Koreksi' }] as const).map(t => (
             <button key={t.v} onClick={() => setType(t.v)}
               className={`py-2.5 rounded-xl text-sm font-medium border transition-colors ${type === t.v ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>{t.l}</button>
           ))}
@@ -814,7 +814,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
         supabase.from('store_recipes').select('*').eq('store_id', sid),
         supabase.from('store_recipe_items').select('*'),
         supabase.from('production_log_materials').select('*'),
-        // Pull logs hari ini dari Supabase â termasuk yang sudah di-void dari device lain
+        // Pull logs hari ini dari Supabase — termasuk yang sudah di-void dari device lain
         supabase.from('production_logs')
           .select('*')
           .eq('store_id', sid)
@@ -832,7 +832,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
     }
   }
 
-  // Realtime subscription â update Dexie otomatis saat ada perubahan production_logs
+  // Realtime subscription — update Dexie otomatis saat ada perubahan production_logs
   useEffect(() => {
     if (!activeStoreId) return
 
@@ -896,10 +896,10 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
 
   // ââ VOID HANDLER: TOKO ââââââââââââââââââââââââââââââââââââ
   // Rollback stok ditangani oleh DB trigger (trigger_rollback_production_stock)
-  // Client hanya update status â tidak ada logic stok di sini
+  // Client hanya update status — tidak ada logic stok di sini
   async function handleVoidToko(logId: string, logStoreId: string, recipeId: string, totalYield: number) {
     try {
-      // Guard: cek dulu di Supabase â kalau sudah voided, jangan proses lagi
+      // Guard: cek dulu di Supabase — kalau sudah voided, jangan proses lagi
       const { data: existingLog } = await supabase
         .from('production_logs')
         .select('status')
@@ -911,7 +911,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
         return
       }
 
-      // Update status voided â DB trigger otomatis rollback stok
+      // Update status voided — DB trigger otomatis rollback stok
       await supabase.from('production_logs').update({
         status: 'voided',
         voided_at: new Date().toISOString(),
@@ -962,7 +962,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
       {!isSyncing && recipes?.length === 0 && (
         <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-center">
           <p className="text-sm font-medium text-amber-800">Belum ada resep produksi toko</p>
-          <p className="text-xs text-amber-600 mt-1">Buat resep di menu Resep â Resep Produksi Toko</p>
+          <p className="text-xs text-amber-600 mt-1">Buat resep di menu Resep → Resep Produksi Toko</p>
           <button onClick={() => syncStoreRecipes(activeStoreId)}
             className="mt-2 text-xs text-blue-600 border border-blue-200 px-3 py-1 rounded-lg">
             Sync ulang resep
@@ -1029,7 +1029,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
                   <div className="mt-2 border-t border-gray-50 pt-1.5 space-y-0.5">
                     {(l as any).materials.map((m: any) => (
                       <div key={m.id} className="flex justify-between text-xs text-gray-400">
-                        <span>{m.material?.name} Ã {m.qty_used} {m.material?.unit}{m.material?.unit_cost > 0 ? ` @ ${formatRupiah(m.material.unit_cost)}` : ''}</span>
+                        <span>{m.material?.name} × {m.qty_used} {m.material?.unit}{m.material?.unit_cost > 0 ? ` @ ${formatRupiah(m.material.unit_cost)}` : ''}</span>
                         {m.material?.unit_cost > 0 && <span>{formatRupiah(m.qty_used * m.material.unit_cost)}</span>}
                       </div>
                     ))}
@@ -1120,7 +1120,7 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
       if (error) console.error('[PTOKO LOG ERROR]', error)
 
       // FIX: query langsung dari Supabase, bukan Dexie
-      // Dexie bisa stale â qty_used tersimpan salah (semua jadi 1)
+      // Dexie bisa stale — qty_used tersimpan salah (semua jadi 1)
       const { data: riFromSupabase, error: riErr } = await supabase
         .from('store_recipe_items')
         .select('*')
@@ -1184,7 +1184,7 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
         }
       }
 
-      toast.success(`${logNumber} â ${finalYield} ${yieldUnit} dicatat`)
+      toast.success(`${logNumber} — ${finalYield} ${yieldUnit} dicatat`)
       onClose()
     } catch (e) { console.error(e); toast.error('Gagal menyimpan') }
     finally { setSaving(false) }
@@ -1196,7 +1196,7 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
         <Label required>Pilih Resep</Label>
         {recipes.length === 0 ? (
           <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-center">
-            <p className="text-xs text-amber-700">Belum ada resep. Buat di menu Resep â Resep Produksi Toko</p>
+            <p className="text-xs text-amber-700">Belum ada resep. Buat di menu Resep → Resep Produksi Toko</p>
           </div>
         ) : (
           <select className="input" value={recipeId} onChange={e => setRecipeId(e.target.value)}>

@@ -1,9 +1,9 @@
 // src/pages/produksi/ProduksiPage.tsx
 // CHANGELOG v6:
-// - FEAT: Void produksi divisi — owner/manager bisa void log, stok dikembalikan
-// - FEAT: Realtime subscription production_logs — kasir lihat perubahan otomatis tanpa refresh
+// - FEAT: Void produksi divisi Ã¢ÂÂ owner/manager bisa void log, stok dikembalikan
+// - FEAT: Realtime subscription production_logs Ã¢ÂÂ kasir lihat perubahan otomatis tanpa refresh
 // - FIX: syncStoreRecipes pull logs hari ini dari Supabase saat mount
-// - FEAT: Void produksi toko — owner/manager bisa void log, stok toko dikembalikan
+// - FEAT: Void produksi toko Ã¢ÂÂ owner/manager bisa void log, stok toko dikembalikan
 // - UI: Row voided tampil strikethrough + badge "Dibatalkan"
 
 import { useState, useEffect, useMemo, createContext, useContext } from 'react'
@@ -72,7 +72,7 @@ function CopyBtn({ text }: { text: string }) {
   return (
     <button onClick={() => { navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }) }}
       className="inline-flex items-center gap-0.5 text-[10px] text-blue-400 hover:text-blue-600 ml-1 align-middle">
-      {copied ? 'â' : 'â§'}
+      {copied ? 'OK' : 'Copy'}
     </button>
   )
 }
@@ -91,7 +91,7 @@ function LoadingSkeleton() {
   )
 }
 
-// ââ VOID CONFIRM MODAL ââââââââââââââââââââââââââââââââââââââââ
+// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ VOID CONFIRM MODAL ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
 function VoidConfirmModal({ logNumber, onConfirm, onClose }: {
   logNumber: string; onConfirm: () => void; onClose: () => void
 }) {
@@ -109,7 +109,7 @@ function VoidConfirmModal({ logNumber, onConfirm, onClose }: {
       <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl p-5 space-y-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
-            <span className="text-red-600 text-lg">â </span>
+            <span className="text-red-600 text-lg">ÃÂ¢ÃÂÃÂ </span>
           </div>
           <div>
             <p className="text-sm font-semibold text-gray-900">Batalkan Produksi?</p>
@@ -230,11 +230,11 @@ export default function ProduksiPage() {
         <div className="bg-white border-b border-gray-100 flex flex-shrink-0">
           <button onClick={() => setActiveTab('divisi')}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 transition-colors ${activeTab === 'divisi' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
-            ð­ Divisi Produksi
+            ÃÂ°ÃÂÃÂÃÂ­ Divisi Produksi
           </button>
           <button onClick={() => setActiveTab('toko')}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 transition-colors ${activeTab === 'toko' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
-            ðª Produksi Toko
+            ÃÂ°ÃÂÃÂÃÂª Produksi Toko
           </button>
         </div>
       )}
@@ -274,7 +274,7 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
   )
 }
 
-// ââ DIVISI PRODUKSI âââââââââââââââââââââââââââââââââââââââââââ
+// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ DIVISI PRODUKSI ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
 function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerManager?: boolean }) {
   const setToolbar = useContext(ToolbarCtx)
   const [showForm, setShowForm] = useState(false)
@@ -326,7 +326,7 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
     )
   }, [logs, search])
 
-  // ââ VOID HANDLER: DIVISI ââââââââââââââââââââââââââââââââââ
+  // ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ VOID HANDLER: DIVISI ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
   // Rollback stok ditangani oleh DB trigger (trigger_rollback_production_stock)
   // Client hanya update status
   async function handleVoidDivisi(logId: string) {
@@ -343,7 +343,7 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
         return
       }
 
-      // Update status voided — DB trigger otomatis rollback stok
+      // Update status voided Ã¢ÂÂ DB trigger otomatis rollback stok
       await supabase.from('production_logs').update({
         status: 'voided',
         voided_at: new Date().toISOString(),
@@ -415,13 +415,13 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
                               </span>
                             )}
                           </div>
-                          <p className={`text-sm font-medium text-gray-900 ${isVoided ? 'line-through' : ''}`}>{log.recipe?.name || '—'}</p>
+                          <p className={`text-sm font-medium text-gray-900 ${isVoided ? 'line-through' : ''}`}>{log.recipe?.name || 'Ã¢ÂÂ'}</p>
                           <p className="text-xs text-gray-400 mt-0.5">
                             {new Date(log.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                             {', '}
                             {new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })}
-                            {' · '}{log.batch_count} batch
-                            {log.notes && ` · ${log.notes}`}
+                            {' ÃÂ· '}{log.batch_count} batch
+                            {log.notes && ` ÃÂ· ${log.notes}`}
                           </p>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0 ml-3">
@@ -441,7 +441,7 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
                         <div className="mt-1.5 border-t border-gray-50 pt-1.5 space-y-0.5">
                           {log.materials.map(m => (
                             <div key={m.id} className="flex justify-between text-xs text-gray-400">
-                              <span>{m.material?.name} × {m.qty_used} {m.material?.unit} @ {formatRupiah(m.material?.unit_cost || 0)}</span>
+                              <span>{m.material?.name} ÃÂ {m.qty_used} {m.material?.unit} @ {formatRupiah(m.material?.unit_cost || 0)}</span>
                               <span>{formatRupiah(m.qty_used * (m.material?.unit_cost || 0))}</span>
                             </div>
                           ))}
@@ -612,7 +612,7 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
           {recipes?.map(r => <option key={r.id} value={r.id}>{r.name} ({r.batch_yield} {r.yield_unit}/batch)</option>)}
         </select>
         {recipes?.length === 0 && (
-          <p className="text-xs text-amber-600 mt-1.5">â  Belum ada resep. Buat resep di menu Resep terlebih dahulu.</p>
+          <p className="text-xs text-amber-600 mt-1.5">ÃÂ¢ÃÂÃÂ  Belum ada resep. Buat resep di menu Resep terlebih dahulu.</p>
         )}
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -710,7 +710,7 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
       <div>
         <Label required>Tujuan</Label>
         <div className="grid grid-cols-2 gap-2">
-          {([{ v: 'to_store', l: '→ Toko' }, { v: 'to_partner', l: '→ Franchise' }, { v: 'return_from_store', l: 'â Retur' }, { v: 'adjustment', l: 'Koreksi' }] as const).map(t => (
+          {([{ v: 'to_store', l: 'Ã¢ÂÂ Toko' }, { v: 'to_partner', l: 'Ã¢ÂÂ Franchise' }, { v: 'return_from_store', l: 'ÃÂ¢ÃÂÃÂ Retur' }, { v: 'adjustment', l: 'Koreksi' }] as const).map(t => (
             <button key={t.v} onClick={() => setType(t.v)}
               className={`py-2.5 rounded-xl text-sm font-medium border transition-colors ${type === t.v ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>{t.l}</button>
           ))}
@@ -774,7 +774,7 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
   )
 }
 
-// ââ PRODUKSI TOKO âââââââââââââââââââââââââââââââââââââââââââââ
+// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ PRODUKSI TOKO ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
 function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: string; role: string }) {
   const isOwnerManager = ['owner', 'manager'].includes(role)
   const [isSyncing, setIsSyncing] = useState(false)
@@ -814,7 +814,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
         supabase.from('store_recipes').select('*').eq('store_id', sid),
         supabase.from('store_recipe_items').select('*'),
         supabase.from('production_log_materials').select('*'),
-        // Pull logs hari ini dari Supabase — termasuk yang sudah di-void dari device lain
+        // Pull logs hari ini dari Supabase Ã¢ÂÂ termasuk yang sudah di-void dari device lain
         supabase.from('production_logs')
           .select('*')
           .eq('store_id', sid)
@@ -832,7 +832,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
     }
   }
 
-  // Realtime subscription — update Dexie otomatis saat ada perubahan production_logs
+  // Realtime subscription Ã¢ÂÂ update Dexie otomatis saat ada perubahan production_logs
   useEffect(() => {
     if (!activeStoreId) return
 
@@ -894,12 +894,12 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
 
   const totalHariIni = logs?.filter(l => (l as any).status !== 'voided').reduce((s, l) => s + l.total_yield, 0) || 0
 
-  // ââ VOID HANDLER: TOKO ââââââââââââââââââââââââââââââââââââ
+  // ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ VOID HANDLER: TOKO ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
   // Rollback stok ditangani oleh DB trigger (trigger_rollback_production_stock)
-  // Client hanya update status — tidak ada logic stok di sini
+  // Client hanya update status Ã¢ÂÂ tidak ada logic stok di sini
   async function handleVoidToko(logId: string, logStoreId: string, recipeId: string, totalYield: number) {
     try {
-      // Guard: cek dulu di Supabase — kalau sudah voided, jangan proses lagi
+      // Guard: cek dulu di Supabase Ã¢ÂÂ kalau sudah voided, jangan proses lagi
       const { data: existingLog } = await supabase
         .from('production_logs')
         .select('status')
@@ -911,7 +911,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
         return
       }
 
-      // Update status voided — DB trigger otomatis rollback stok
+      // Update status voided Ã¢ÂÂ DB trigger otomatis rollback stok
       await supabase.from('production_logs').update({
         status: 'voided',
         voided_at: new Date().toISOString(),
@@ -962,7 +962,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
       {!isSyncing && recipes?.length === 0 && (
         <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-center">
           <p className="text-sm font-medium text-amber-800">Belum ada resep produksi toko</p>
-          <p className="text-xs text-amber-600 mt-1">Buat resep di menu Resep → Resep Produksi Toko</p>
+          <p className="text-xs text-amber-600 mt-1">Buat resep di menu Resep Ã¢ÂÂ Resep Produksi Toko</p>
           <button onClick={() => syncStoreRecipes(activeStoreId)}
             className="mt-2 text-xs text-blue-600 border border-blue-200 px-3 py-1 rounded-lg">
             Sync ulang resep
@@ -1003,7 +1003,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
                       {new Date(l.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                       {', '}
                       {new Date(l.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })}
-                      {' · '}{l.batch_count} batch
+                      {' ÃÂ· '}{l.batch_count} batch
                     </p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0 ml-3">
@@ -1029,7 +1029,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
                   <div className="mt-2 border-t border-gray-50 pt-1.5 space-y-0.5">
                     {(l as any).materials.map((m: any) => (
                       <div key={m.id} className="flex justify-between text-xs text-gray-400">
-                        <span>{m.material?.name} × {m.qty_used} {m.material?.unit}{m.material?.unit_cost > 0 ? ` @ ${formatRupiah(m.material.unit_cost)}` : ''}</span>
+                        <span>{m.material?.name} ÃÂ {m.qty_used} {m.material?.unit}{m.material?.unit_cost > 0 ? ` @ ${formatRupiah(m.material.unit_cost)}` : ''}</span>
                         {m.material?.unit_cost > 0 && <span>{formatRupiah(m.qty_used * m.material.unit_cost)}</span>}
                       </div>
                     ))}
@@ -1120,7 +1120,7 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
       if (error) console.error('[PTOKO LOG ERROR]', error)
 
       // FIX: query langsung dari Supabase, bukan Dexie
-      // Dexie bisa stale — qty_used tersimpan salah (semua jadi 1)
+      // Dexie bisa stale Ã¢ÂÂ qty_used tersimpan salah (semua jadi 1)
       const { data: riFromSupabase, error: riErr } = await supabase
         .from('store_recipe_items')
         .select('*')
@@ -1184,7 +1184,7 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
         }
       }
 
-      toast.success(`${logNumber} — ${finalYield} ${yieldUnit} dicatat`)
+      toast.success(`${logNumber} Ã¢ÂÂ ${finalYield} ${yieldUnit} dicatat`)
       onClose()
     } catch (e) { console.error(e); toast.error('Gagal menyimpan') }
     finally { setSaving(false) }
@@ -1196,7 +1196,7 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
         <Label required>Pilih Resep</Label>
         {recipes.length === 0 ? (
           <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-center">
-            <p className="text-xs text-amber-700">Belum ada resep. Buat di menu Resep → Resep Produksi Toko</p>
+            <p className="text-xs text-amber-700">Belum ada resep. Buat di menu Resep Ã¢ÂÂ Resep Produksi Toko</p>
           </div>
         ) : (
           <select className="input" value={recipeId} onChange={e => setRecipeId(e.target.value)}>

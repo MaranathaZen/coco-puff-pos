@@ -420,8 +420,8 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
                             {new Date(log.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                             {', '}
                             {new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })}
-                            {' Â· '}{log.batch_count} batch
-                            {log.notes && ` Â· ${log.notes}`}
+                            {' · '}{log.batch_count} batch
+                            {log.notes && ` · ${log.notes}`}
                           </p>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0 ml-3">
@@ -1003,7 +1003,7 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
                       {new Date(l.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                       {', '}
                       {new Date(l.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })}
-                      {' Â· '}{l.batch_count} batch
+                      {' · '}{l.batch_count} batch
                     </p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0 ml-3">

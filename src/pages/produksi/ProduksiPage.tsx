@@ -230,11 +230,11 @@ export default function ProduksiPage() {
         <div className="bg-white border-b border-gray-100 flex flex-shrink-0">
           <button onClick={() => setActiveTab('divisi')}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 transition-colors ${activeTab === 'divisi' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
-            ├░┬ƒ┬Å┬¡ Divisi Produksi
+            🏭 Divisi Produksi
           </button>
           <button onClick={() => setActiveTab('toko')}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 transition-colors ${activeTab === 'toko' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400'}`}>
-            ├░┬ƒ┬Å┬¬ Produksi Toko
+            🏪 Produksi Toko
           </button>
         </div>
       )}

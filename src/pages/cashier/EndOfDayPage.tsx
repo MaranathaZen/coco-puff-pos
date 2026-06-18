@@ -258,6 +258,8 @@ export default function EndOfDayPage() {
   }
 
   async function handleSave() {
+    if (!saldoAwal || Number(saldoAwal) <= 0) return toast.error('Saldo awal wajib diisi dan lebih dari 0')
+    if (!uangFisik || Number(uangFisik) <= 0) return toast.error('Uang fisik di laci wajib diisi dan lebih dari 0')
     try {
       const { data: existing } = await supabase
         .from('close_order_reports').select('id')

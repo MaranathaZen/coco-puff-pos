@@ -572,18 +572,27 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
         await supabase.from('materials').update({ unit_cost: hppPerUnit, avg_cost: hppPerUnit }).eq('id', fgsProductId)
       }
 
-      const existing2 = await db.finished_goods_stock.filter(f =>
-        f.product_name === productName.trim() || f.product_id === fgsProductId
-      ).first()
-      const fgsId = existing2?.id || generateId()
-      const newFgsQty = (existing2?.qty_on_hand || 0) + finalYield
-      const fgsData: any = { id: fgsId, product_id: fgsProductId, product_name: productName.trim(), qty_on_hand: newFgsQty, hpp_per_unit: hppPerUnit, last_updated: now() }
-      await db.finished_goods_stock.put(fgsData)
-      if (existing2) {
-        await supabase.from('finished_goods_stock').update({ qty_on_hand: newFgsQty, hpp_per_unit: hppPerUnit, last_updated: now() }).eq('id', fgsId)
+      const outputType = (selectedRecipe as any)?.output_type || 'finished_goods'
+      if (outputType === 'production_stock') {
+        const existingPs = await db.production_stock.where('material_id').equals(fgsProductId).first()
+        const newPsQty = (existingPs?.qty_on_hand || 0) + finalYield
+        const psData: any = { id: existingPs?.id || generateId(), material_id: fgsProductId, qty_on_hand: newPsQty, avg_cost: hppPerUnit, last_updated: now() }
+        await db.production_stock.put(psData)
+        await supabase.from('production_stock').upsert(psData)
       } else {
-        const { error } = await supabase.from('finished_goods_stock').upsert(fgsData)
-        if (error) await supabase.from('finished_goods_stock').upsert(fgsData)
+        const existing2 = await db.finished_goods_stock.filter(f =>
+          f.product_name === productName.trim() || f.product_id === fgsProductId
+        ).first()
+        const fgsId = existing2?.id || generateId()
+        const newFgsQty = (existing2?.qty_on_hand || 0) + finalYield
+        const fgsData: any = { id: fgsId, product_id: fgsProductId, product_name: productName.trim(), qty_on_hand: newFgsQty, hpp_per_unit: hppPerUnit, last_updated: now() }
+        await db.finished_goods_stock.put(fgsData)
+        if (existing2) {
+          await supabase.from('finished_goods_stock').update({ qty_on_hand: newFgsQty, hpp_per_unit: hppPerUnit, last_updated: now() }).eq('id', fgsId)
+        } else {
+          const { error } = await supabase.from('finished_goods_stock').upsert(fgsData)
+          if (error) await supabase.from('finished_goods_stock').upsert(fgsData)
+        }
       }
 
       toast.success(`Produksi ${logNumber} dicatat: ${totalYield} ${selectedRecipe?.yield_unit || 'pcs'}`)

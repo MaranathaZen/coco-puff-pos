@@ -1005,17 +1005,7 @@ pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;wh
                 <RefreshCw size={14} className={isSyncing ? 'animate-spin text-blue-500' : ''} />
               </button>
             </div>
-            {pakets.length > 0 && (
-              <div className="bg-gray-50 border-b border-gray-100 px-3 py-2 flex gap-2 overflow-x-auto scrollbar-hide flex-shrink-0">
-                <span className="text-xs font-medium text-gray-500 self-center mr-1 flex-shrink-0">Paket:</span>
-                {pakets.map(p => (
-                  <button key={p.id} onClick={() => openPaketModal(p)}
-                    className="flex items-center gap-1.5 bg-gray-900 text-white px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0">
-                    <Package size={12} />{p.name} — {formatRupiah(p.price)}
-                  </button>
-                ))}
-              </div>
-            )}
+
             <div className="flex-1 overflow-auto p-3">
               {products && products.length === 0 && !isSyncing && (
                 <div className="text-center py-16">

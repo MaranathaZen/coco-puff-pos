@@ -621,6 +621,7 @@ function StokTokoView({ storeId, role, isOwner, isOwnerManager, setHeaderActions
           key={activeStoreId}
           storeId={activeStoreId}
           isOwnerManager={isOwnerManager}
+          isOwner={isOwner}
           setHeaderActions={setHeaderActions}
         />
       ) : (
@@ -630,8 +631,8 @@ function StokTokoView({ storeId, role, isOwner, isOwnerManager, setHeaderActions
   )
 }
 
-function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: {
-  storeId: string; isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void
+function StokTokoContent({ storeId, isOwnerManager, isOwner, setHeaderActions }: {
+  storeId: string; isOwnerManager: boolean; isOwner?: boolean; setHeaderActions: (n: React.ReactNode) => void
 }) {
   const [search, setSearch] = useState('')
   const [filterTokoKat, setFilterTokoKat] = useState('semua')

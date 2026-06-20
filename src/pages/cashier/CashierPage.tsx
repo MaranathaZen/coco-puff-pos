@@ -376,6 +376,7 @@ export default function CashierPage() {
   const paketDiscount = useMemo(() => {
     if (!pakets.length || !Object.keys(paketProducts).length) return 0
     let total = 0
+    const isOnlineCh = orderType === 'online'
     for (const pkt of pakets) {
       const productIds = paketProducts[pkt.id] || []
       if (!productIds.length) continue
@@ -385,17 +386,17 @@ export default function CashierPage() {
       const fullPakets = Math.floor(totalQtyInPaket / pkt.qty_total)
       if (fullPakets <= 0) continue
       const qtyDapat = fullPakets * pkt.qty_total
-      // FIX: pakai base_price (harga dasar offline), bukan unit_price yang sudah kena markup online
-      // supaya nominal diskon paket tetap flat di semua channel (offline/online)
+      // FIX: pakai unit_price aktual (sesuai channel offline/online), harga paket juga sesuai channel
       const avgHargaNormal = items
         .filter(item => productIds.includes(item.product.id))
-        .reduce((s, item) => s + (item.product.base_price ?? item.unit_price), 0) /
+        .reduce((s, item) => s + item.unit_price, 0) /
         (items.filter(item => productIds.includes(item.product.id)).length || 1)
-      const discountTotal = qtyDapat * avgHargaNormal - fullPakets * pkt.price
+      const pktPrice = isOnlineCh && (pkt as any).price_online > 0 ? (pkt as any).price_online : pkt.price
+      const discountTotal = qtyDapat * avgHargaNormal - fullPakets * pktPrice
       if (discountTotal > 0) total += discountTotal
     }
     return Math.round(total)
-  }, [items, pakets, paketProducts])
+  }, [items, pakets, paketProducts, orderType])
 
   const rawDiscount = totalDiscount() + buy1get1Discount + paketDiscount
   const afterDiscount = rawSubtotal - rawDiscount

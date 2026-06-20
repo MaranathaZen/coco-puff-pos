@@ -138,8 +138,8 @@ export default function UnifiedStokPage() {
       )}
       <div className="flex-1 overflow-auto bg-gray-50">
         {tab === 'gudang' && <StokGudangView isOwnerManager={isOwnerManager} isOwner={role === 'owner'} setHeaderActions={setHeaderActions} />}
-        {tab === 'produksi' && <StokProduksiView isOwnerManager={isOwnerManager} setHeaderActions={setHeaderActions} />}
-        {tab === 'toko' && <StokTokoView storeId={user?.store_id || ''} role={role} isOwnerManager={isOwnerManager} setHeaderActions={setHeaderActions} />}
+        {tab === 'produksi' && <StokProduksiView isOwnerManager={isOwnerManager} isOwner={role === 'owner'} setHeaderActions={setHeaderActions} />}
+        {tab === 'toko' && <StokTokoView storeId={user?.store_id || ''} role={role} isOwner={role === 'owner'} isOwnerManager={isOwnerManager} setHeaderActions={setHeaderActions} />}
       </div>
     </div>
   )
@@ -267,8 +267,8 @@ function StokGudangView({ isOwnerManager, isOwner, setHeaderActions }: {
 }
 
 // ── STOK PRODUKSI ─────────────────────────────────────────────
-function StokProduksiView({ isOwnerManager, setHeaderActions }: {
-  isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void
+function StokProduksiView({ isOwnerManager, isOwner, setHeaderActions }: {
+  isOwnerManager: boolean; isOwner?: boolean; setHeaderActions: (n: React.ReactNode) => void
 }) {
   const [search, setSearch] = useState('')
   const [filterKat, setFilterKat] = useState('semua')
@@ -391,7 +391,7 @@ function StokProduksiView({ isOwnerManager, setHeaderActions }: {
       </div>
 
       {showFgsForm && isOwnerManager && <FgsEditForm fgs={editFgs} onClose={() => { setShowFgsForm(false); setEditFgs(null) }} />}
-      {showPsForm && isOwnerManager && <PsEditForm ps={editPs} onClose={() => { setShowPsForm(false); setEditPs(null) }} />}
+      {showPsForm && isOwnerManager && <PsEditForm ps={editPs} isOwner={isOwner} onClose={() => { setShowPsForm(false); setEditPs(null) }} />}
     </div>
   )
 }
@@ -446,7 +446,7 @@ function FgsEditForm({ fgs, onClose }: { fgs: any; onClose: () => void }) {
 // ── FORM: Edit Stok Bahan Produksi ────────────────────────────
 // ── FORM: Edit Stok Bahan Produksi (FULL - sama dengan gudang) ────────────────────────
 // ── FORM: Edit Stok Bahan Produksi (FULL - sama dengan gudang) ────────────────────────
-function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
+function PsEditForm({ ps, isOwner, onClose }: { ps: any; isOwner?: boolean; onClose: () => void }) {
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const mat = materials?.find(m => m.id === ps?.material_id)
 
@@ -459,6 +459,7 @@ function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
   const [customUnit, setCustom] = useState(false)
   const [qty, setQty] = useState(String(ps?.qty_on_hand || ''))
   const [avg, setAvg] = useState(String((ps as any)?.avg_cost || ''))
+  const [isActive, setIsActive] = useState(true)
   const [saving, setSaving] = useState(false)
 
   // Load material data when mat changes
@@ -470,7 +471,23 @@ function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
     setUnitCost(String(mat.unit_cost || 0))
     setMinStock(String(mat.min_stock || 0))
     setCustom(!SATUAN.map(s => s.toLowerCase()).includes((mat.unit || '').toLowerCase()))
+    setIsActive(mat.is_active ?? true)
   }, [mat?.id])
+
+  async function handleDelete() {
+    if (!matId || !mat) return
+    if (!confirm(`Hapus permanen "${mat.name}"? Tindakan ini tidak bisa dibatalkan.`)) return
+    setSaving(true)
+    try {
+      await db.production_stock.where('material_id').equals(matId).delete()
+      await supabase.from('production_stock').delete().eq('material_id', matId)
+      await db.materials.delete(matId)
+      await supabase.from('materials').delete().eq('id', matId)
+      toast.success(`"${mat.name}" dihapus`)
+      onClose()
+    } catch (e) { toast.error('Gagal hapus: ' + String((e as any)?.message || e)) }
+    finally { setSaving(false) }
+  }
 
   async function handleSave() {
     if (!matId) return toast.error('Pilih bahan')
@@ -483,12 +500,12 @@ function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
       const matData: any = {
         id: matId, name: name.trim(), category, unit,
         unit_cost: Number(unitCost), min_stock: Number(minStock),
-        is_active: true, updated_at: now(),
+        is_active: isActive, updated_at: now(),
       }
       await db.materials.update(matId, matData)
       const hasHistoryPs = (mat as any)?.total_qty_purchased > 0
       const newAvgPs = hasHistoryPs ? (mat as any)?.avg_cost : Number(unitCost)
-      await supabase.from('materials').update({ name: name.trim(), category, unit, unit_cost: Number(unitCost), avg_cost: newAvgPs, min_stock: Number(minStock) }).eq('id', matId)
+      await supabase.from('materials').update({ name: name.trim(), category, unit, unit_cost: Number(unitCost), avg_cost: newAvgPs, min_stock: Number(minStock), is_active: isActive }).eq('id', matId)
 
       // Update production stock
       const existing = ps || await db.production_stock.where('material_id').equals(matId).first()
@@ -549,6 +566,14 @@ function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
         <div><Label>Harga Default/Satuan (Rp)</Label><input className="input" type="number" value={unitCost} onChange={e => setUnitCost(e.target.value)} /></div>
         <div><Label>Min. Stok (alert)</Label><input className="input" type="number" value={minStock} onChange={e => setMinStock(e.target.value)} /></div>
       </div>
+      {isOwner && ps && (
+        <div className="flex items-center justify-between py-2">
+          <div><p className="text-sm font-medium text-gray-700">Aktif</p><p className="text-xs text-gray-400">Nonaktif tidak muncul di stok</p></div>
+          <button onClick={() => setIsActive(!isActive)} className={`w-12 h-6 rounded-full transition-colors ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
+            <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform mx-0.5 ${isActive ? 'translate-x-6' : 'translate-x-0'}`} />
+          </button>
+        </div>
+      )}
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
@@ -557,8 +582,8 @@ function PsEditForm({ ps, onClose }: { ps: any; onClose: () => void }) {
   )
 }
 
-function StokTokoView({ storeId, role, isOwnerManager, setHeaderActions }: {
-  storeId: string; role: string; isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void
+function StokTokoView({ storeId, role, isOwner, isOwnerManager, setHeaderActions }: {
+  storeId: string; role: string; isOwner?: boolean; isOwnerManager: boolean; setHeaderActions: (n: React.ReactNode) => void
 }) {
   const canSeeAllStores = ['owner', 'manager', 'gudang', 'produksi'].includes(role)
   const stores = useLiveQuery(() =>
@@ -732,7 +757,7 @@ function StokTokoContent({ storeId, isOwnerManager, setHeaderActions }: {
         )}
       </div>
       {showStokAwal && isOwnerManager && <StokAwalTokoForm storeId={storeId} onClose={() => setShowStokAwal(false)} />}
-      {editStock && isOwnerManager && <EditStokTokoForm stock={editStock} onClose={() => setEditStock(null)} />}
+      {editStock && isOwnerManager && <EditStokTokoForm stock={editStock} isOwner={isOwner} onClose={() => setEditStock(null)} />}
     </div>
   )
 }

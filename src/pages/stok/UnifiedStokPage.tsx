@@ -840,7 +840,7 @@ function StokAwalTokoForm({ storeId, onClose }: { storeId: string; onClose: () =
 // ── FORM: Edit Stok Toko ──────────────────────────────────────
 // ── FORM: Edit Stok Toko (FULL - sama dengan gudang) ──────────────────────────────────
 // ── FORM: Edit Stok Toko (FULL - sama dengan gudang) ──────────────────────────────────
-function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void }) {
+function EditStokTokoForm({ stock, isOwner, onClose }: { stock: any; isOwner?: boolean; onClose: () => void }) {
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const mat = materials?.find(m => m.id === stock.ingredient_id)
 
@@ -852,6 +852,7 @@ function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void 
   const [customUnit, setCustom] = useState(false)
   const [qty, setQty] = useState(String(stock.qty_on_hand || 0))
   const [avg, setAvg] = useState(String(stock.avg_cost || 0))
+  const [isActive, setIsActive] = useState(true)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -862,7 +863,23 @@ function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void 
     setUnitCost(String(mat.unit_cost || 0))
     setMinStock(String(mat.min_stock || 0))
     setCustom(!SATUAN.map(s => s.toLowerCase()).includes((mat.unit || '').toLowerCase()))
+    setIsActive(mat.is_active ?? true)
   }, [mat?.id])
+
+  async function handleDelete() {
+    if (!mat) return
+    if (!confirm(`Hapus permanen "${mat.name}"? Tindakan ini tidak bisa dibatalkan.`)) return
+    setSaving(true)
+    try {
+      await db.stock.delete(stock.stockId)
+      await supabase.from('stock').delete().eq('id', stock.stockId)
+      await db.materials.delete(mat.id)
+      await supabase.from('materials').delete().eq('id', mat.id)
+      toast.success(`"${mat.name}" dihapus`)
+      onClose()
+    } catch (e) { toast.error('Gagal hapus: ' + String((e as any)?.message || e)) }
+    finally { setSaving(false) }
+  }
 
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama wajib diisi')
@@ -873,8 +890,8 @@ function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void 
       if (mat) {
         const hasHistoryToko = (mat as any)?.total_qty_purchased > 0
         const newAvgToko = hasHistoryToko ? (mat as any)?.avg_cost : Number(unitCost)
-        await db.materials.update(mat.id, { name: name.trim(), category, unit, unit_cost: Number(unitCost), avg_cost: newAvgToko, min_stock: Number(minStock), updated_at: now() } as any)
-        await supabase.from('materials').update({ name: name.trim(), category, unit, unit_cost: Number(unitCost), avg_cost: newAvgToko, min_stock: Number(minStock) }).eq('id', mat.id)
+        await db.materials.update(mat.id, { name: name.trim(), category, unit, unit_cost: Number(unitCost), avg_cost: newAvgToko, min_stock: Number(minStock), is_active: isActive, updated_at: now() } as any)
+        await supabase.from('materials').update({ name: name.trim(), category, unit, unit_cost: Number(unitCost), avg_cost: newAvgToko, min_stock: Number(minStock), is_active: isActive }).eq('id', mat.id)
       }
       // Update stock toko
       await db.stock.update(stock.stockId, { qty_on_hand: Number(qty), avg_cost: Number(avg), last_updated: now() } as any)
@@ -917,6 +934,14 @@ function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void 
             <div><Label>Harga Default (Rp)</Label><input className="input" type="number" value={unitCost} onChange={e => setUnitCost(e.target.value)} /></div>
             <div><Label>Min. Stok</Label><input className="input" type="number" value={minStock} onChange={e => setMinStock(e.target.value)} /></div>
           </div>
+          {isOwner && (
+            <div className="flex items-center justify-between py-2">
+              <div><p className="text-sm font-medium text-gray-700">Aktif</p><p className="text-xs text-gray-400">Nonaktif tidak muncul di stok</p></div>
+              <button onClick={() => setIsActive(!isActive)} className={`w-12 h-6 rounded-full transition-colors ${isActive ? 'bg-gray-900' : 'bg-gray-200'}`}>
+                <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform mx-0.5 ${isActive ? 'translate-x-6' : 'translate-x-0'}`} />
+              </button>
+            </div>
+          )}
         </>
       )}
       <div className="grid grid-cols-2 gap-3">
@@ -924,6 +949,9 @@ function EditStokTokoForm({ stock, onClose }: { stock: any; onClose: () => void 
         <div><Label>Avg Cost (Rp)</Label><input className="input" type="number" value={avg} onChange={e => setAvg(e.target.value)} /></div>
       </div>
       <div className="flex gap-3">
+        {isOwner && !stock.isProduk && mat && (
+          <button onClick={handleDelete} disabled={saving} className="px-4 py-3 rounded-xl border border-red-200 text-red-500 text-sm font-medium flex items-center gap-1"><Trash2 size={14}/>Hapus</button>
+        )}
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
       </div>

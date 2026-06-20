@@ -11,6 +11,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useAuthStore } from '@/store/auth'
 import { useAppSettings, applyFavicon } from '@/hooks/useAppSettings'
 import { db } from '@/lib/db'
+import { supabase } from '@/lib/supabase'
 import {
   LogOut, Wifi, WifiOff,
   ShoppingCart, FlaskConical,
@@ -161,8 +162,26 @@ export default function Layout() {
     )
   }
 
+  const [maintenanceMode, setMaintenanceMode] = useState(false)
+  useEffect(() => {
+    supabase.from('app_config').select('maintenance_mode').eq('id', 'main').maybeSingle()
+      .then(({ data }) => setMaintenanceMode(!!data?.maintenance_mode))
+    const channel = supabase.channel('app_config_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_config' }, (payload: any) => {
+        setMaintenanceMode(!!payload.new?.maintenance_mode)
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [])
+
   return (
     <div className="flex h-[100dvh] bg-gray-50">
+      {maintenanceMode && (
+        <div className="fixed top-2 right-2 z-50 bg-red-600 text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+          Aplikasi dalam perbaikan
+        </div>
+      )}
       {/* ── DESKTOP SIDEBAR ── */}
       <aside className="hidden md:flex flex-col w-56 bg-white border-r border-gray-100 flex-shrink-0">
         <div className="px-4 py-4 border-b border-gray-100">

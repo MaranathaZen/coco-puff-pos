@@ -14,7 +14,7 @@ import { X, ChevronRight, Plus, Check, Trash2, Tag, Store, Download, AlertTriang
 import toast from 'react-hot-toast'
 import type { User, Role } from '@/types'
 
-type Tab = 'users' | 'supplier' | 'mitra' | 'toko' | 'password' | 'ppn' | 'promo' | 'tampilan' | 'reset' | 'tutup_tahun'
+type Tab = 'users' | 'supplier' | 'mitra' | 'toko' | 'password' | 'ppn' | 'promo' | 'tampilan' | 'reset' | 'tutup_tahun' | 'sistem'
 
 const ALL_MENUS = [
   { path: '/kasir',          label: 'Kasir'       },
@@ -38,7 +38,7 @@ export default function SettingsPage() {
   const isOwnerManager = user?.role === 'owner' || user?.role === 'manager'
   if (!user) return null
 
-  const tabs: { id: Tab; label: string; ownerOnly?: boolean }[] = [
+  const tabs: { id: Tab; label: string; ownerOnly?: boolean; ownerStrict?: boolean }[] = [
     { id: 'users',       label: 'User'        },
     { id: 'supplier',    label: 'Supplier'    },
     { id: 'mitra',       label: 'Franchise'   },
@@ -49,7 +49,8 @@ export default function SettingsPage() {
     { id: 'tampilan',    label: 'Tampilan',    ownerOnly: true },
     { id: 'tutup_tahun', label: 'Tutup Tahun', ownerOnly: true },
     { id: 'reset',       label: 'Reset',       ownerOnly: true },
-  ].filter(t => !t.ownerOnly || isOwnerManager)
+    { id: 'sistem',      label: 'Sistem',      ownerStrict: true },
+  ].filter(t => (!t.ownerOnly || isOwnerManager) && (!t.ownerStrict || isOwner))
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -75,6 +76,7 @@ export default function SettingsPage() {
         {tab === 'tampilan'    && <TampilanTab />}
         {tab === 'tutup_tahun' && <TutupTahunTab currentUser={user!} />}
         {tab === 'reset'       && <ResetDataTab />}
+        {tab === 'sistem'      && <SistemTab />}
       </div>
     </div>
   )
@@ -796,3 +798,51 @@ return(<Modal title={supplier?'Edit Supplier':'Tambah Supplier'} onClose={onClos
 
 function MitraForm({partner,onClose}:{partner:Partner|null;onClose:()=>void}){const[name,setName]=useState(partner?.name||'');const[contact,setContact]=useState(partner?.contact||'');const[city,setCity]=useState(partner?.city||'');const[address,setAddr]=useState(partner?.address||'');const[isActive,setActive]=useState(partner?.is_active??true);const[saving,setSaving]=useState(false);async function handleSave(){if(!name.trim())return toast.error('Nama wajib diisi');setSaving(true);try{const data:Partner={id:partner?.id||generateId(),name:name.trim(),contact:contact||undefined,city:city||undefined,address:address||undefined,is_active:isActive,created_at:partner?.created_at||now()};await db.partners.put(data);await supabase.from('partners').upsert(data);toast.success(partner?'Diupdate':'Ditambahkan');onClose()}finally{setSaving(false)}}
 return(<Modal title={partner?'Edit Mitra':'Tambah Franchise'} onClose={onClose}><div><Label required>Nama Franchise</Label><input className="input" value={name} onChange={e=>setName(e.target.value)} autoFocus/></div><div className="grid grid-cols-2 gap-3"><div><Label required>Kota</Label><input className="input" value={city} onChange={e=>setCity(e.target.value)}/></div><div><Label required>No. Telepon</Label><input className="input" type="tel" value={contact} onChange={e=>setContact(e.target.value)}/></div></div><div><Label>Alamat</Label><input className="input" value={address} onChange={e=>setAddr(e.target.value)} placeholder="Opsional"/></div><div className="flex items-center justify-between py-2 border-t border-gray-100"><p className="text-sm text-gray-700">Aktif</p><button onClick={()=>setActive(!isActive)} className={`w-11 h-6 rounded-full transition-colors relative ${isActive?'bg-gray-900':'bg-gray-200'}`}><div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${isActive?'left-[22px]':'left-0.5'}`}/></button></div><div className="flex gap-3 pt-1 border-t border-gray-100"><button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button><button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving?'Menyimpan...':'Simpan'}</button></div></Modal>)}
+
+
+function SistemTab() {
+  const [maintenanceMode, setMaintenanceMode] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    supabase.from('app_config').select('maintenance_mode').eq('id', 'main').maybeSingle()
+      .then(({ data }) => { setMaintenanceMode(!!data?.maintenance_mode); setLoading(false) })
+  }, [])
+
+  async function toggle() {
+    setSaving(true)
+    try {
+      const newVal = !maintenanceMode
+      const { error } = await supabase.from('app_config').update({ maintenance_mode: newVal, updated_at: new Date().toISOString() }).eq('id', 'main')
+      if (error) throw error
+      setMaintenanceMode(newVal)
+      toast.success(newVal ? 'Mode perbaikan diaktifkan untuk semua role' : 'Mode perbaikan dimatikan')
+    } catch (e) { toast.error('Gagal mengubah mode perbaikan') }
+    finally { setSaving(false) }
+  }
+
+  if (loading) return <div className="p-4 text-sm text-gray-400">Memuat...</div>
+
+  return (
+    <div className="p-4 space-y-3">
+      <div className="bg-white rounded-xl border border-gray-100 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-900">Mode Perbaikan</p>
+            <p className="text-xs text-gray-400 mt-0.5">Tampilkan banner "Aplikasi dalam perbaikan" di semua role secara real-time</p>
+          </div>
+          <button onClick={toggle} disabled={saving}
+            className={`w-12 h-6 rounded-full transition-colors flex-shrink-0 ${maintenanceMode ? 'bg-red-600' : 'bg-gray-200'}`}>
+            <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform mx-0.5 ${maintenanceMode ? 'translate-x-6' : 'translate-x-0'}`} />
+          </button>
+        </div>
+      </div>
+      {maintenanceMode && (
+        <div className="bg-red-50 border border-red-100 rounded-xl p-3">
+          <p className="text-xs text-red-700">Banner sedang tampil di semua role. Matikan toggle di atas untuk menghilangkannya.</p>
+        </div>
+      )}
+    </div>
+  )
+}

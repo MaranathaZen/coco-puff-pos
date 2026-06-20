@@ -385,9 +385,11 @@ export default function CashierPage() {
       const fullPakets = Math.floor(totalQtyInPaket / pkt.qty_total)
       if (fullPakets <= 0) continue
       const qtyDapat = fullPakets * pkt.qty_total
+      // FIX: pakai base_price (harga dasar offline), bukan unit_price yang sudah kena markup online
+      // supaya nominal diskon paket tetap flat di semua channel (offline/online)
       const avgHargaNormal = items
         .filter(item => productIds.includes(item.product.id))
-        .reduce((s, item) => s + item.unit_price, 0) /
+        .reduce((s, item) => s + (item.product.base_price ?? item.unit_price), 0) /
         (items.filter(item => productIds.includes(item.product.id)).length || 1)
       const discountTotal = qtyDapat * avgHargaNormal - fullPakets * pkt.price
       if (discountTotal > 0) total += discountTotal

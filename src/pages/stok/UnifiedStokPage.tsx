@@ -575,6 +575,9 @@ function PsEditForm({ ps, isOwner, onClose }: { ps: any; isOwner?: boolean; onCl
         </div>
       )}
       <div className="flex gap-3">
+        {isOwner && ps && (
+          <button onClick={handleDelete} disabled={saving} className="px-4 py-3 rounded-xl border border-red-200 text-red-500 text-sm font-medium flex items-center gap-1"><Trash2 size={14}/>Hapus</button>
+        )}
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
       </div>

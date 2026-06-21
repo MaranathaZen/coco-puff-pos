@@ -272,7 +272,7 @@ export function now(): string { return new Date().toISOString() }
 export async function addToSyncQueue(
   table_name: string,
   record_id: string,
-  operation: 'insert' | 'update' | 'delete',
+  operation: 'insert' | 'update' | 'delete' | 'upsert',
   payload: object,
   store_id: string
 ) {

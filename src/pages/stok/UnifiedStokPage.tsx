@@ -1024,7 +1024,7 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
       <div><Label required>Kategori</Label>
         <div className="grid grid-cols-2 gap-2">
           {KATEGORI.map(k => (
-            <button key={k.value} onClick={() => setCategory(k.value)}
+            <button key={k.value} onClick={() => setCategory(k.value as typeof category)}
               className={`px-3 py-2.5 rounded-xl text-xs font-medium border text-left transition-colors ${category === k.value ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
               {k.label}
             </button>

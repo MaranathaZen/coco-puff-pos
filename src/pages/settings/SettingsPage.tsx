@@ -39,17 +39,17 @@ export default function SettingsPage() {
   if (!user) return null
 
   const tabs: { id: Tab; label: string; ownerOnly?: boolean; ownerStrict?: boolean }[] = [
-    { id: 'users',       label: 'User'        },
-    { id: 'supplier',    label: 'Supplier'    },
-    { id: 'mitra',       label: 'Franchise'   },
-    { id: 'toko',        label: 'Toko',        ownerOnly: true },
-    { id: 'password',    label: 'Password'    },
-    { id: 'ppn',         label: 'PPN',         ownerOnly: true },
-    { id: 'promo',       label: 'Promo',       ownerOnly: true },
-    { id: 'tampilan',    label: 'Tampilan',    ownerOnly: true },
-    { id: 'tutup_tahun', label: 'Tutup Tahun', ownerOnly: true },
-    { id: 'reset',       label: 'Reset',       ownerOnly: true },
-    { id: 'sistem',      label: 'Sistem',      ownerStrict: true },
+    { id: 'users' as const,       label: 'User'        },
+    { id: 'supplier' as const,    label: 'Supplier'    },
+    { id: 'mitra' as const,       label: 'Franchise'   },
+    { id: 'toko' as const,        label: 'Toko',        ownerOnly: true },
+    { id: 'password' as const,    label: 'Password'    },
+    { id: 'ppn' as const,         label: 'PPN',         ownerOnly: true },
+    { id: 'promo' as const,       label: 'Promo',       ownerOnly: true },
+    { id: 'tampilan' as const,    label: 'Tampilan',    ownerOnly: true },
+    { id: 'tutup_tahun' as const, label: 'Tutup Tahun', ownerOnly: true },
+    { id: 'reset' as const,       label: 'Reset',       ownerOnly: true },
+    { id: 'sistem' as const,      label: 'Sistem',      ownerStrict: true },
   ].filter(t => (!t.ownerOnly || isOwnerManager) && (!t.ownerStrict || isOwner))
 
   return (
@@ -112,7 +112,7 @@ async function uploadProductImage(file: File, productId: string): Promise<string
 
 function UploadBox({ label, hint, currentUrl, onUpload, loading }: {
   label: string; hint: string; currentUrl: string | null
-  onUpload: (file: File) => Promise<void>; loading: boolean
+  onUpload: (file: File) => Promise<any>; loading: boolean
 }) {
   const ref = useRef<HTMLInputElement>(null)
   return (
@@ -650,7 +650,7 @@ function PPNTab({ currentUser }: { currentUser: User }) {
   const [enabled,setEnabled]=useState(false);const [rate,setRate]=useState('11');const [mode,setMode]=useState<'include'|'exclude'>('include');const [saving,setSaving]=useState(false);const [loaded,setLoaded]=useState(false)
   useEffect(()=>{
     setLoaded(false)
-    supabase.from('stores').select('ppn_enabled, ppn_rate, ppn_mode').eq('id',selectedStoreId).single()
+    Promise.resolve(supabase.from('stores').select('ppn_enabled, ppn_rate, ppn_mode').eq('id',selectedStoreId).single())
       .then(({data})=>{
         if(data&&data.ppn_rate>0){setEnabled(data.ppn_enabled??false);setRate(String(data.ppn_rate??11));setMode(data.ppn_mode??'include')}
         else{const saved=localStorage.getItem(`ppn_config_${selectedStoreId}`);if(saved){try{const cfg=JSON.parse(saved);setEnabled(cfg.enabled??false);setRate(String(cfg.rate??11));setMode(cfg.mode??'include')}catch{}}}

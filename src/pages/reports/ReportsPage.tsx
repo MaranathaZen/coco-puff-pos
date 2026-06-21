@@ -189,12 +189,12 @@ export default function ReportsPage() {
     exportPDF(buildLaporanData())
   }
 
-  const divTabs: { id: DivisiTab; label: string; icon: any; hidden?: boolean }[] = [
-    { id: 'ringkasan', label: 'Ringkasan', icon: TrendingUp },
-    { id: 'penjualan', label: 'Penjualan', icon: ShoppingBag, hidden: isGudang },
-    { id: 'gudang',    label: 'Gudang',    icon: Package },
-    { id: 'produksi',  label: 'Produksi',  icon: FlaskConical, hidden: isGudang },
-    { id: 'biaya',     label: 'Biaya',     icon: Receipt },
+  const divTabs = [
+    { id: 'ringkasan' as const, label: 'Ringkasan', icon: TrendingUp },
+    { id: 'penjualan' as const, label: 'Penjualan', icon: ShoppingBag, hidden: isGudang },
+    { id: 'gudang' as const,    label: 'Gudang',    icon: Package },
+    { id: 'produksi' as const,  label: 'Produksi',  icon: FlaskConical, hidden: isGudang },
+    { id: 'biaya' as const,     label: 'Biaya',     icon: Receipt },
   ].filter(t => !t.hidden)
 
   return (

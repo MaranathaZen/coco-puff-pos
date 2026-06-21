@@ -595,14 +595,14 @@ export default function CashierPage() {
         unit_price: cp.paket.price / cp.paket.qty_total, discount: 0,
         promo_id: null, promo_discount: 0, promo_name: null,
         subtotal: (cp.paket.price / cp.paket.qty_total) * p.qty,
-        item_type: 'package', package_id: cp.paket.id,
+        item_type: 'package' as const, package_id: cp.paket.id,
       })))
 
       await db.transactions.put(tx)
       await db.transaction_items.bulkPut([...txItems, ...txPakets])
-      await addToSyncQueue('transactions', txId, 'upsert', tx, STORE_ID)
+      await addToSyncQueue('transactions', txId, 'upsert' as any, tx, STORE_ID)
       for (const item of [...txItems, ...txPakets])
-        await addToSyncQueue('transaction_items', item.id, 'upsert', item, STORE_ID)
+        await addToSyncQueue('transaction_items', item.id, 'upsert' as any, item, STORE_ID)
       await deductStockFromRecipes([...txItems, ...txPakets], STORE_ID)
       pushToSupabase().catch(() => { })
 

@@ -15,6 +15,7 @@ export interface User {
   role: Role
   is_active: boolean
   created_at: string
+  password_hash?: string
 }
 
 export interface Store {
@@ -37,6 +38,8 @@ export interface Shift {
   closing_cash?: number
   note?: string
   status: 'open' | 'closed'
+  total_trx?: number
+  total_sales?: number
 }
 
 // ── Products ─────────────────────────────────────────────────
@@ -208,7 +211,7 @@ export interface SyncQueueItem {
   store_id: string
   table_name: string
   record_id: string
-  operation: 'insert' | 'update' | 'delete'
+  operation: 'insert' | 'update' | 'delete' | 'upsert'
   payload: string
   status: 'pending' | 'syncing' | 'done' | 'failed'
   retry_count: number

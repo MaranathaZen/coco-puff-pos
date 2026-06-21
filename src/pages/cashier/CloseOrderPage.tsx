@@ -67,7 +67,7 @@ export default function CloseOrderPage() {
       if (txRes.data?.length)     await db.transactions.bulkPut(txRes.data)
       if (shiftsRes.data?.length) await db.shifts.bulkPut(shiftsRes.data)
       if (storesRes.data !== null) { await db.stores.clear(); if (storesRes.data.length) await db.stores.bulkPut(storesRes.data) }
-      if (usersRes.data?.length)  await db.users.bulkPut(usersRes.data)
+      if (usersRes.data?.length)  await db.users.bulkPut(usersRes.data as any)
       if (reportsRes.data?.length) setCloseReports(reportsRes.data)
       toast.success('Data diperbarui')
     } catch { toast.error('Gagal sync') }

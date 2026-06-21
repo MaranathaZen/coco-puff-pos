@@ -700,7 +700,7 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
         <Label required>Kategori</Label>
         <div className="grid grid-cols-2 gap-2">
           {KATEGORI_GUDANG.map(k => (
-            <button key={k.value} onClick={() => setCat(k.value)}
+            <button key={k.value} onClick={() => setCat(k.value as typeof category)}
               className={`px-3 py-2 rounded-xl text-left border transition-colors ${category === k.value ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600'}`}>
               <p className="text-xs font-medium">{k.label}</p>
               <p className={`text-[10px] leading-tight mt-0.5 ${category === k.value ? 'text-gray-300' : 'text-gray-400'}`}>{k.desc}</p>
@@ -1013,9 +1013,93 @@ function PembelianForm({ userId, onClose }: { userId: string; onClose: () => voi
   )
 }
 
+// ── FORM: Biaya ───────────────────────────────────────────────
+function BiayaForm({ userId, onClose }: { userId: string; onClose: () => void }) {
+  const [description, setDescription] = useState('')
+  const [amount,      setAmount]      = useState('')
+  const [category,    setCategory]    = useState('beban_bahan_baku')
+  const [payMethod,   setPayMethod]   = useState('tunai')
+  const [notes,       setNotes]       = useState('')
+  const [saving,      setSaving]      = useState(false)
+
+  async function handleSave() {
+    if (!description.trim()) return toast.error('Deskripsi wajib diisi')
+    if (!amount || Number(amount) <= 0) return toast.error('Jumlah wajib diisi')
+    setSaving(true)
+    try {
+      const expNumber = await generateExpenseNumber()
+      const data: any = {
+        id: generateId(),
+        name: description.trim(),
+        description: description.trim(),
+        amount: Number(amount),
+        category,
+        payment_method: payMethod,
+        expense_number: expNumber,
+        expense_date: new Date().toLocaleDateString('sv-SE'),
+        status: 'done',
+        created_by: userId,
+        created_at: now(),
+      }
+      if (notes?.trim()) data.notes = notes.trim()
+      await db.warehouse_expenses.put(data)
+      await supabase.from('warehouse_expenses').upsert(data)
+      toast.success('Biaya dicatat')
+      onClose()
+    } catch (e) {
+      console.error('[BiayaForm]', e)
+      toast.error('Gagal menyimpan: ' + String((e as any)?.message || e))
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title="Catat Biaya" onClose={onClose}>
+      <div><Label required>Deskripsi</Label>
+        <input className="input" value={description} onChange={e => setDescription(e.target.value)}
+          placeholder="Contoh: Bensin motor, Sabun cuci, dll" autoFocus />
+      </div>
+      <div><Label required>Jumlah (Rp)</Label>
+        <input className="input text-lg font-semibold" inputMode="decimal" value={amount}
+          onChange={e => setAmount(e.target.value.replace(/[^0-9]/g,''))} placeholder="0" />
+      </div>
+      <div><Label required>Kategori</Label>
+        <div className="grid grid-cols-2 gap-2">
+          {KATEGORI_BIAYA.map(k => (
+            <button key={k.value} onClick={() => setCategory(k.value)}
+              className={`py-2.5 rounded-xl text-xs font-medium border text-left px-3 transition-colors ${category===k.value?'bg-gray-900 text-white border-gray-900':'border-gray-200 text-gray-600'}`}>
+              {k.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div><Label>Metode Bayar</Label>
+        <div className="flex gap-2">
+          {METODE_BAYAR.map(m => (
+            <button key={m.value} onClick={() => setPayMethod(m.value)}
+              className={`flex-1 py-2.5 rounded-xl text-xs font-medium border transition-colors ${payMethod===m.value?'bg-gray-900 text-white border-gray-900':'border-gray-200 text-gray-600'}`}>
+              {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div><Label>Catatan</Label>
+        <input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opsional" />
+      </div>
+      <div className="flex gap-3">
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving}
+          className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">
+          {saving ? 'Menyimpan...' : 'Simpan'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 // ── FORM: Mutasi ──────────────────────────────────────────────
 function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }) {
   const { user }  = useAuthStore()
+  const region = (user as any)?.region || ''
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const partners  = useLiveQuery(() => db.partners.filter(p => p.is_active).toArray(), [])
   const stores    = useLiveQuery(async () => {
@@ -1189,4 +1273,38 @@ function MutasiForm({ userId, onClose }: { userId: string; onClose: () => void }
             const mat         = materials?.find(m => m.id === item.material_id)
             const displayCost = mat?.avg_cost || mat?.unit_cost || 0
             return (
-              <div key={i}
+              <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-gray-50">
+                <select className="input text-sm" value={item.material_id} onChange={e => {
+                  setItems(p => p.map((it, idx) => idx === i ? { ...it, material_id: e.target.value } : it))
+                }}>
+                  <option value="">Pilih bahan</option>
+                  {materials?.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
+                </select>
+                <div className="grid grid-cols-2 gap-2">
+                  <input className="input text-sm" type="number" placeholder={`Qty (${mat?.unit || 'unit'})`} value={item.qty} onChange={e => {
+                    setItems(p => p.map((it, idx) => idx === i ? { ...it, qty: e.target.value } : it))
+                  }} />
+                  <div className="text-xs text-gray-400 flex items-center">
+                    {displayCost > 0 && `@ ${formatRupiah(displayCost)}/${mat?.unit || 'unit'}`}
+                  </div>
+                </div>
+                {item.qty && displayCost > 0 && <p className="text-xs text-gray-400">Subtotal: {formatRupiah(Number(item.qty) * displayCost)}</p>}
+                {items.length > 1 && <button onClick={() => setItems(p => p.filter((_, idx) => idx !== i))} className="text-xs text-red-400">Hapus</button>}
+              </div>
+            )
+          })}
+        </div>
+        <button onClick={() => setItems(p => [...p, { material_id: '', qty: '' }])} className="mt-2 text-sm text-blue-600 font-medium">+ Tambah Item</button>
+      </div>
+      <div><Label>Catatan</Label><input className="input" value={notes} onChange={e => setNotes(e.target.value)} /></div>
+      <div className="flex items-center justify-between py-2 border-t border-gray-100">
+        <span className="text-sm font-medium text-gray-700">Total Nilai</span>
+        <span className="text-base font-semibold text-gray-900">{formatRupiah(totalNilai)}</span>
+      </div>
+      <div className="flex gap-3">
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
+        <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan Mutasi'}</button>
+      </div>
+    </Modal>
+  )
+}

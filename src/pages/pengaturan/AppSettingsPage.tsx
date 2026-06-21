@@ -49,7 +49,7 @@ function UploadBox({ label, hint, currentUrl, onUpload, loading }: {
   label: string
   hint: string
   currentUrl: string | null
-  onUpload: (file: File) => Promise<void>
+  onUpload: (file: File) => Promise<any>
   loading: boolean
 }) {
   const ref = useRef<HTMLInputElement>(null)
@@ -309,7 +309,7 @@ function ProductImageRow({ product, imgUrl, isUploading, onUpload, onRemove }: {
   product: any
   imgUrl: string | null
   isUploading: boolean
-  onUpload: (file: File) => Promise<void>
+  onUpload: (file: File) => Promise<any>
   onRemove: () => void
 }) {
   const fileRef = useRef<HTMLInputElement>(null)

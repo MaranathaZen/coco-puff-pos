@@ -648,7 +648,7 @@ export default function DebugPage() {
                     supabase.from('materials').select('*'),
                     supabase.from('stock').select('*').eq('store_id', storeId),
                     supabase.from('packages').select('*').eq('is_active', true),
-                    supabase.from('package_items').select('*').catch(() => ({ data: [] })),
+                    supabase.from('package_items').select('*').then(res => res).catch(() => ({ data: [] as any[] })) as any,
                   ])
                   if (recs.data?.length) await db.store_recipes.bulkPut(recs.data)
                   if (items.data?.length) await db.store_recipe_items.bulkPut(items.data)

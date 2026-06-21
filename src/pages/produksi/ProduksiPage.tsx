@@ -1,4 +1,4 @@
-﻿// src/pages/produksi/ProduksiPage.tsx
+// src/pages/produksi/ProduksiPage.tsx
 // CHANGELOG v6:
 // - FEAT: Void produksi divisi ├ó┬Ç┬ö owner/manager bisa void log, stok dikembalikan
 // - FEAT: Realtime subscription production_logs ├ó┬Ç┬ö kasir lihat perubahan otomatis tanpa refresh
@@ -211,7 +211,7 @@ export default function ProduksiPage() {
         <h1 className="text-lg font-semibold text-gray-900">Produksi</h1>
         <div className="flex items-center gap-2">
           {toolbarActions}
-          <button onClick={syncData} disabled={isSyncing} className="p-2 rounded-full text-gray-400">
+          <button onClick={() => syncData()} disabled={isSyncing} className="p-2 rounded-full text-gray-400">
             <RefreshCw size={16} className={isSyncing ? 'animate-spin text-blue-500' : ''} />
           </button>
         </div>

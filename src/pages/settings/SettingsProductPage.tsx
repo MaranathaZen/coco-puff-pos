@@ -385,7 +385,7 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
 
   // Harga per toko per tipe order
   const stores = useLiveQuery(() => db.stores.filter(s => s.is_active && !s.id.includes('gudang') && !s.id.includes('produksi')).toArray(), [])
-  const [storePrices, setStorePrices] = useState<Record<string, {dine_in: string; take_away: string; online: string}>>({})
+  const [storePrices, setStorePrices] = useState<Record<string, {dine_in: string; take_away: string; online: string; is_active?: boolean}>>({})
 
   // Load existing prices
   useEffect(() => {

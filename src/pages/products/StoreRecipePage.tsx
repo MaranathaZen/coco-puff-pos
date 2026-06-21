@@ -98,7 +98,7 @@ function StoreRecipeForm({ recipe, storeId, onClose }: {
 
   const [productId, setProductId] = useState(recipe?.product_id || '')
   const [isActive, setIsActive]   = useState(recipe?.is_active ?? true)
-  const [items, setItems]         = useState<{ id?: string; material_id: string; qty: string; source: 'warehouse'|'production' }[]>([])
+  const [items, setItems]         = useState<{ id?: string; material_id: string; qty: string; source: 'warehouse'|'production'|'store' }[]>([])
   const [saving, setSaving]       = useState(false)
   const [loading, setLoading]     = useState(!!recipe)
 

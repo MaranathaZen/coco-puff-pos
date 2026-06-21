@@ -79,6 +79,7 @@ export interface ProductionRecipe {
   id: string; name: string; batch_yield: number
   yield_unit: string; is_active: boolean; created_at: string
   product_name?: string
+  output_type?: 'finished_goods' | 'production_stock'
 }
 
 export interface ProductionRecipeItem {
@@ -127,7 +128,7 @@ export interface StoreRecipe {
 
 export interface StoreRecipeItem {
   id: string; recipe_id: string; material_id: string
-  qty_used: number; source: 'warehouse' | 'production' | 'store'; notes?: string
+  qty_used: number; source: 'production' | 'store'; notes?: string
 }
 
 export class CocoPuffDB extends Dexie {
@@ -272,7 +273,7 @@ export function now(): string { return new Date().toISOString() }
 export async function addToSyncQueue(
   table_name: string,
   record_id: string,
-  operation: 'insert' | 'update' | 'delete' | 'upsert',
+  operation: 'insert' | 'update' | 'delete',
   payload: object,
   store_id: string
 ) {

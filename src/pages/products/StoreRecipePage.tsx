@@ -98,24 +98,24 @@ function StoreRecipeForm({ recipe, storeId, onClose }: {
 
   const [productId, setProductId] = useState(recipe?.product_id || '')
   const [isActive, setIsActive]   = useState(recipe?.is_active ?? true)
-  const [items, setItems]         = useState<{ id?: string; material_id: string; qty: string; source: 'warehouse'|'production'|'store' }[]>([])
+  const [items, setItems]         = useState<{ id?: string; material_id: string; qty: string; source: 'store'|'production' }[]>([])
   const [saving, setSaving]       = useState(false)
   const [loading, setLoading]     = useState(!!recipe)
 
   useEffect(() => {
-    if (!recipe) { setItems([{ material_id: '', qty: '', source: 'warehouse' }]); return }
+    if (!recipe) { setItems([{ material_id: '', qty: '', source: 'store' }]); return }
     async function load() {
       const existing = await db.store_recipe_items.where('recipe_id').equals(recipe.id).toArray()
       setItems(existing.length > 0
-        ? existing.map(i => ({ id: i.id, material_id: i.material_id, qty: String(i.qty_used), source: i.source || 'warehouse' }))
-        : [{ material_id: '', qty: '', source: 'warehouse' }]
+        ? existing.map(i => ({ id: i.id, material_id: i.material_id, qty: String(i.qty_used), source: i.source || 'store' }))
+        : [{ material_id: '', qty: '', source: 'store' }]
       )
       setLoading(false)
     }
     load()
   }, [recipe?.id])
 
-  function addItem() { setItems(p => [...p, { material_id: '', qty: '', source: 'warehouse' }]) }
+  function addItem() { setItems(p => [...p, { material_id: '', qty: '', source: 'store' }]) }
   function updateItem(i: number, f: string, v: string) {
     setItems(p => p.map((item, idx) => idx === i ? { ...item, [f]: v } : item))
   }
@@ -231,7 +231,7 @@ function StoreRecipeForm({ recipe, storeId, onClose }: {
                         value={item.qty} onChange={e => updateItem(i, 'qty', e.target.value)} />
                       <select className="input text-sm" value={item.source}
                         onChange={e => updateItem(i, 'source', e.target.value)}>
-                        <option value="warehouse">Stok Gudang</option>
+                        <option value="store">Stok Toko</option>
                         <option value="production">Stok Produksi</option>
                       </select>
                     </div>

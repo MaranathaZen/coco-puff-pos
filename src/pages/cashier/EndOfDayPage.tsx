@@ -260,6 +260,7 @@ export default function EndOfDayPage() {
   async function handleSave() {
     if (!saldoAwal || Number(saldoAwal) <= 0) return toast.error('Saldo awal wajib diisi dan lebih dari 0')
     if (!uangFisik || Number(uangFisik) <= 0) return toast.error('Uang fisik di laci wajib diisi dan lebih dari 0')
+    if (!notes.trim()) return toast.error('Nama kasir wajib diisi')
     try {
       const { data: existing } = await supabase
         .from('close_order_reports').select('id')
@@ -355,10 +356,10 @@ export default function EndOfDayPage() {
         <NumInput label="Uang Fisik di Laci" value={uangFisik} onChange={setUangFisik} disabled={!!existingReport} />
       </div>
       <div>
-        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Catatan</label>
+        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Kasir <span className="text-red-500">*</span></label>
         <input className={`input ${existingReport ? 'opacity-50 cursor-not-allowed' : ''}`}
           value={notes} onChange={e => !existingReport && setNotes(e.target.value)}
-          placeholder="Opsional" readOnly={!!existingReport} />
+          placeholder="Nama kasir" readOnly={!!existingReport} required />
       </div>
     </div>
   )

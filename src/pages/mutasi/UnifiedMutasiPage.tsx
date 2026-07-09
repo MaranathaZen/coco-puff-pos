@@ -7,9 +7,10 @@
 
 import { useState, useMemo, useEffect, useContext, createContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, generateId, now, type WarehouseMutationItem } from '@/lib/db'
+import { db, generateId, now, addToSyncQueue, type WarehouseMutationItem } from '@/lib/db'
 import { shareWaMutasi } from '@/lib/shareWa'
 import { supabase } from '@/lib/supabase'
+import { replacePreservingUnsynced, mergePreservingUnsynced } from '@/lib/sync'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
 import { Plus, RefreshCw, X } from 'lucide-react'
@@ -138,16 +139,17 @@ export default function UnifiedMutasiPage() {
           supabase.from('production_stock').select('*'),
           supabase.from('stock').select('*'),
         ])
-        if (m.data !== null)   { await db.warehouse_mutations.clear();      if (m.data.length)   await db.warehouse_mutations.bulkPut(m.data)      }
-        if (mi.data !== null)  { await db.warehouse_mutation_items.clear(); if (mi.data.length)  await db.warehouse_mutation_items.bulkPut(mi.data) }
+        // Anti-clobber: pertahankan record lokal yang belum ter-push
+        await replacePreservingUnsynced(db.warehouse_mutations, 'warehouse_mutations', m.data)
+        await replacePreservingUnsynced(db.warehouse_mutation_items, 'warehouse_mutation_items', mi.data)
         if (mats.data?.length)     await db.materials.bulkPut(mats.data)
         if (stores.data?.length)   await db.stores.bulkPut(stores.data)
         if (partners.data?.length) await db.partners.bulkPut(partners.data)
         if (prods.data?.length)    await db.products.bulkPut(prods.data)
-        if (fgStock.data?.length)  await db.finished_goods_stock.bulkPut(fgStock.data)
-        if (wstock.data?.length)   await db.warehouse_stock.bulkPut(wstock.data)
-        if (pstock.data?.length)   await db.production_stock.bulkPut(pstock.data)
-        if (stock.data?.length)    await db.stock.bulkPut(stock.data)
+        await mergePreservingUnsynced(db.finished_goods_stock, 'finished_goods_stock', fgStock.data)
+        await mergePreservingUnsynced(db.warehouse_stock, 'warehouse_stock', wstock.data)
+        await mergePreservingUnsynced(db.production_stock, 'production_stock', pstock.data)
+        await mergePreservingUnsynced(db.stock, 'stock', stock.data)
       } catch (e) { console.warn('[Mutasi mount sync]', e) }
       finally { setSyncing(false) }
     }
@@ -169,16 +171,17 @@ export default function UnifiedMutasiPage() {
         supabase.from('production_stock').select('*'),
         supabase.from('stock').select('*'),
       ])
-      if (m.data !== null)   { await db.warehouse_mutations.clear();      if (m.data.length)   await db.warehouse_mutations.bulkPut(m.data)      }
-      if (mi.data !== null)  { await db.warehouse_mutation_items.clear(); if (mi.data.length)  await db.warehouse_mutation_items.bulkPut(mi.data) }
+      // Anti-clobber: pertahankan record lokal yang belum ter-push
+      await replacePreservingUnsynced(db.warehouse_mutations, 'warehouse_mutations', m.data)
+      await replacePreservingUnsynced(db.warehouse_mutation_items, 'warehouse_mutation_items', mi.data)
       if (mats.data?.length)     await db.materials.bulkPut(mats.data)
       if (stores.data?.length)   await db.stores.bulkPut(stores.data)
       if (partners.data?.length) await db.partners.bulkPut(partners.data)
       if (prods.data?.length)    await db.products.bulkPut(prods.data)
-      if (fgStock.data?.length)  await db.finished_goods_stock.bulkPut(fgStock.data)
-      if (wstock.data?.length)   await db.warehouse_stock.bulkPut(wstock.data)
-      if (pstock.data?.length)   await db.production_stock.bulkPut(pstock.data)
-      if (stock.data?.length)    await db.stock.bulkPut(stock.data)
+      await mergePreservingUnsynced(db.finished_goods_stock, 'finished_goods_stock', fgStock.data)
+      await mergePreservingUnsynced(db.warehouse_stock, 'warehouse_stock', wstock.data)
+      await mergePreservingUnsynced(db.production_stock, 'production_stock', pstock.data)
+      await mergePreservingUnsynced(db.stock, 'stock', stock.data)
       toast.success('Data diperbarui')
     } catch { toast.error('Gagal sync') }
     finally { setSyncing(false) }
@@ -353,21 +356,22 @@ function MutasiList({ userId, role, storeId }: { userId: string; role: string; s
   // Client hanya update status
   async function handleVoidMutasi(mutationId: string) {
     try {
-      // Guard: cek sudah voided belum
-      const { data: existing } = await supabase
+      // Guard: cek sudah voided belum. Resilient: fallback ke status lokal saat offline.
+      let curStatus: string | undefined
+      const { data: existing, error: chkErr } = await supabase
         .from('warehouse_mutations').select('status').eq('id', mutationId).single()
-      if (existing?.status === 'voided') {
+      if (!chkErr && existing) curStatus = existing.status
+      else curStatus = (await db.warehouse_mutations.get(mutationId))?.status
+      if (curStatus === 'voided') {
         toast.error('Mutasi ini sudah dibatalkan sebelumnya')
         setVoidTarget(null)
         return
       }
 
-      // Update status — DB trigger otomatis rollback stok
-      await supabase.from('warehouse_mutations').update({
-        status: 'voided',
-        voided_at: new Date().toISOString(),
-      }).eq('id', mutationId)
+      // Update status — DB trigger di server otomatis rollback stok saat push
       await db.warehouse_mutations.update(mutationId, { status: 'voided', voided_at: now() } as any)
+      const full = await db.warehouse_mutations.get(mutationId)
+      if (full) await addToSyncQueue('warehouse_mutations', mutationId, 'upsert' as any, full, (full as any).acting_store_id || (full as any).store_id || 'gudang')
 
       toast.success('Mutasi dibatalkan & stok dikembalikan')
       setVoidTarget(null)
@@ -711,8 +715,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
         created_at: now(), confirmed_at: now(), confirmed_by: userId,
       }
       await db.warehouse_mutations.put(mut)
-      const { error: mutErr } = await supabase.from('warehouse_mutations').upsert(mut)
-      if (mutErr) { console.error('[MUT INSERT ERROR]', mutErr); throw new Error(mutErr.message) }
+      await addToSyncQueue('warehouse_mutations', mutId, 'upsert' as any, mut, effectiveStoreId || 'gudang')
 
       for (const item of valid) {
         const snapshotCost = getSnapshotCost(item.material_id)
@@ -721,8 +724,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           qty: Number(item.qty), unit_cost: snapshotCost,
         }
         await db.warehouse_mutation_items.put(mi as any)
-        const { error: miErr } = await supabase.from('warehouse_mutation_items').upsert(mi)
-        if (miErr) console.error('[MUT ITEM ERROR]', miErr)
+        await addToSyncQueue('warehouse_mutation_items', mi.id, 'upsert' as any, mi, effectiveStoreId || 'gudang')
 
         if (effectiveRole === 'kasir') {
           const ss = await db.stock.filter(s =>
@@ -733,7 +735,8 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           if (ss) {
             const newQty = Math.max(0, (ss.qty_on_hand || 0) - Number(item.qty))
             await db.stock.update(ss.id, { qty_on_hand: newQty, last_updated: now() } as any)
-            await supabase.from('stock').update({ qty_on_hand: newQty }).eq('id', ss.id)
+            const full = await db.stock.get(ss.id)
+            if (full) await addToSyncQueue('stock', ss.id, 'upsert' as any, full, effectiveStoreId || 'gudang')
           }
         } else if (effectiveRole === 'produksi') {
           const isFg = (type === 'to_store' || type === 'to_partner') &&
@@ -743,14 +746,16 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
             if (fg) {
               const n = Math.max(0, fg.qty_on_hand - Number(item.qty))
               await db.finished_goods_stock.update(fg.id, { qty_on_hand: n, last_updated: now() })
-              await supabase.from('finished_goods_stock').update({ qty_on_hand: n, last_updated: now() }).eq('id', fg.id)
+              const full = await db.finished_goods_stock.get(fg.id)
+              if (full) await addToSyncQueue('finished_goods_stock', fg.id, 'upsert' as any, full, effectiveStoreId || 'gudang')
             }
           } else {
             const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
             if (ps) {
               const n = Math.max(0, ps.qty_on_hand - Number(item.qty))
               await db.production_stock.update(ps.id, { qty_on_hand: n, last_updated: now() })
-              await supabase.from('production_stock').update({ qty_on_hand: n, last_updated: now() }).eq('id', ps.id)
+              const full = await db.production_stock.get(ps.id)
+              if (full) await addToSyncQueue('production_stock', ps.id, 'upsert' as any, full, effectiveStoreId || 'gudang')
             }
           }
         } else {
@@ -758,7 +763,8 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           if (ws) {
             const n = Math.max(0, ws.qty_on_hand - Number(item.qty))
             await db.warehouse_stock.update(ws.id, { qty_on_hand: n, last_updated: now() })
-            await supabase.from('warehouse_stock').update({ qty_on_hand: n, last_updated: now() }).eq('id', ws.id)
+            const full = await db.warehouse_stock.get(ws.id)
+            if (full) await addToSyncQueue('warehouse_stock', ws.id, 'upsert' as any, full, effectiveStoreId || 'gudang')
           }
         }
 
@@ -771,7 +777,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           const newAvg   = newQty > 0 ? (prevQty * prevCost + inQty * snapshotCost) / newQty : snapshotCost
           const psd: any = { id: ps?.id || generateId(), material_id: item.material_id, qty_on_hand: newQty, avg_cost: newAvg, last_updated: now() }
           await db.production_stock.put(psd)
-          await supabase.from('production_stock').upsert(psd)
+          await addToSyncQueue('production_stock', psd.id, 'upsert' as any, psd, effectiveStoreId || 'gudang')
         }
 
         if (type === 'to_store' && destId) {
@@ -791,7 +797,8 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           const newAvg   = newQty > 0 ? (prevQty * prevCost + inQty * snapshotCost) / newQty : snapshotCost
           if (existingStock) {
             await db.stock.update(existingStock.id, { qty_on_hand: newQty, avg_cost: newAvg, last_updated: now() } as any)
-            await supabase.from('stock').update({ qty_on_hand: newQty, avg_cost: newAvg, last_updated: now() }).eq('id', existingStock.id)
+            const full = await db.stock.get(existingStock.id)
+            if (full) await addToSyncQueue('stock', existingStock.id, 'upsert' as any, full, destId)
           } else {
             const newStock: any = {
               id: generateId(), store_id: destId,
@@ -799,7 +806,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
               qty_on_hand: inQty, avg_cost: newAvg, last_updated: now(),
             }
             await db.stock.add(newStock)
-            await supabase.from('stock').upsert(newStock, { onConflict: 'id' })
+            await addToSyncQueue('stock', newStock.id, 'upsert' as any, newStock, destId)
           }
         }
       }

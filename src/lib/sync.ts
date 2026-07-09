@@ -215,12 +215,21 @@ export async function pullFromSupabase(storeId?: string) {
     if (prices.data?.length) await db.store_product_prices.bulkPut(prices.data)
     if (promos.data?.length) await db.promotions.bulkPut(promos.data)
     if (stock.data) {
-      await db.stock.where('store_id').equals(sid).delete()
-      if (stock.data.length) await db.stock.bulkPut(stock.data)
+      // Anti-clobber: hapus stok toko yang tak ada di server KECUALI yang belum ter-push
+      const unsyncedStock = await getUnsyncedIds('stock')
+      const serverStockIds = new Set(stock.data.map((r: any) => r.id).filter(Boolean))
+      const localStock = await db.stock.where('store_id').equals(sid).toArray()
+      const toDelete = localStock
+        .filter((r: any) => r.id && !serverStockIds.has(r.id) && !unsyncedStock.has(r.id))
+        .map((r: any) => r.id)
+      if (toDelete.length) await db.stock.bulkDelete(toDelete)
+      // Jangan timpa stok lokal yang belum ter-push
+      const toPut = unsyncedStock.size ? stock.data.filter((r: any) => !unsyncedStock.has(r.id)) : stock.data
+      if (toPut.length) await db.stock.bulkPut(toPut)
     }
-    await safeReplace(db.warehouse_stock, wstock.data)
-    await safeReplace(db.production_stock, pstock.data)
-    await safeReplace(db.finished_goods_stock, fgstock.data)
+    await replacePreservingUnsynced(db.warehouse_stock, 'warehouse_stock', wstock.data)
+    await replacePreservingUnsynced(db.production_stock, 'production_stock', pstock.data)
+    await replacePreservingUnsynced(db.finished_goods_stock, 'finished_goods_stock', fgstock.data)
     // store_recipes & production_recipe_items ditarik di pullMasterData()
 
     const wMutIds = new Set((wmuts.data || []).map((m: any) => m.id))
@@ -276,19 +285,39 @@ export async function pullFromSupabase(storeId?: string) {
  * safeReplace â€” replace data + hapus orphan yang tidak ada di server
  * Untuk master tables: stores, products, categories, materials, users, dll
  */
-async function safeReplace(table: any, data: any[] | null) {
+// getUnsyncedIds: id record yang masih menunggu push (pending/failed).
+// Anti-clobber: jangan hapus record lokal yang belum ter-push saat pull.
+export async function getUnsyncedIds(tableName: string): Promise<Set<string>> {
+  try {
+    const rows = await db.sync_queue
+      .where('table_name').equals(tableName)
+      .filter(q => q.status === 'pending' || q.status === 'failed')
+      .toArray()
+    return new Set(rows.map(r => r.record_id))
+  } catch {
+    return new Set()
+  }
+}
+
+async function safeReplace(table: any, data: any[] | null, tableName?: string) {
   if (data === null || data === undefined) return
   if (data.length === 0) {
-    await table.clear()
+    // Jangan clear buta-buta kalau ada record belum ter-push
+    const unsynced = tableName ? await getUnsyncedIds(tableName) : new Set<string>()
+    if (unsynced.size === 0) { await table.clear(); return }
+    const localRecords = await table.toArray()
+    const toDelete = localRecords.filter((r: any) => r.id && !unsynced.has(r.id)).map((r: any) => r.id)
+    if (toDelete.length) await table.bulkDelete(toDelete)
     return
   }
   await table.bulkPut(data)
   // Hapus record lokal yang tidak ada di server (orphan cleanup)
   try {
     const serverIds = new Set(data.map((r: any) => r.id).filter(Boolean))
+    const unsynced = tableName ? await getUnsyncedIds(tableName) : new Set<string>()
     const localRecords = await table.toArray()
     const toDelete = localRecords
-      .filter((r: any) => r.id && !serverIds.has(r.id))
+      .filter((r: any) => r.id && !serverIds.has(r.id) && !unsynced.has(r.id))
       .map((r: any) => r.id)
     // Guard: jangan hapus kalau server data terlalu sedikit (kemungkinan partial pull)
     if (toDelete.length > 0 && data.length >= 3) {
@@ -297,6 +326,48 @@ async function safeReplace(table: any, data: any[] | null) {
     }
   } catch (e) {
     console.warn('[SYNC] Orphan cleanup failed:', e)
+  }
+}
+
+// mergePreservingUnsynced: bulkPut data server TANPA hapus orphan (parity dgn
+// pola bulkPut-only), tapi tetap lewati baris lokal yang belum ter-push supaya
+// qty lokal tak ke-overwrite nilai stale. Aman dari cap 1000-row select.
+export async function mergePreservingUnsynced(
+  table: any, tableName: string, data: any[] | null
+) {
+  if (!data || !data.length) return
+  const unsynced = await getUnsyncedIds(tableName)
+  const toPut = unsynced.size ? data.filter((r: any) => !unsynced.has(r.id)) : data
+  if (toPut.length) await table.bulkPut(toPut)
+}
+
+// replacePreservingUnsynced: bulkPut data server + orphan cleanup yang
+// mempertahankan record lokal belum ter-push. storeId => cleanup store-scoped.
+// Hanya untuk pola yang memang clear()+bulkPut (full replace) sebelumnya.
+export async function replacePreservingUnsynced(
+  table: any, tableName: string, data: any[] | null, storeId?: string
+) {
+  if (data === null || data === undefined) return
+  const unsynced = await getUnsyncedIds(tableName)
+  // Jangan timpa baris lokal yang belum ter-push (versi lokal lebih baru)
+  const toPut = unsynced.size ? data.filter((r: any) => !unsynced.has(r.id)) : data
+  if (toPut.length) await table.bulkPut(toPut)
+  try {
+    const serverIds = new Set(data.map((r: any) => r.id).filter(Boolean))
+    const localRecords = await table.toArray()
+    const toDelete = localRecords
+      .filter((r: any) =>
+        r.id && !serverIds.has(r.id) && !unsynced.has(r.id) &&
+        (storeId ? r.store_id === storeId : true)
+      )
+      .map((r: any) => r.id)
+    // Guard partial pull: hanya cleanup kalau server balas cukup data
+    if (toDelete.length > 0 && data.length >= 3) {
+      await table.bulkDelete(toDelete)
+      console.log(`[SYNC] Cleaned ${toDelete.length} orphan (${tableName}), preserve ${unsynced.size} unsynced`)
+    }
+  } catch (e) {
+    console.warn(`[SYNC] replacePreservingUnsynced ${tableName} cleanup failed:`, e)
   }
 }
 

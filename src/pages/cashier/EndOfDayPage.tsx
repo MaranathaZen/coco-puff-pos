@@ -7,7 +7,7 @@
 
 import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, generateId, now } from '@/lib/db'
+import { db, generateId, now, addToSyncQueue } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
@@ -299,29 +299,21 @@ export default function EndOfDayPage() {
         submitted_by: user?.id,
         submitted_at: now(),
       }
-      const { error } = await supabase.from('close_order_reports').insert(reportData)
-      if (error) {
-        if (error.code === '23505' || error.message?.includes('duplicate')) {
-          toast.error('Close Order hari ini sudah ada!'); setSaved(true); return
-        }
-        throw error
-      }
+      // Durable: masuk sync_queue, push worker kirim saat online (offline-safe)
+      await addToSyncQueue('close_order_reports', reportData.id, 'upsert' as any, reportData, storeId)
 
       if (totalSetorNum > 0) {
-        try {
-          await supabase.from('cash_deposits').insert({
-            id: generateId(),
-            store_id: storeId,
-            amount: totalSetorNum,
-            deposit_date: today,
-            notes: `Auto dari Close Order ${today} — ${storeName}`,
-            status: 'pending',
-            created_by: user?.id,
-            created_at: now(),
-          })
-        } catch (e) {
-          console.warn('[CLOSE ORDER] Gagal buat setoran otomatis:', e)
+        const dep: any = {
+          id: generateId(),
+          store_id: storeId,
+          amount: totalSetorNum,
+          deposit_date: today,
+          notes: `Auto dari Close Order ${today} — ${storeName}`,
+          status: 'pending',
+          created_by: user?.id,
+          created_at: now(),
         }
+        await addToSyncQueue('cash_deposits', dep.id, 'upsert' as any, dep, storeId)
       }
 
       setSavedReport(reportData); setSaved(true)

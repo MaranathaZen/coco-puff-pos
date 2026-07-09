@@ -5,7 +5,7 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, generateId, now, type Material, type WarehouseStock } from '@/lib/db'
+import { db, generateId, now, addToSyncQueue, type Material, type WarehouseStock } from '@/lib/db'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
 import { Warehouse, FlaskConical, Store, RefreshCw, AlertCircle, Plus, Package, X, Trash2, Edit } from 'lucide-react'
@@ -417,11 +417,7 @@ function FgsEditForm({ fgs, onClose }: { fgs: any; onClose: () => void }) {
         last_updated: now(),
       }
       await db.finished_goods_stock.put(data)
-      if (fgs) {
-        await supabase.from('finished_goods_stock').update({ qty_on_hand: data.qty_on_hand, hpp_per_unit: data.hpp_per_unit, last_updated: data.last_updated }).eq('id', fgs.id)
-      } else {
-        await supabase.from('finished_goods_stock').upsert(data)
-      }
+      await addToSyncQueue('finished_goods_stock', data.id, 'upsert' as any, data, 'gudang')
       toast.success(fgs ? 'Stok produk jadi diupdate' : 'Produk jadi ditambahkan')
       onClose()
     } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }
@@ -502,10 +498,11 @@ function PsEditForm({ ps, isOwner, onClose }: { ps: any; isOwner?: boolean; onCl
         unit_cost: Number(unitCost), min_stock: Number(minStock),
         is_active: isActive, updated_at: now(),
       }
-      await db.materials.update(matId, matData)
       const hasHistoryPs = (mat as any)?.total_qty_purchased > 0
       const newAvgPs = hasHistoryPs ? (mat as any)?.avg_cost : Number(unitCost)
-      await supabase.from('materials').update({ name: name.trim(), category, unit, unit_cost: Number(unitCost), avg_cost: newAvgPs, min_stock: Number(minStock), is_active: isActive }).eq('id', matId)
+      await db.materials.update(matId, { ...matData, avg_cost: newAvgPs })
+      const matFull = await db.materials.get(matId)
+      if (matFull) await addToSyncQueue('materials', matId, 'upsert' as any, matFull, 'gudang')
 
       // Update production stock
       const existing = ps || await db.production_stock.where('material_id').equals(matId).first()
@@ -517,7 +514,7 @@ function PsEditForm({ ps, isOwner, onClose }: { ps: any; isOwner?: boolean; onCl
         last_updated: now(),
       }
       await db.production_stock.put(data)
-      await supabase.from('production_stock').upsert(data)
+      await addToSyncQueue('production_stock', data.id, 'upsert' as any, data, 'gudang')
       toast.success('Stok bahan produksi diupdate')
       onClose()
     } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }
@@ -794,7 +791,7 @@ function StokAwalTokoForm({ storeId, onClose }: { storeId: string; onClose: () =
           last_updated: now(),
         }
         await db.stock.put(data)
-        await supabase.from('stock').upsert(data, { onConflict: 'store_id,ingredient_id' })
+        await addToSyncQueue('stock', data.id, 'upsert' as any, data, storeId)
       }
       toast.success(`${valid.length} item stok toko disimpan`)
       onClose()
@@ -895,11 +892,13 @@ function EditStokTokoForm({ stock, isOwner, onClose }: { stock: any; isOwner?: b
         const hasHistoryToko = (mat as any)?.total_qty_purchased > 0
         const newAvgToko = hasHistoryToko ? (mat as any)?.avg_cost : Number(unitCost)
         await db.materials.update(mat.id, { name: name.trim(), category, unit, unit_cost: Number(unitCost), avg_cost: newAvgToko, min_stock: Number(minStock), is_active: isActive, updated_at: now() } as any)
-        await supabase.from('materials').update({ name: name.trim(), category, unit, unit_cost: Number(unitCost), avg_cost: newAvgToko, min_stock: Number(minStock), is_active: isActive }).eq('id', mat.id)
+        const matFull = await db.materials.get(mat.id)
+        if (matFull) await addToSyncQueue('materials', mat.id, 'upsert' as any, matFull, 'gudang')
       }
       // Update stock toko
       await db.stock.update(stock.stockId, { qty_on_hand: Number(qty), avg_cost: Number(avg), last_updated: now() } as any)
-      await supabase.from('stock').update({ qty_on_hand: Number(qty), avg_cost: Number(avg) }).eq('id', stock.stockId)
+      const stFull = await db.stock.get(stock.stockId)
+      if (stFull) await addToSyncQueue('stock', stock.stockId, 'upsert' as any, stFull, (stFull as any).store_id || 'gudang')
       toast.success('Stok diupdate')
       onClose()
     } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }
@@ -1010,8 +1009,7 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
         is_active: isActive, created_at: material?.created_at || now(), updated_at: now(),
       }
       await db.materials.put(data)
-      const { error } = await supabase.from('materials').upsert(data)
-      if (error) throw error
+      await addToSyncQueue('materials', data.id, 'upsert' as any, data, 'gudang')
       toast.success(material ? `"${name.trim()}" diperbarui` : `"${name.trim()}" ditambahkan`)
       onClose()
     } catch (e) { toast.error('Gagal menyimpan: ' + String((e as any)?.message || e)) }
@@ -1098,18 +1096,19 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
         const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
         const wsd: WarehouseStock = { id: ws?.id || generateId(), material_id: item.material_id, qty_on_hand: qty, last_updated: now() }
         await db.warehouse_stock.put(wsd)
-        await supabase.from('warehouse_stock').upsert(wsd)
+        await addToSyncQueue('warehouse_stock', wsd.id, 'upsert' as any, wsd, 'gudang')
         if (cost > 0) {
           await db.materials.update(item.material_id, { unit_cost: cost, avg_cost: cost, updated_at: now() })
-          await supabase.from('materials').update({ unit_cost: cost, avg_cost: cost }).eq('id', item.material_id)
+          const matFull = await db.materials.get(item.material_id)
+          if (matFull) await addToSyncQueue('materials', item.material_id, 'upsert' as any, matFull, 'gudang')
         }
         const mutId = generateId()
         const mut = { id: mutId, mutation_type: 'opening_stock', destination_name: 'Saldo Awal', notes: notes || 'Stok awal', status: 'confirmed', created_by: 'system', created_at: `${date}T00:00:00.000Z`, confirmed_at: now(), confirmed_by: 'system' }
         await db.warehouse_mutations.add(mut as any)
-        await supabase.from('warehouse_mutations').upsert(mut)
+        await addToSyncQueue('warehouse_mutations', mutId, 'upsert' as any, mut, 'gudang')
         const mi = { id: generateId(), mutation_id: mutId, material_id: item.material_id, qty, unit_cost: cost }
         await db.warehouse_mutation_items.add(mi)
-        await supabase.from('warehouse_mutation_items').upsert(mi)
+        await addToSyncQueue('warehouse_mutation_items', mi.id, 'upsert' as any, mi, 'gudang')
       }
       toast.success(`${valid.length} item stok awal disimpan`)
       onClose()
@@ -1181,11 +1180,12 @@ function EditStokGudangForm({ item, onClose }: { item: any; onClose: () => void 
     setSaving(true)
     try {
       await db.materials.update(item.id, { name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock), updated_at: now() })
-      await supabase.from('materials').update({ name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock) }).eq('id', item.id)
+      const matFull = await db.materials.get(item.id)
+      if (matFull) await addToSyncQueue('materials', item.id, 'upsert' as any, matFull, 'gudang')
       const ws = await db.warehouse_stock.where('material_id').equals(item.id).first()
       const wsd: any = { id: ws?.id || generateId(), material_id: item.id, qty_on_hand: Number(qty), avg_cost: Number(avg) || Number(unitCost) || 0, last_updated: now() }
       await db.warehouse_stock.put(wsd)
-      await supabase.from('warehouse_stock').upsert(wsd)
+      await addToSyncQueue('warehouse_stock', wsd.id, 'upsert' as any, wsd, 'gudang')
       toast.success('Stok gudang diperbarui')
       onClose()
     } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }

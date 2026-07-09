@@ -8,8 +8,9 @@
 
 import { useState, useEffect, useMemo, createContext, useContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, generateId, now, type ProductionLog } from '@/lib/db'
+import { db, generateId, now, addToSyncQueue, type ProductionLog } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
+import { replacePreservingUnsynced, mergePreservingUnsynced } from '@/lib/sync'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
 import { Plus, RefreshCw, X, ChevronDown } from 'lucide-react'
@@ -181,12 +182,13 @@ export default function ProduksiPage() {
 
       await Promise.all([
         mats.data?.length ? db.materials.bulkPut(mats.data) : Promise.resolve(),
-        pstock.data !== null ? (async () => { await db.production_stock.clear(); if (pstock.data?.length) await db.production_stock.bulkPut(pstock.data) })() : Promise.resolve(),
-        fgs.data?.length ? db.finished_goods_stock.bulkPut(fgs.data) : Promise.resolve(),
+        // Anti-clobber: pertahankan record lokal yang belum ter-push
+        replacePreservingUnsynced(db.production_stock, 'production_stock', pstock.data),
+        mergePreservingUnsynced(db.finished_goods_stock, 'finished_goods_stock', fgs.data),
         recipes.data !== null ? (async () => { await db.production_recipes.clear(); if (recipes.data?.length) await db.production_recipes.bulkPut(recipes.data) })() : Promise.resolve(),
         recipeItems.data !== null ? (async () => { await db.production_recipe_items.clear(); if (recipeItems.data?.length) await db.production_recipe_items.bulkPut(recipeItems.data) })() : Promise.resolve(),
-        logs.data !== null ? (async () => { await db.production_logs.clear(); if (logs.data?.length) await db.production_logs.bulkPut(logs.data) })() : Promise.resolve(),
-        logMats.data !== null ? (async () => { await db.production_log_materials.clear(); if (logMats.data?.length) await db.production_log_materials.bulkPut(logMats.data) })() : Promise.resolve(),
+        replacePreservingUnsynced(db.production_logs, 'production_logs', logs.data),
+        replacePreservingUnsynced(db.production_log_materials, 'production_log_materials', logMats.data),
         mutations.data?.length ? db.production_mutations.bulkPut(mutations.data) : Promise.resolve(),
         mutItems.data?.length ? db.production_mutation_items.bulkPut(mutItems.data) : Promise.resolve(),
         partners.data?.length ? db.partners.bulkPut(partners.data) : Promise.resolve(),
@@ -331,24 +333,25 @@ function CatatProduksiTab({ userId, isOwnerManager }: { userId: string; isOwnerM
   // Client hanya update status
   async function handleVoidDivisi(logId: string) {
     try {
-      // Guard: cek sudah voided belum
-      const { data: existingLog } = await supabase
+      // Guard: cek sudah voided belum. Resilient: fallback ke status lokal saat offline.
+      let curStatus: string | undefined
+      const { data: existingLog, error: chkErr } = await supabase
         .from('production_logs')
         .select('status')
         .eq('id', logId)
         .single()
-      if (existingLog?.status === 'voided') {
+      if (!chkErr && existingLog) curStatus = existingLog.status
+      else curStatus = ((await db.production_logs.get(logId)) as any)?.status
+      if (curStatus === 'voided') {
         toast.error('Produksi ini sudah dibatalkan sebelumnya')
         setVoidTarget(null)
         return
       }
 
-      // Update status voided ├ó┬Ç┬ö DB trigger otomatis rollback stok
-      await supabase.from('production_logs').update({
-        status: 'voided',
-        voided_at: new Date().toISOString(),
-      }).eq('id', logId)
+      // Update status voided ├ó┬Ç┬ö DB trigger di server otomatis rollback stok saat push
       await db.production_logs.update(logId, { status: 'voided', voided_at: now() } as any)
+      const full = await db.production_logs.get(logId)
+      if (full) await addToSyncQueue('production_logs', logId, 'upsert' as any, full, (full as any).store_id || 'produksi')
 
       toast.success('Produksi dibatalkan & stok dikembalikan')
       setVoidTarget(null)
@@ -511,6 +514,7 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
     if (!productName.trim()) return toast.error('Nama produk wajib diisi')
     if (Number(batchCount) <= 0) return toast.error('Jumlah batch harus lebih dari 0')
     setSaving(true)
+    const storeCtx = inputAsStore || 'produksi'
     try {
       const recipeItems = await db.production_recipe_items.where('recipe_id').equals(recipeId).toArray()
       const matDefs = await db.materials.toArray()
@@ -532,19 +536,20 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
         status: 'done',
       }
       await db.production_logs.add(log)
-      await supabase.from('production_logs').upsert(log)
+      await addToSyncQueue('production_logs', logId, 'upsert' as any, log, storeCtx)
 
       for (const ri of recipeItems) {
         const qtyUsed = ri.qty_per_batch * Number(batchCount)
         const logMat: any = { id: generateId(), log_id: logId, material_id: ri.material_id, qty_used: qtyUsed }
         await db.production_log_materials.add(logMat)
-        await supabase.from('production_log_materials').upsert(logMat)
+        await addToSyncQueue('production_log_materials', logMat.id, 'upsert' as any, logMat, storeCtx)
 
         const ps = await db.production_stock.where('material_id').equals(ri.material_id).first()
         if (ps) {
           const newQty = Math.max(0, ps.qty_on_hand - qtyUsed)
           await db.production_stock.update(ps.id, { qty_on_hand: newQty, last_updated: now() })
-          await supabase.from('production_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', ps.id)
+          const psFull = await db.production_stock.get(ps.id)
+          if (psFull) await addToSyncQueue('production_stock', ps.id, 'upsert' as any, psFull, storeCtx)
         }
       }
 
@@ -563,13 +568,14 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
           is_active: true, created_at: now(), updated_at: now(),
         }
         await db.materials.put(newMat)
-        await supabase.from('materials').upsert(newMat)
+        await addToSyncQueue('materials', newMatId, 'upsert' as any, newMat, storeCtx)
         fgsProductId = newMatId
       }
 
       if (hppPerUnit > 0) {
         await db.materials.update(fgsProductId, { unit_cost: hppPerUnit, avg_cost: hppPerUnit, updated_at: now() } as any)
-        await supabase.from('materials').update({ unit_cost: hppPerUnit, avg_cost: hppPerUnit }).eq('id', fgsProductId)
+        const matFull = await db.materials.get(fgsProductId)
+        if (matFull) await addToSyncQueue('materials', fgsProductId, 'upsert' as any, matFull, storeCtx)
       }
 
       const outputType = (selectedRecipe as any)?.output_type || 'finished_goods'
@@ -578,7 +584,7 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
         const newPsQty = (existingPs?.qty_on_hand || 0) + finalYield
         const psData: any = { id: existingPs?.id || generateId(), material_id: fgsProductId, qty_on_hand: newPsQty, avg_cost: hppPerUnit, last_updated: now() }
         await db.production_stock.put(psData)
-        await supabase.from('production_stock').upsert(psData)
+        await addToSyncQueue('production_stock', psData.id, 'upsert' as any, psData, storeCtx)
       } else {
         const existing2 = await db.finished_goods_stock.filter(f =>
           f.product_name === productName.trim() || f.product_id === fgsProductId
@@ -587,12 +593,7 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
         const newFgsQty = (existing2?.qty_on_hand || 0) + finalYield
         const fgsData: any = { id: fgsId, product_id: fgsProductId, product_name: productName.trim(), qty_on_hand: newFgsQty, hpp_per_unit: hppPerUnit, last_updated: now() }
         await db.finished_goods_stock.put(fgsData)
-        if (existing2) {
-          await supabase.from('finished_goods_stock').update({ qty_on_hand: newFgsQty, hpp_per_unit: hppPerUnit, last_updated: now() }).eq('id', fgsId)
-        } else {
-          const { error } = await supabase.from('finished_goods_stock').upsert(fgsData)
-          if (error) await supabase.from('finished_goods_stock').upsert(fgsData)
-        }
+        await addToSyncQueue('finished_goods_stock', fgsId, 'upsert' as any, fgsData, storeCtx)
       }
 
       toast.success(`Produksi ${logNumber} dicatat: ${totalYield} ${selectedRecipe?.yield_unit || 'pcs'}`)
@@ -695,17 +696,18 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
       const mutId = generateId()
       const mut: any = { id: mutId, mutation_type: type, destination_id: destId || undefined, destination_name: destName || undefined, notes: notes || undefined, status: 'confirmed', created_by: userId, created_at: now(), confirmed_at: now(), confirmed_by: userId }
       await db.production_mutations.add(mut)
-      await supabase.from('production_mutations').upsert(mut)
+      await addToSyncQueue('production_mutations', mutId, 'upsert' as any, mut, 'produksi')
       for (const item of valid) {
         const fg = fgStocks?.find(s => s.product_id === item.product_id)
         const mi: any = { id: generateId(), mutation_id: mutId, product_id: item.product_id, product_name: fg?.product_name || '', qty: Number(item.qty) }
         await db.production_mutation_items.add(mi)
-        await supabase.from('production_mutation_items').upsert(mi)
+        await addToSyncQueue('production_mutation_items', mi.id, 'upsert' as any, mi, 'produksi')
         if (fg) {
           const isReturn = type === 'return_from_store'
           const newQty = isReturn ? fg.qty_on_hand + Number(item.qty) : Math.max(0, fg.qty_on_hand - Number(item.qty))
           await db.finished_goods_stock.update(fg.id, { qty_on_hand: newQty, last_updated: now() })
-          await supabase.from('finished_goods_stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', fg.id)
+          const fgFull = await db.finished_goods_stock.get(fg.id)
+          if (fgFull) await addToSyncQueue('finished_goods_stock', fg.id, 'upsert' as any, fgFull, 'produksi')
         }
       }
       toast.success('Pengiriman dicatat')
@@ -908,24 +910,25 @@ function ProduksiTokoTab({ userId, storeId, role }: { userId: string; storeId: s
   // Client hanya update status ├ó┬Ç┬ö tidak ada logic stok di sini
   async function handleVoidToko(logId: string, logStoreId: string, recipeId: string, totalYield: number) {
     try {
-      // Guard: cek dulu di Supabase ├ó┬Ç┬ö kalau sudah voided, jangan proses lagi
-      const { data: existingLog } = await supabase
+      // Guard: cek sudah voided belum. Resilient: fallback ke status lokal saat offline.
+      let curStatus: string | undefined
+      const { data: existingLog, error: chkErr } = await supabase
         .from('production_logs')
         .select('status')
         .eq('id', logId)
         .single()
-      if (existingLog?.status === 'voided') {
+      if (!chkErr && existingLog) curStatus = existingLog.status
+      else curStatus = ((await db.production_logs.get(logId)) as any)?.status
+      if (curStatus === 'voided') {
         toast.error('Produksi ini sudah dibatalkan sebelumnya')
         setVoidTarget(null)
         return
       }
 
-      // Update status voided ├ó┬Ç┬ö DB trigger otomatis rollback stok
-      await supabase.from('production_logs').update({
-        status: 'voided',
-        voided_at: new Date().toISOString(),
-      }).eq('id', logId)
+      // Update status voided ├ó┬Ç┬ö DB trigger di server otomatis rollback stok saat push
       await db.production_logs.update(logId, { status: 'voided', voided_at: now() } as any)
+      const full = await db.production_logs.get(logId)
+      if (full) await addToSyncQueue('production_logs', logId, 'upsert' as any, full, logStoreId || (full as any).store_id || 'produksi')
 
       toast.success('Produksi dibatalkan & stok dikembalikan')
       setVoidTarget(null)
@@ -1125,8 +1128,7 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
         created_at: now(), status: 'done',
       }
       await db.production_logs.add(logData)
-      const { error } = await supabase.from('production_logs').upsert(logData)
-      if (error) console.error('[PTOKO LOG ERROR]', error)
+      await addToSyncQueue('production_logs', logId, 'upsert' as any, logData, storeId)
 
       // FIX: query langsung dari Supabase, bukan Dexie
       // Dexie bisa stale ├ó┬Ç┬ö qty_used tersimpan salah (semua jadi 1)
@@ -1150,26 +1152,27 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
         if (existing) {
           const newQty = Math.max(0, existing.qty_on_hand - used)
           await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
-          // FIX: await supaya server update tidak fire-and-forget
-          await supabase.from('stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', existing.id)
+          const stFull = await db.stock.get(existing.id)
+          if (stFull) await addToSyncQueue('stock', existing.id, 'upsert' as any, stFull, storeId)
         } else {
-          // FIX: kalau tidak ada di Dexie, cek langsung ke server
+          // FIX: kalau tidak ada di Dexie, cek langsung ke server (read only, fallback saat offline)
           const { data: serverStock } = await supabase.from('stock')
-            .select('id, qty_on_hand')
+            .select('*')
             .eq('store_id', storeId)
             .eq('material_id', ri.material_id)
             .maybeSingle()
           if (serverStock) {
             const newQty = Math.max(0, serverStock.qty_on_hand - used)
-            await supabase.from('stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', serverStock.id)
-            await db.stock.put({ ...serverStock, store_id: storeId, ingredient_id: ri.material_id, material_id: ri.material_id, qty_on_hand: newQty, last_updated: now() })
+            const stFull: any = { ...serverStock, store_id: storeId, ingredient_id: ri.material_id, material_id: ri.material_id, qty_on_hand: newQty, last_updated: now() }
+            await db.stock.put(stFull)
+            await addToSyncQueue('stock', stFull.id, 'upsert' as any, stFull, storeId)
           } else {
             console.warn('[PTOKO] Stok tidak ditemukan untuk:', ri.material_id)
           }
         }
         const lm: any = { id: generateId(), log_id: logId, material_id: ri.material_id, qty_used: used }
         await db.production_log_materials.add(lm)
-        supabase.from('production_log_materials').upsert(lm).then(() => { })
+        await addToSyncQueue('production_log_materials', lm.id, 'upsert' as any, lm, storeId)
       }
 
       const productName = (selectedRecipe as any)?.product_name || ''
@@ -1182,13 +1185,12 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
           const newQty = (existing?.qty_on_hand || 0) + finalYield
           if (existing) {
             await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
-            // FIX: await supaya server update tidak fire-and-forget
-            await supabase.from('stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', existing.id)
+            const stFull = await db.stock.get(existing.id)
+            if (stFull) await addToSyncQueue('stock', existing.id, 'upsert' as any, stFull, storeId)
           } else {
             const newStock: any = { id: generateId(), store_id: storeId, ingredient_id: mat.id, material_id: mat.id, qty_on_hand: newQty, avg_cost: 0, last_updated: now() }
             await db.stock.add(newStock)
-            // FIX: await supaya server upsert tidak fire-and-forget
-            await supabase.from('stock').upsert(newStock, { onConflict: 'store_id,ingredient_id' })
+            await addToSyncQueue('stock', newStock.id, 'upsert' as any, newStock, storeId)
           }
         }
       }

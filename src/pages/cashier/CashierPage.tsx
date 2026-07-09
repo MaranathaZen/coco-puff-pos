@@ -28,6 +28,17 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
+// Print server: paksa loopback ke http/ws (hindari cert self-signed https/wss
+// yang bikin "print server mati" & harus klik advanced>unsafe tiap kali).
+const DEFAULT_PRINT_URL = 'http://localhost:7676'
+function normPrintUrl(u?: string): string {
+  const url = (u && u.trim()) || DEFAULT_PRINT_URL
+  return url.replace(/^https:\/\/(localhost|127\.0\.0\.1)/i, 'http://$1')
+}
+function toWsUrl(u: string): string {
+  return u.replace(/^http/i, 'ws') // http->ws, https->wss
+}
+
 interface PaketItem {
   id: string; name: string; qty_total: number; price: number; is_mix: boolean
 }
@@ -225,9 +236,9 @@ export default function CashierPage() {
   useEffect(() => {
     const cfg = getPrinterConfig(STORE_ID || userStoreId)
     if (cfg.printMode !== 'server') return
-    const url = cfg.serverUrl || 'https://localhost:7676'
+    const url = normPrintUrl(cfg.serverUrl)
     async function checkPrintServer() {
-      const wsUrl = url.replace(/^https?/, 'wss') + '/ws'
+      const wsUrl = toWsUrl(url) + '/ws'
       try {
         await new Promise<void>((resolve, reject) => {
           const ws = new WebSocket(wsUrl)
@@ -745,10 +756,10 @@ export default function CashierPage() {
             const url = (() => {
               try {
                 const cfg = JSON.parse(localStorage.getItem(`printer_config_${STORE_ID}`) || '{}')
-                return cfg.serverUrl || 'https://localhost:7676'
-              } catch { return 'https://localhost:7676' }
+                return normPrintUrl(cfg.serverUrl)
+              } catch { return DEFAULT_PRINT_URL }
             })()
-            const wsUrl = url.replace(/^https?/, 'wss')
+            const wsUrl = toWsUrl(url)
             const ws = new WebSocket(wsUrl)
             ws.onopen = () => ws.send(JSON.stringify({ type: 'print', text: txt }))
             ws.onmessage = (e) => {
@@ -1479,13 +1490,14 @@ function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () =
     try { return JSON.parse(localStorage.getItem(key) || '{}').autoPrint === true } catch { return false }
   })
   const [serverUrl, setServerUrl] = useState<string>(() => {
-    try { return JSON.parse(localStorage.getItem(key) || '{}').serverUrl || 'https://localhost:7676' } catch { return 'https://localhost:7676' }
+    try { return normPrintUrl(JSON.parse(localStorage.getItem(key) || '{}').serverUrl) } catch { return DEFAULT_PRINT_URL }
   })
   const [serverStatus, setServerStatus] = useState<'unknown' | 'ok' | 'error'>('unknown')
   const [saved, setSaved] = useState(false)
 
   async function testServer() {
-    const wsUrl = serverUrl.replace(/^https?/, 'wss') + '/ws'
+    const url = normPrintUrl(serverUrl)
+    const wsUrl = toWsUrl(url) + '/ws'
     try {
       await new Promise<void>((resolve, reject) => {
         const ws = new WebSocket(wsUrl)
@@ -1502,7 +1514,7 @@ function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () =
       })
     } catch {
       try {
-        const res = await fetch(`${serverUrl}/health`, {
+        const res = await fetch(`${url}/health`, {
           signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 3000); return c.signal })()
         })
         const data = await res.json()
@@ -1546,7 +1558,7 @@ function PrinterMiniModal({ storeId, onClose }: { storeId: string; onClose: () =
               <p className="text-xs font-medium text-blue-800">URL Print Server</p>
               <div className="flex gap-2">
                 <input className="input flex-1 text-sm" value={serverUrl}
-                  onChange={e => setServerUrl(e.target.value)} placeholder="https://localhost:7676" />
+                  onChange={e => setServerUrl(e.target.value)} placeholder="http://localhost:7676" />
                 <button onClick={testServer} className="px-3 py-2 text-xs font-medium bg-blue-600 text-white rounded-lg">Test</button>
               </div>
               {serverStatus === 'ok' && <p className="text-xs text-green-600">✓ Terhubung</p>}
@@ -1721,10 +1733,10 @@ pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;wh
           localStorage.getItem(`printer_config_${data.storeId}`) ||
           localStorage.getItem(`printer_config_${data.storeName}`) || '{}'
         )
-        return cfg.serverUrl || 'http://localhost:7676'
-      } catch { return 'http://localhost:7676' }
+        return normPrintUrl(cfg.serverUrl)
+      } catch { return DEFAULT_PRINT_URL }
     })()
-    const wsUrl = url.replace(/^https?/, 'wss') + '/ws'
+    const wsUrl = toWsUrl(url) + '/ws'
     try {
       await new Promise<void>((resolve, reject) => {
         const ws = new WebSocket(wsUrl)

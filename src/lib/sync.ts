@@ -15,6 +15,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 
 let pushInterval: ReturnType<typeof setInterval> | null = null
 let pullInterval: ReturnType<typeof setInterval> | null = null
+let masterInterval: ReturnType<typeof setInterval> | null = null
 let realtimeChannel: RealtimeChannel | null = null
 let isSyncing = false
 let isPulling = false
@@ -140,13 +141,10 @@ async function handleRealtimeChange(tableName: string, payload: any) {
   }
 }
 
-export async function pullFromSupabase(storeId?: string) {
-  const sid = storeId || currentStoreId
-  if (!sid || isPulling) return
-  isPulling = true
-
+export async function pullMasterData() {
   try {
-    const [cats, prods, mats, sups, parts, stores, recipes, pkgs, menuCfg, users] = await Promise.all([
+    const [cats, prods, mats, sups, parts, stores, recipes, pkgs, menuCfg, users,
+           storeRecipes, storeRecipeItems, prodRecipeItems] = await Promise.all([
       supabase.from('categories').select('*'),
       supabase.from('products').select('*'),
       supabase.from('materials').select('*'),
@@ -157,8 +155,10 @@ export async function pullFromSupabase(storeId?: string) {
       supabase.from('packages').select('*'),
       supabase.from('menu_role_config').select('*'),
       supabase.from('users').select('*').eq('is_active', true),
+      supabase.from('store_recipes').select('*'),
+      supabase.from('store_recipe_items').select('*'),
+      supabase.from('production_recipe_items').select('*'),
     ])
-
     await safeReplace(db.categories, cats.data)
     await safeReplace(db.products, prods.data)
     await safeReplace(db.materials, mats.data)
@@ -169,6 +169,20 @@ export async function pullFromSupabase(storeId?: string) {
     await safeReplace(db.packages, pkgs.data)
     await safeReplace(db.menu_role_config, menuCfg.data)
     await safeReplace(db.users, users.data)
+    await safeReplace(db.store_recipes, storeRecipes.data)
+    await safeReplace(db.store_recipe_items, storeRecipeItems.data)
+    await safeReplace(db.production_recipe_items, prodRecipeItems.data)
+    console.log('[SYNC] Master data pulled')
+  } catch (e) { console.warn('[SYNC] pullMasterData error:', e) }
+}
+
+export async function pullFromSupabase(storeId?: string) {
+  const sid = storeId || currentStoreId
+  if (!sid || isPulling) return
+  isPulling = true
+
+  try {
+    // Master data ditarik di pullMasterData(), bukan di sini
 
     const [
       prices, promos, stock, wstock, pstock, fgstock,
@@ -187,12 +201,12 @@ export async function pullFromSupabase(storeId?: string) {
       supabase.from('warehouse_mutation_items').select('*'),
       supabase.from('production_mutations').select('*').order('created_at', { ascending: false }).limit(200),
       supabase.from('production_mutation_items').select('*'),
-      supabase.from('production_recipe_items').select('*'),
+      supabase.from('production_recipe_items').select('*').limit(1), // placeholder — ditarik di master
       supabase.from('warehouse_expenses').select('*').order('created_at', { ascending: false }).limit(500),
       supabase.from('purchases').select('*').order('created_at', { ascending: false }).limit(500),
       supabase.from('purchase_items').select('*'),
-      supabase.from('store_recipes').select('*'),
-      supabase.from('store_recipe_items').select('*'),
+      supabase.from('store_recipes').select('*').limit(1), // placeholder — ditarik di master
+      supabase.from('store_recipe_items').select('*').limit(1), // placeholder — ditarik di master
       supabase.from('production_logs').select('*').order('created_at', { ascending: false }).limit(200),
       supabase.from('production_log_materials').select('*'),
     ])
@@ -207,9 +221,7 @@ export async function pullFromSupabase(storeId?: string) {
     await safeReplace(db.warehouse_stock, wstock.data)
     await safeReplace(db.production_stock, pstock.data)
     await safeReplace(db.finished_goods_stock, fgstock.data)
-    await safeReplace(db.store_recipes, storeRecipes.data)
-    await safeReplace(db.store_recipe_items, storeRecipeItems.data)
-    await safeReplace(db.production_recipe_items, recipeItems.data)
+    // store_recipes & production_recipe_items ditarik di pullMasterData()
 
     const wMutIds = new Set((wmuts.data || []).map((m: any) => m.id))
     const pMutIds = new Set((pmuts.data || []).map((m: any) => m.id))
@@ -386,11 +398,13 @@ export function startSyncWorker(storeId: string) {
 
   stopSyncWorker()
 
+  pullMasterData()
   pullFromSupabase(storeId)
   startRealtime(storeId)
 
   pushInterval = setInterval(() => { pushToSupabase() }, 5_000)
   pullInterval = setInterval(() => { pullFromSupabase(storeId) }, 30_000)
+  masterInterval = setInterval(() => { pullMasterData() }, 600_000) // 10 menit
 
   document.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('online', handleOnline)
@@ -401,6 +415,7 @@ export function startSyncWorker(storeId: string) {
 export function stopSyncWorker() {
   if (pushInterval) { clearInterval(pushInterval); pushInterval = null }
   if (pullInterval) { clearInterval(pullInterval); pullInterval = null }
+  if (masterInterval) { clearInterval(masterInterval); masterInterval = null }
   if (realtimeChannel) { supabase.removeChannel(realtimeChannel); realtimeChannel = null }
   realtimeConnected = false  // FIX v9: reset flag
   document.removeEventListener('visibilitychange', handleVisibilityChange)

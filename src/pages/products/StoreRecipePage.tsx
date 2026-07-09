@@ -3,7 +3,7 @@
 // Setiap produk menu punya resep: bahan apa yang terpakai saat 1 pcs terjual
 import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, generateId, now } from '@/lib/db'
+import { db, generateId, now, addToSyncQueue } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { Plus, X, ChevronRight, FlaskConical } from 'lucide-react'
@@ -145,11 +145,12 @@ function StoreRecipeForm({ recipe, storeId, onClose }: {
         updated_at: now(),
       }
       await db.store_recipes.put(data)
-      await supabase.from('store_recipes').upsert(data)
+      await addToSyncQueue('store_recipes', recipeId, 'upsert' as any, data, storeId)
 
-      // Hapus items lama, insert baru
+      // Hapus items lama (queue delete per id supaya bersih offline), insert baru
+      const oldItems = await db.store_recipe_items.where('recipe_id').equals(recipeId).toArray()
       await db.store_recipe_items.where('recipe_id').equals(recipeId).delete()
-      await supabase.from('store_recipe_items').delete().eq('recipe_id', recipeId)
+      for (const oi of oldItems) await addToSyncQueue('store_recipe_items', oi.id, 'delete' as any, { id: oi.id }, storeId)
 
       for (const item of valid) {
         const ri: StoreRecipeItem = {
@@ -160,7 +161,7 @@ function StoreRecipeForm({ recipe, storeId, onClose }: {
           source: item.source,
         }
         await db.store_recipe_items.add(ri)
-        await supabase.from('store_recipe_items').insert(ri)
+        await addToSyncQueue('store_recipe_items', ri.id, 'upsert' as any, ri, storeId)
       }
 
       toast.success(recipe ? 'Resep diperbarui' : 'Resep ditambahkan')

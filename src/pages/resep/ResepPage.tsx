@@ -13,7 +13,7 @@
 
 import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, generateId, now } from '@/lib/db'
+import { db, generateId, now, addToSyncQueue } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
@@ -423,24 +423,17 @@ function ResepProduksiTokoForm({ recipe, storeId, onClose }: { recipe: any; stor
         created_at: recipe?.created_at || now(), updated_at: now()
       }
       await db.store_recipes.put(data)
-      const { error: recipeErr } = await supabase.from('store_recipes').upsert(data)
-      if (recipeErr) console.error('[RESEP SAVE ERROR]', recipeErr)
-      else console.log('[RESEP SAVED]', data.store_id, data.product_name)
+      await addToSyncQueue('store_recipes', recipeId, 'upsert' as any, data, storeId)
 
+      const oldItems = await db.store_recipe_items.where('recipe_id').equals(recipeId).toArray()
       await db.store_recipe_items.where('recipe_id').equals(recipeId).delete()
-      await supabase.from('store_recipe_items').delete().eq('recipe_id', recipeId)
+      for (const oi of oldItems) await addToSyncQueue('store_recipe_items', oi.id, 'delete' as any, { id: oi.id }, storeId)
       for (const item of valid) {
         const ri: any = { id:item.id||generateId(), recipe_id:recipeId, material_id:item.material_id, qty_used:Number(item.qty), source:'store' }
         await db.store_recipe_items.put(ri)
-        const { error: itemErr } = await supabase.from('store_recipe_items').upsert(ri)
-        if (itemErr) console.error('[RESEP ITEM ERROR]', itemErr)
+        await addToSyncQueue('store_recipe_items', ri.id, 'upsert' as any, ri, storeId)
       }
       toast.success(recipe?'Resep diupdate':'Resep ditambahkan')
-      // FIX: re-sync pakai storeId dari prop
-      supabase.from('store_recipes').select('*').eq('store_id', storeId)
-        .then(({ data }) => { if (data?.length) db.store_recipes.bulkPut(data) })
-      supabase.from('store_recipe_items').select('*')
-        .then(({ data }) => { if (data?.length) db.store_recipe_items.bulkPut(data) })
       onClose()
     } catch (e) { toast.error('Gagal menyimpan'); console.error(e) }
     finally { setSaving(false) }
@@ -655,24 +648,17 @@ function ResepTokoForm({ recipe, storeId, onClose }: { recipe: any; storeId: str
         updated_at: now()
       }
       await db.store_recipes.put(data)
-      const { error: recipeErr } = await supabase.from('store_recipes').upsert(data)
-      if (recipeErr) console.error('[RESEP SAVE ERROR]', recipeErr)
-      else console.log('[RESEP SAVED]', data.store_id, data.product_name)
+      await addToSyncQueue('store_recipes', recipeId, 'upsert' as any, data, storeId)
 
+      const oldItems = await db.store_recipe_items.where('recipe_id').equals(recipeId).toArray()
       await db.store_recipe_items.where('recipe_id').equals(recipeId).delete()
-      await supabase.from('store_recipe_items').delete().eq('recipe_id', recipeId)
+      for (const oi of oldItems) await addToSyncQueue('store_recipe_items', oi.id, 'delete' as any, { id: oi.id }, storeId)
       for (const item of valid) {
         const ri: any = { id:item.id||generateId(), recipe_id:recipeId, material_id:item.material_id, qty_used:Number(item.qty), source:'store' }
         await db.store_recipe_items.put(ri)
-        const { error: itemErr } = await supabase.from('store_recipe_items').upsert(ri)
-        if (itemErr) console.error('[RESEP ITEM ERROR]', itemErr)
+        await addToSyncQueue('store_recipe_items', ri.id, 'upsert' as any, ri, storeId)
       }
       toast.success(recipe?'Resep diupdate':'Resep ditambahkan')
-      // FIX: re-sync pakai storeId dari prop
-      supabase.from('store_recipes').select('*').eq('store_id', storeId)
-        .then(({ data }) => { if (data?.length) db.store_recipes.bulkPut(data) })
-      supabase.from('store_recipe_items').select('*')
-        .then(({ data }) => { if (data?.length) db.store_recipe_items.bulkPut(data) })
       onClose()
     } catch (e) { toast.error('Gagal menyimpan'); console.error(e) }
     finally { setSaving(false) }

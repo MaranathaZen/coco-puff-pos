@@ -9,12 +9,21 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { hashPassword, formatRupiah } from '@/lib/utils'
 import { hardResetLocal } from '@/lib/sync-helpers'
-import { useAppSettings } from '@/hooks/useAppSettings'
-import { X, ChevronRight, Plus, Check, Trash2, Tag, Store, Download, AlertTriangle, Upload, RefreshCw, Image, Smartphone, Monitor } from 'lucide-react'
+import { useAppSettings, type MarkupRule } from '@/hooks/useAppSettings'
+import { X, ChevronRight, Plus, Check, Trash2, Tag, Store, Download, AlertTriangle, Upload, RefreshCw, Image, Smartphone, Monitor, Percent } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { User, Role } from '@/types'
 
-type Tab = 'users' | 'supplier' | 'mitra' | 'toko' | 'password' | 'ppn' | 'promo' | 'tampilan' | 'reset' | 'tutup_tahun' | 'sistem'
+type Tab = 'users' | 'supplier' | 'mitra' | 'toko' | 'password' | 'ppn' | 'promo' | 'tampilan' | 'markup' | 'reset' | 'tutup_tahun' | 'sistem'
+
+// Tipe mutasi yang bisa dikasih markup
+const MUT_TYPE_LABELS: Record<string, string> = {
+  to_partner:    'Ke Franchise',
+  to_store:      'Ke Toko',
+  to_production: 'Ke Produksi',
+  internal_use:  'Pemakaian Internal',
+  adjustment:    'Penyesuaian',
+}
 
 const ALL_MENUS = [
   { path: '/kasir',          label: 'Kasir'       },
@@ -47,6 +56,7 @@ export default function SettingsPage() {
     { id: 'ppn' as const,         label: 'PPN',         ownerOnly: true },
     { id: 'promo' as const,       label: 'Promo',       ownerOnly: true },
     { id: 'tampilan' as const,    label: 'Tampilan',    ownerOnly: true },
+    { id: 'markup' as const,      label: 'Markup',      ownerOnly: true },
     { id: 'tutup_tahun' as const, label: 'Tutup Tahun', ownerOnly: true },
     { id: 'reset' as const,       label: 'Reset',       ownerOnly: true },
     { id: 'sistem' as const,      label: 'Sistem',      ownerStrict: true },
@@ -74,6 +84,7 @@ export default function SettingsPage() {
         {tab === 'ppn'         && <PPNTab currentUser={user!} />}
         {tab === 'promo'       && <PromoTab currentUser={user!} />}
         {tab === 'tampilan'    && <TampilanTab />}
+        {tab === 'markup'      && <MarkupTab />}
         {tab === 'tutup_tahun' && <TutupTahunTab currentUser={user!} />}
         {tab === 'reset'       && <ResetDataTab />}
         {tab === 'sistem'      && <SistemTab />}
@@ -314,6 +325,100 @@ function ProductImageRow({ product, imgUrl, isUploading, onUpload, onRemove }: {
   )
 }
 
+
+// ── MARKUP TAB ────────────────────────────────────────────────
+function MarkupTab() {
+  const { settings, refresh } = useAppSettings()
+  const [rules,  setRules]  = useState<MarkupRule[]>([])
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => { setRules(settings.markup_rules || []) }, [settings.markup_rules])
+
+  function updateRule(i: number, patch: Partial<MarkupRule>) {
+    setRules(prev => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r))
+  }
+  function addRule() {
+    const used = new Set(rules.map(r => r.mutation_type))
+    const next = Object.keys(MUT_TYPE_LABELS).find(t => !used.has(t)) || 'to_partner'
+    setRules(prev => [...prev, { mutation_type: next, percent: 0, enabled: true }])
+  }
+  function removeRule(i: number) { setRules(prev => prev.filter((_, idx) => idx !== i)) }
+
+  async function handleSave() {
+    setSaving(true)
+    try {
+      const clean = rules
+        .filter(r => r.mutation_type)
+        .map(r => ({ mutation_type: r.mutation_type, percent: Number(r.percent) || 0, enabled: !!r.enabled }))
+      const { error } = await supabase.from('app_settings')
+        .update({ markup_rules: clean, updated_at: new Date().toISOString() })
+        .eq('id', 'default')
+      if (error) throw error
+      await refresh()
+      toast.success('Markup mutasi disimpan')
+    } catch (e) {
+      console.error('[SaveMarkup]', e)
+      toast.error('Gagal menyimpan markup')
+    }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center gap-2">
+        <Percent size={13} className="text-gray-400" />
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Markup Mutasi</p>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3">
+        <p className="text-xs text-gray-400">
+          Tambahan persen di atas HPP saat mutasi ke tujuan tertentu (mis. ke Franchise +15%).
+          Berlaku untuk semua role yang mengirim tipe itu (gudang & produksi).
+        </p>
+
+        {rules.length === 0 && <p className="text-sm text-gray-400 text-center py-3">Belum ada aturan markup</p>}
+
+        {rules.map((r, i) => {
+          const usedTypes = new Set(rules.filter((_, idx) => idx !== i).map(x => x.mutation_type))
+          return (
+            <div key={i} className="flex items-center gap-2">
+              <select className="input text-sm flex-1" value={r.mutation_type}
+                onChange={e => updateRule(i, { mutation_type: e.target.value })}>
+                {Object.entries(MUT_TYPE_LABELS).map(([val, label]) => (
+                  <option key={val} value={val} disabled={usedTypes.has(val)}>{label}</option>
+                ))}
+              </select>
+              <div className="flex items-center gap-1 w-24 flex-shrink-0">
+                <input className="input text-sm w-full text-right" inputMode="decimal" value={r.percent}
+                  onChange={e => updateRule(i, { percent: Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 })} />
+                <span className="text-sm text-gray-400">%</span>
+              </div>
+              <button onClick={() => updateRule(i, { enabled: !r.enabled })}
+                className={`text-xs px-2 py-1.5 rounded-lg border flex-shrink-0 ${r.enabled ? 'border-green-200 text-green-600 bg-green-50' : 'border-gray-200 text-gray-400'}`}>
+                {r.enabled ? 'Aktif' : 'Off'}
+              </button>
+              <button onClick={() => removeRule(i)}
+                className="text-red-400 border border-red-200 p-1.5 rounded-lg hover:bg-red-50 flex-shrink-0">
+                <Trash2 size={13} />
+              </button>
+            </div>
+          )
+        })}
+
+        <div className="flex items-center justify-between pt-1">
+          <button onClick={addRule} disabled={rules.length >= Object.keys(MUT_TYPE_LABELS).length}
+            className="flex items-center gap-1 text-sm text-blue-600 disabled:opacity-40">
+            <Plus size={14} /> Tambah aturan
+          </button>
+          <button onClick={handleSave} disabled={saving}
+            className="px-4 py-2 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-40">
+            {saving ? 'Menyimpan...' : 'Simpan Markup'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ── USERS TAB ─────────────────────────────────────────────────
 function UsersTab({ currentUser }: { currentUser: User }) {

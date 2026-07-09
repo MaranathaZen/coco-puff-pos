@@ -411,6 +411,10 @@ export async function pushToSupabase() {
             p_table: payload.table, p_id: payload.id, p_delta: payload.delta,
           })
           if (error) throw error
+          // data null = baris belum ada di server (insert belum ter-push) → retry, JANGAN mark done
+          if (data === null || data === undefined) {
+            throw new Error('rpc_delta: baris belum ada di server, retry')
+          }
           if (typeof data === 'number') {
             const dexieName = TABLE_MAP[payload.table] || payload.table
             const dexieTable = (db as any)[dexieName]

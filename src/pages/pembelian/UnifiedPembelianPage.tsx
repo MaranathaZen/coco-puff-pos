@@ -186,7 +186,11 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   , [isOwnerManager])
 
   useEffect(() => {
-    if (stores && stores.length > 0 && !filterStore) setFilterStore(stores[0].id)
+    if (stores && stores.length > 0 && !filterStore) {
+      // Default ke Gudang (pembelian umumnya masuk gudang), fallback store pertama
+      const gudang = stores.find(s => s.id.includes('gudang'))
+      setFilterStore((gudang || stores[0]).id)
+    }
   }, [stores])
 
   useEffect(() => {

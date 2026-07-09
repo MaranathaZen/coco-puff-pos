@@ -13,6 +13,12 @@
   button, .no-select { user-select: none; -webkit-user-select: none; }
 }
 
+@layer utilities {
+  /* Sembunyikan scrollbar (tab bar, chip horizontal) tapi tetap bisa scroll */
+  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+}
+
 @layer components {
   .btn-primary {
     @apply bg-brand-600 text-white font-medium px-4 py-2.5 rounded-xl

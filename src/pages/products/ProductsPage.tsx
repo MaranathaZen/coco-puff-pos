@@ -35,7 +35,7 @@ export default function ProductsPage() {
     await db.products.put(updated)
     // FIX: strip join fields before upsert
     const { category: _cat, ...toUpsert } = updated as any
-    await supabase.from('products').upsert(toUpsert)
+    await addToSyncQueue('products', toUpsert.id, 'upsert' as any, toUpsert, STORE_ID)
     toast.success(updated.is_active ? 'Produk diaktifkan' : 'Produk dinonaktifkan')
   }
 

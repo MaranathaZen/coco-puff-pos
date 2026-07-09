@@ -7,9 +7,18 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
-import { useAppSettings } from '@/hooks/useAppSettings'
+import { useAppSettings, type MarkupRule } from '@/hooks/useAppSettings'
 import { formatRupiah } from '@/lib/utils'
-import { Upload, RefreshCw, Check, Image, Smartphone, Monitor, X } from 'lucide-react'
+import { Upload, RefreshCw, Check, Image, Smartphone, Monitor, X, Percent, Plus, Trash2 } from 'lucide-react'
+
+// Tipe mutasi yang bisa dikasih markup
+const MUT_TYPE_LABELS: Record<string, string> = {
+  to_partner:    'Ke Franchise',
+  to_store:      'Ke Toko',
+  to_production: 'Ke Produksi',
+  internal_use:  'Pemakaian Internal',
+  adjustment:    'Penyesuaian',
+}
 import toast from 'react-hot-toast'
 
 // ── Upload ke Supabase Storage ────────────────────────────────
@@ -112,9 +121,49 @@ export default function AppSettingsPage() {
   const [productSearch,    setProductSearch]    = useState('')
   const [uploadingProduct, setUploadingProduct] = useState<string | null>(null)
 
+  // Markup mutasi
+  const [rules,        setRules]        = useState<MarkupRule[]>([])
+  const [savingMarkup, setSavingMarkup] = useState(false)
+
   useEffect(() => {
     setAppName(settings.app_name)
   }, [settings.app_name])
+
+  useEffect(() => {
+    setRules(settings.markup_rules || [])
+  }, [settings.markup_rules])
+
+  function updateRule(i: number, patch: Partial<MarkupRule>) {
+    setRules(prev => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r))
+  }
+  function addRule() {
+    // Ambil tipe pertama yang belum dipakai
+    const used = new Set(rules.map(r => r.mutation_type))
+    const next = Object.keys(MUT_TYPE_LABELS).find(t => !used.has(t)) || 'to_partner'
+    setRules(prev => [...prev, { mutation_type: next, percent: 0, enabled: true }])
+  }
+  function removeRule(i: number) {
+    setRules(prev => prev.filter((_, idx) => idx !== i))
+  }
+
+  async function handleSaveMarkup() {
+    setSavingMarkup(true)
+    try {
+      const clean = rules
+        .filter(r => r.mutation_type)
+        .map(r => ({ mutation_type: r.mutation_type, percent: Number(r.percent) || 0, enabled: !!r.enabled }))
+      const { error } = await supabase.from('app_settings')
+        .update({ markup_rules: clean, updated_at: new Date().toISOString() })
+        .eq('id', 'default')
+      if (error) throw error
+      await refresh()
+      toast.success('Markup mutasi disimpan')
+    } catch (e) {
+      console.error('[SaveMarkup]', e)
+      toast.error('Gagal menyimpan markup — pastikan kolom markup_rules ada di DB')
+    }
+    finally { setSavingMarkup(false) }
+  }
 
   const products = useLiveQuery(async () => {
     const all = await db.products.filter(p => p.is_active).toArray()
@@ -259,6 +308,75 @@ export default function AppSettingsPage() {
               </p>
             </div>
           ) : null}
+        </div>
+
+        {/* ── MARKUP MUTASI ── */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 px-1">
+            <Percent size={14} className="text-gray-400" />
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Markup Mutasi</p>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3">
+            <p className="text-xs text-gray-400">
+              Tambahan persen di atas HPP saat mutasi ke tujuan tertentu (mis. ke Franchise +15%).
+              Berlaku untuk semua role yang mengirim tipe itu (gudang & produksi).
+            </p>
+
+            {rules.length === 0 && (
+              <p className="text-sm text-gray-400 text-center py-3">Belum ada aturan markup</p>
+            )}
+
+            {rules.map((r, i) => {
+              const usedTypes = new Set(rules.filter((_, idx) => idx !== i).map(x => x.mutation_type))
+              return (
+                <div key={i} className="flex items-center gap-2">
+                  <select
+                    className="input text-sm flex-1"
+                    value={r.mutation_type}
+                    onChange={e => updateRule(i, { mutation_type: e.target.value })}>
+                    {Object.entries(MUT_TYPE_LABELS).map(([val, label]) => (
+                      <option key={val} value={val} disabled={usedTypes.has(val)}>{label}</option>
+                    ))}
+                  </select>
+                  <div className="flex items-center gap-1 w-24 flex-shrink-0">
+                    <input
+                      className="input text-sm w-full text-right"
+                      inputMode="decimal"
+                      value={r.percent}
+                      onChange={e => updateRule(i, { percent: Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 })}
+                    />
+                    <span className="text-sm text-gray-400">%</span>
+                  </div>
+                  <button
+                    onClick={() => updateRule(i, { enabled: !r.enabled })}
+                    className={`text-xs px-2 py-1.5 rounded-lg border flex-shrink-0 ${r.enabled ? 'border-green-200 text-green-600 bg-green-50' : 'border-gray-200 text-gray-400'}`}>
+                    {r.enabled ? 'Aktif' : 'Off'}
+                  </button>
+                  <button
+                    onClick={() => removeRule(i)}
+                    className="text-red-400 border border-red-200 p-1.5 rounded-lg hover:bg-red-50 flex-shrink-0">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              )
+            })}
+
+            <div className="flex items-center justify-between pt-1">
+              <button
+                onClick={addRule}
+                disabled={rules.length >= Object.keys(MUT_TYPE_LABELS).length}
+                className="flex items-center gap-1 text-sm text-blue-600 disabled:opacity-40">
+                <Plus size={14} /> Tambah aturan
+              </button>
+              <button
+                onClick={handleSaveMarkup}
+                disabled={savingMarkup}
+                className="px-4 py-2 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-40">
+                {savingMarkup ? 'Menyimpan...' : 'Simpan Markup'}
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* ── FOTO PRODUK ── */}

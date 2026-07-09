@@ -6,7 +6,7 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, generateId, now } from '@/lib/db'
+import { db, generateId, now, addToSyncQueue } from '@/lib/db'
 import type { WarehouseStock } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
@@ -279,21 +279,22 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   // Client hanya update status
   async function handleVoidPembelian(purchaseId: string) {
     try {
-      // Guard: cek sudah voided belum
-      const { data: existing } = await supabase
+      // Guard: cek sudah voided belum. Resilient: fallback status lokal saat offline.
+      let curStatus: string | undefined
+      const { data: existing, error: chkErr } = await supabase
         .from('purchases').select('status').eq('id', purchaseId).single()
-      if (existing?.status === 'voided') {
+      if (!chkErr && existing) curStatus = existing.status
+      else curStatus = (await db.purchases.get(purchaseId) as any)?.status
+      if (curStatus === 'voided') {
         toast.error('Pembelian ini sudah dibatalkan sebelumnya')
         setVoidTarget(null)
         return
       }
 
-      // Update status — DB trigger otomatis rollback stok
-      await supabase.from('purchases').update({
-        status: 'voided',
-        voided_at: new Date().toISOString(),
-      }).eq('id', purchaseId)
+      // Update status — DB trigger di server otomatis rollback stok saat push
       await db.purchases.update(purchaseId, { status: 'voided', voided_at: now() } as any)
+      const full = await db.purchases.get(purchaseId)
+      if (full) await addToSyncQueue('purchases', purchaseId, 'upsert' as any, full, storeId || 'gudang')
 
       toast.success('Pembelian dibatalkan')
       setVoidTarget(null)
@@ -518,7 +519,7 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
         created_by: userId, created_at: now(),
       }
       await db.purchases.add(purch)
-      await supabase.from('purchases').upsert(purch)
+      await addToSyncQueue('purchases', purchId, 'upsert' as any, purch, activeStoreId || 'gudang')
 
       for (const item of valid) {
         const uc = getUnitCost(item)
@@ -527,7 +528,7 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
           qty: Number(item.qty), unit_cost: uc, subtotal: Number(item.qty) * uc, qty_returned: 0
         }
         await db.purchase_items.add(pi)
-        await supabase.from('purchase_items').upsert(pi)
+        await addToSyncQueue('purchase_items', pi.id, 'upsert' as any, pi, activeStoreId || 'gudang')
 
         if (isInputAsGudang) {
           const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
@@ -538,7 +539,7 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
             last_updated: now()
           }
           await db.warehouse_stock.put(wsd)
-          await supabase.from('warehouse_stock').upsert(wsd)
+          await addToSyncQueue('warehouse_stock', wsd.id, 'upsert' as any, wsd, activeStoreId || 'gudang')
         } else {
           const existing = await db.stock
             .filter(s => s.store_id === activeStoreId &&
@@ -547,7 +548,8 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
           const newQty = (existing?.qty_on_hand || 0) + Number(item.qty)
           if (existing) {
             await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
-            await supabase.from('stock').update({ qty_on_hand: newQty, last_updated: now() }).eq('id', existing.id)
+            const full = await db.stock.get(existing.id)
+            if (full) await addToSyncQueue('stock', existing.id, 'upsert' as any, full, activeStoreId || 'gudang')
           } else {
             const newStock: any = {
               id: generateId(), store_id: activeStoreId,
@@ -555,7 +557,7 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
               qty_on_hand: newQty, avg_cost: uc, last_updated: now()
             }
             await db.stock.add(newStock)
-            await supabase.from('stock').upsert(newStock)
+            await addToSyncQueue('stock', newStock.id, 'upsert' as any, newStock, activeStoreId || 'gudang')
           }
         }
 
@@ -571,10 +573,8 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
               unit_cost: avgCost, avg_cost: avgCost,
               total_qty_purchased: newQty, total_cost_purchased: newCost, updated_at: now()
             })
-            await supabase.from('materials').update({
-              unit_cost: avgCost, avg_cost: avgCost,
-              total_qty_purchased: newQty, total_cost_purchased: newCost
-            }).eq('id', item.material_id)
+            const matFull = await db.materials.get(item.material_id)
+            if (matFull) await addToSyncQueue('materials', item.material_id, 'upsert' as any, matFull, activeStoreId || 'gudang')
           }
         }
       }

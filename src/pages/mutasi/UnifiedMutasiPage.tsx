@@ -13,6 +13,7 @@ import { supabase } from '@/lib/supabase'
 import { replacePreservingUnsynced, mergePreservingUnsynced } from '@/lib/sync'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
+import { getMarkupPercent } from '@/hooks/useAppSettings'
 import { Plus, RefreshCw, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -667,6 +668,12 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
     return materials?.find(m => m.id === materialId)?.unit_cost || 0
   }
 
+  // Cost + markup sesuai tipe mutasi (mis. to_partner/franchise +15%).
+  const markupPct = getMarkupPercent(type)
+  function costWithMarkup(materialId: string): number {
+    return getSnapshotCost(materialId) * (1 + markupPct / 100)
+  }
+
   function getAvailableQty(materialId: string): number {
     if (effectiveRole === 'kasir') return (storeStocks || []).find(s => s.id === materialId)?.qty || 0
     if (effectiveRole === 'produksi') {
@@ -679,7 +686,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
     return (warehouseStocks || []).find(s => s.id === materialId)?.qty || 0
   }
 
-  const totalNilai = items.reduce((s, item) => s + Number(item.qty) * getSnapshotCost(item.material_id), 0)
+  const totalNilai = items.reduce((s, item) => s + Number(item.qty) * costWithMarkup(item.material_id), 0)
 
   async function handleSave() {
     const valid = items.filter(i => i.material_id && Number(i.qty) > 0)
@@ -718,7 +725,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
       await addToSyncQueue('warehouse_mutations', mutId, 'upsert' as any, mut, effectiveStoreId || 'gudang')
 
       for (const item of valid) {
-        const snapshotCost = getSnapshotCost(item.material_id)
+        const snapshotCost = costWithMarkup(item.material_id)
         const mi: WarehouseMutationItem = {
           id: generateId(), mutation_id: mutId, material_id: item.material_id,
           qty: Number(item.qty), unit_cost: snapshotCost,
@@ -882,7 +889,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           <div className="space-y-2">
             {items.map((item, i) => {
               const selOpt    = opts.find(o => o.id === item.material_id)
-              const cost      = getSnapshotCost(item.material_id)
+              const cost      = costWithMarkup(item.material_id)
               const available = item.material_id ? getAvailableQty(item.material_id) : null
               const isOver    = available !== null && available > 0 && Number(item.qty) > available
               return (
@@ -917,7 +924,10 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
       </div>
       {totalNilai > 0 && (
         <div className="flex items-center justify-between py-2 bg-gray-50 rounded-xl px-3">
-          <span className="text-sm text-gray-600">Total Nilai</span>
+          <span className="text-sm text-gray-600">
+            Total Nilai
+            {markupPct > 0 && <span className="text-xs text-purple-600 ml-1">(+{markupPct}% markup)</span>}
+          </span>
           <span className="text-sm font-semibold text-gray-900">{formatRupiah(totalNilai)}</span>
         </div>
       )}

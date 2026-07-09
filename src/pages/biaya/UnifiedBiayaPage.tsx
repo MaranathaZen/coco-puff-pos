@@ -7,7 +7,7 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, generateId, now } from '@/lib/db'
+import { db, generateId, now, addToSyncQueue } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
@@ -270,20 +270,21 @@ function BiayaList({ userId, role, storeId, setToolbarActions }: {
   // ── VOID HANDLER ─────────────────────────────────────────
   async function handleVoidBiaya(expenseId: string) {
     try {
-      // Guard: cek sudah voided belum
-      const { data: existing } = await supabase
+      // Guard: cek sudah voided belum. Resilient: fallback status lokal saat offline.
+      let curStatus: string | undefined
+      const { data: existing, error: chkErr } = await supabase
         .from('warehouse_expenses').select('status').eq('id', expenseId).single()
-      if (existing?.status === 'voided') {
+      if (!chkErr && existing) curStatus = existing.status
+      else curStatus = ((await db.warehouse_expenses.get(expenseId)) as any)?.status
+      if (curStatus === 'voided') {
         toast.error('Biaya ini sudah dibatalkan sebelumnya')
         setVoidTarget(null)
         return
       }
 
-      await supabase.from('warehouse_expenses').update({
-        status: 'voided',
-        voided_at: new Date().toISOString(),
-      }).eq('id', expenseId)
       await db.warehouse_expenses.update(expenseId, { status: 'voided', voided_at: now() } as any)
+      const full = await db.warehouse_expenses.get(expenseId)
+      if (full) await addToSyncQueue('warehouse_expenses', expenseId, 'upsert' as any, full, (full as any).store_id || 'gudang')
 
       toast.success('Biaya dibatalkan')
       setVoidTarget(null)
@@ -479,13 +480,8 @@ function BiayaForm({ userId, storeId, role, onClose }: {
       }
       if (notes?.trim()) data.notes = notes.trim()
       await db.warehouse_expenses.put(data)
-      const { error } = await supabase.from('warehouse_expenses').upsert(data)
-      if (error) {
-        console.error('[BIAYA ERROR]', error)
-        toast.error('Tersimpan lokal, gagal sync: ' + error.message)
-      } else {
-        toast.success('Biaya dicatat')
-      }
+      await addToSyncQueue('warehouse_expenses', data.id, 'upsert' as any, data, activeStoreId || 'gudang')
+      toast.success('Biaya dicatat')
       onClose()
     } catch (e) {
       console.error('[BIAYA]', e)

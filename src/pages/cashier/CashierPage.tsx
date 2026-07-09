@@ -465,7 +465,7 @@ export default function CashierPage() {
       const matMap = Object.fromEntries(allMaterials.map(m => [m.id, m]))
 
       for (const txItem of txItems) {
-        const recipe = bomRecipes.find(r => r.product_id === txItem.product_id)
+        const recipe = bomRecipes.find(r => r.product_id === txItem.product_id && r.store_id === storeId)
         if (!recipe) continue
         const riList = recipeItems.filter(ri => ri.recipe_id === recipe.id)
         const _prod = await db.products.get(txItem.product_id);
@@ -517,7 +517,7 @@ export default function CashierPage() {
       const matMap = Object.fromEntries(allMaterials.map(m => [m.id, m]))
 
       for (const txItem of txItems) {
-        const recipe = bomRecipes.find(r => r.product_id === txItem.product_id)
+        const recipe = bomRecipes.find(r => r.product_id === txItem.product_id && r.store_id === storeId)
         if (!recipe) continue
         const riList = recipeItems.filter(ri => ri.recipe_id === recipe.id)
         const _prod2 = await db.products.get(txItem.product_id)

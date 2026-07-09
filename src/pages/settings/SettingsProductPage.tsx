@@ -6,7 +6,7 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, generateId, now } from '@/lib/db'
+import { db, generateId, now, addToSyncQueue } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
@@ -114,7 +114,8 @@ function ProdukTab({ storeId }: { storeId: string }) {
   async function toggleActive(p: any) {
     const newActive = !p.is_active
     await db.products.update(p.id, { is_active: newActive, updated_at: now() })
-    await supabase.from('products').update({ is_active: newActive }).eq('id', p.id)
+    const full = await db.products.get(p.id)
+    if (full) await addToSyncQueue('products', p.id, 'upsert' as any, full, 'gudang')
     toast.success(newActive ? 'Produk diaktifkan' : 'Produk dinonaktifkan')
   }
 
@@ -230,8 +231,8 @@ function PaketTab({ storeId }: { storeId: string }) {
   async function toggleActive(p: any) {
     const updated = { ...p, is_active: !p.is_active }
     setPakets(prev => prev.map(x => x.id===p.id?updated:x))
-    await supabase.from('packages').update({ is_active: updated.is_active }).eq('id', p.id)
     try { await (db as any).packages?.put(updated) } catch {}
+    await addToSyncQueue('packages', updated.id, 'upsert' as any, updated, updated.store_id || 'gudang')
   }
   async function handleDelete(p: any) {
     if (!confirm(`Hapus paket "${p.name}"?`)) return
@@ -319,8 +320,7 @@ function ProdukTokoTab() {
       updated_at:      now(),
     }
     await db.store_product_prices.put(priceData)
-    const { error } = await supabase.from('store_product_prices').upsert(priceData, { onConflict: 'store_id,product_id' })
-    if (error) await supabase.from('store_product_prices').insert(priceData)
+    await addToSyncQueue('store_product_prices', priceData.id, 'upsert' as any, priceData, storeId)
   }
 
   return (
@@ -432,8 +432,7 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
         is_active: isActive, created_at: product?.created_at||now(), updated_at: now(),
       }
       await db.products.put(data)
-      const { error } = await supabase.from('products').upsert(data)
-      if (error) throw error
+      await addToSyncQueue('products', prodId, 'upsert' as any, data, 'gudang')
 
       // Simpan harga per toko — simpan semua toko yang sudah di-load (aktif/nonaktif)
       for (const [storeId, prices] of Object.entries(storePrices)) {
@@ -453,15 +452,7 @@ function ProdukForm({ product, categories, onClose }: { product: any; categories
           updated_at:     now(),
         }
         await db.store_product_prices.put(priceData)
-        // Coba update dulu, jika tidak ada baru insert
-        const { error: upsertErr } = await supabase.from('store_product_prices').upsert(priceData, { onConflict: 'store_id,product_id' })
-        if (upsertErr) {
-          console.error('[PRICE UPSERT ERROR]', upsertErr)
-          // Fallback: coba insert saja
-          await supabase.from('store_product_prices').insert(priceData).then(r => {
-            if (r.error) console.error('[PRICE INSERT ERROR]', r.error)
-          })
-        }
+        await addToSyncQueue('store_product_prices', priceData.id, 'upsert' as any, priceData, storeId)
       }
       toast.success(product?'Produk diupdate':'Produk ditambahkan')
       onClose()
@@ -604,8 +595,7 @@ function KategoriForm({ kategori, currentCount, onClose }: { kategori: any; curr
     try {
       const data: any = { id: kategori?.id||`cat-${name.toLowerCase().replace(/\s+/g,'-')}-${Date.now().toString(36)}`, name: name.trim(), description: desc||undefined, sort_order: Number(sortOrder)||currentCount+1 }
       await db.categories.put(data)
-      const { error } = await supabase.from('categories').upsert(data)
-      if (error) throw error
+      await addToSyncQueue('categories', data.id, 'upsert' as any, data, 'gudang')
       toast.success(kategori?'Kategori diupdate':'Ditambahkan')
       onClose()
     } catch { toast.error('Gagal menyimpan') }
@@ -648,8 +638,7 @@ function PaketForm({ paket, onClose, onSaved }: { paket: any; onClose: () => voi
     try {
       const data: any = { id: paket?.id||generateId(), name: name.trim(), price: Number(price), qty_total: Number(qtyTotal), is_mix: isMix, store_id: storeId||null, is_active: isActive, created_at: paket?.created_at||now() }
       try { await (db as any).packages?.put(data) } catch {}
-      const { error } = await supabase.from('packages').upsert(data)
-      if (error) throw error
+      await addToSyncQueue('packages', data.id, 'upsert' as any, data, data.store_id || 'gudang')
       toast.success(paket?'Paket diupdate':'Ditambahkan')
       onSaved()
     } catch { toast.error('Gagal menyimpan') }

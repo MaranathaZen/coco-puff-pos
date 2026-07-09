@@ -181,11 +181,11 @@ export default function EndOfDayPage() {
 
   const pembelianHariIni = useLiveQuery(async () => {
     const byStore = await db.purchases
-      .filter(p => (p as any).store_id === storeId && new Date(p.created_at).toLocaleDateString('sv-SE') === today)
+      .filter(p => (p as any).store_id === storeId && (p as any).status !== 'voided' && new Date(p.created_at).toLocaleDateString('sv-SE') === today)
       .toArray()
     if (byStore.length) return byStore.reduce((s, p) => s + p.total_amount, 0)
     return (await db.purchases
-      .filter(p => p.created_by === user?.id && new Date(p.created_at).toLocaleDateString('sv-SE') === today)
+      .filter(p => p.created_by === user?.id && (p as any).status !== 'voided' && new Date(p.created_at).toLocaleDateString('sv-SE') === today)
       .toArray()).reduce((s, p) => s + p.total_amount, 0)
   }, [storeId, user?.id, today])
 

@@ -237,7 +237,7 @@ function LapTokoView({ dateRange, role, storeId }: { dateRange: any; role: strin
 function LapProduksiView({ dateRange }: { dateRange: any }) {
   const data = useLiveQuery(async () => {
     const logs = await db.production_logs
-      .filter(l => l.created_at >= dateRange.start && l.created_at <= dateRange.end)
+      .filter(l => (l as any).status !== 'voided' && l.created_at >= dateRange.start && l.created_at <= dateRange.end)
       .toArray()
     const logMats = await db.production_log_materials.toArray()
     const recipes = await db.production_recipes.toArray()
@@ -322,8 +322,8 @@ function LapProduksiView({ dateRange }: { dateRange: any }) {
 // ── LAPORAN GUDANG ────────────────────────────────────────────
 function LapGudangView({ dateRange }: { dateRange: any }) {
   const data = useLiveQuery(async () => {
-    const purchases = await db.purchases.filter(p => p.created_at >= dateRange.start && p.created_at <= dateRange.end).toArray()
-    const mutations = await db.warehouse_mutations.filter(m => m.created_at >= dateRange.start && m.created_at <= dateRange.end).toArray()
+    const purchases = await db.purchases.filter(p => (p as any).status !== 'voided' && p.created_at >= dateRange.start && p.created_at <= dateRange.end).toArray()
+    const mutations = await db.warehouse_mutations.filter(m => (m as any).status !== 'voided' && m.created_at >= dateRange.start && m.created_at <= dateRange.end).toArray()
     const expenses  = await db.warehouse_expenses.filter(e => e.created_at >= dateRange.start && e.created_at <= dateRange.end).toArray()
     const pItems    = await db.purchase_items.toArray()
     const mItems    = await db.warehouse_mutation_items.toArray()

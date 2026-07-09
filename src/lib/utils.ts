@@ -23,8 +23,19 @@ export function formatDateOnly(dateStr: string): string {
   }).format(new Date(dateStr))
 }
 
-// FIX: receipt_no dengan store prefix agar unik antar toko & device
-// Format: MOG-20260606-001 (store prefix + tanggal + nomor urut)
+// Tag device stabil (acak 3 char, disimpan sekali) — cegah bentrok receipt_no
+// antar-device di toko sama (counter per-device di localStorage).
+function getDeviceTag(): string {
+  let t = localStorage.getItem('cocopuff_device_tag')
+  if (!t) {
+    t = Math.random().toString(36).slice(2, 5).toUpperCase()
+    localStorage.setItem('cocopuff_device_tag', t)
+  }
+  return t
+}
+
+// FIX: receipt_no dengan store prefix + device tag agar unik antar toko & device
+// Format: MOG-20260606-001-A3F (store prefix + tanggal + urut + device tag)
 export async function generateReceiptNo(storeId: string): Promise<string> {
   const date   = new Date()
   const ymd    = date.toISOString().slice(0, 10).replace(/-/g, '')
@@ -40,7 +51,7 @@ export async function generateReceiptNo(storeId: string): Promise<string> {
   const cur  = parseInt(localStorage.getItem(key) || '0', 10)
   const next = cur + 1
   localStorage.setItem(key, String(next))
-  return `${prefix}-${ymd}-${String(next).padStart(3, '0')}`
+  return `${prefix}-${ymd}-${String(next).padStart(3, '0')}-${getDeviceTag()}`
 }
 
 /** Hitung packaging otomatis: qty eceran → dus + sisa eceran */

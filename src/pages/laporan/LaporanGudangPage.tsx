@@ -40,7 +40,7 @@ export default function LaporanGudangPage() {
   // Pembelian dalam periode
   const pembelianData = useLiveQuery(async () => {
     const purchases = await db.purchases
-      .filter(p => p.created_at >= dateRange.start && p.created_at <= dateRange.end)
+      .filter(p => (p as any).status !== 'voided' && p.created_at >= dateRange.start && p.created_at <= dateRange.end)
       .toArray()
     const items = await db.purchase_items.toArray()
     const mats  = await db.materials.toArray()
@@ -68,7 +68,7 @@ export default function LaporanGudangPage() {
   // Mutasi dalam periode
   const mutasiData = useLiveQuery(async () => {
     const muts = await db.warehouse_mutations
-      .filter(m => m.created_at >= dateRange.start && m.created_at <= dateRange.end && m.mutation_type !== 'internal_use')
+      .filter(m => (m as any).status !== 'voided' && m.created_at >= dateRange.start && m.created_at <= dateRange.end && m.mutation_type !== 'internal_use')
       .toArray()
     const items = await db.warehouse_mutation_items.toArray()
 
@@ -87,7 +87,7 @@ export default function LaporanGudangPage() {
   // Pemakaian dalam periode
   const pemakaianData = useLiveQuery(async () => {
     const muts = await db.warehouse_mutations
-      .filter(m => m.created_at >= dateRange.start && m.created_at <= dateRange.end && m.mutation_type === 'internal_use')
+      .filter(m => (m as any).status !== 'voided' && m.created_at >= dateRange.start && m.created_at <= dateRange.end && m.mutation_type === 'internal_use')
       .toArray()
     const items = await db.warehouse_mutation_items.toArray()
     const total = muts.reduce((s, m) => {

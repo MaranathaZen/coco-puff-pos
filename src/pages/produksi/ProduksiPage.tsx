@@ -73,7 +73,7 @@ function CopyBtn({ text }: { text: string }) {
   return (
     <button onClick={() => { navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }) }}
       className="inline-flex items-center gap-0.5 text-[10px] text-blue-400 hover:text-blue-600 ml-1 align-middle">
-      {copied ? 'OK' : 'Copy'}
+      {copied ? '✓' : '⧉'}
     </button>
   )
 }

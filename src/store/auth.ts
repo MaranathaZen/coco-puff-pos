@@ -4,9 +4,9 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { User, Shift, Store } from '@/types'
-import { db, generateId, now } from '@/lib/db'
+import { db, generateId, now, addToSyncQueue } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
-import { hashPassword } from '@/lib/utils'
+import { hashPassword, verifyPassword } from '@/lib/utils'
 
 interface AuthState {
   user:        User | null
@@ -66,7 +66,6 @@ export const useAuthStore = create<AuthState>()(
       login: async (username, password) => {
         set({ isLoading: true, error: null })
         try {
-          const hashed = await hashPassword(password)
           const user   = await db.users
             .filter(u => u.username?.toLowerCase() === username.toLowerCase() && u.is_active)
             .first()
@@ -75,9 +74,19 @@ export const useAuthStore = create<AuthState>()(
             set({ error: 'Username tidak ditemukan', isLoading: false })
             return null
           }
-          if (user.password_hash !== hashed) {
+          const { ok, needsUpgrade } = await verifyPassword(password, user.password_hash)
+          if (!ok) {
             set({ error: 'PIN atau password salah', isLoading: false })
             return null
+          }
+          // Migrasi lazy: hash legacy SHA-256 → PBKDF2 saat login sukses (offline-safe via queue)
+          if (needsUpgrade) {
+            try {
+              const nh = await hashPassword(password)
+              await db.users.update(user.id, { password_hash: nh })
+              await addToSyncQueue('users', user.id, 'update' as any, { id: user.id, password_hash: nh }, user.store_id)
+              user.password_hash = nh
+            } catch (e) { console.warn('[AUTH] gagal upgrade hash', e) }
           }
 
           const store = await db.stores.get(user.store_id) || null

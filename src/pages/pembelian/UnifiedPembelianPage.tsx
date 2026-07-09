@@ -539,7 +539,8 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
             last_updated: now()
           }
           await db.warehouse_stock.put(wsd)
-          await addToSyncQueue('warehouse_stock', wsd.id, 'upsert' as any, wsd, activeStoreId || 'gudang')
+          if (ws) await addToSyncQueue('warehouse_stock', wsd.id, 'rpc_delta' as any, { table: 'warehouse_stock', id: wsd.id, delta: Number(item.qty) }, activeStoreId || 'gudang')
+          else await addToSyncQueue('warehouse_stock', wsd.id, 'upsert' as any, wsd, activeStoreId || 'gudang')
         } else {
           const existing = await db.stock
             .filter(s => s.store_id === activeStoreId &&
@@ -548,8 +549,7 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
           const newQty = (existing?.qty_on_hand || 0) + Number(item.qty)
           if (existing) {
             await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
-            const full = await db.stock.get(existing.id)
-            if (full) await addToSyncQueue('stock', existing.id, 'upsert' as any, full, activeStoreId || 'gudang')
+            await addToSyncQueue('stock', existing.id, 'rpc_delta' as any, { table: 'stock', id: existing.id, delta: Number(item.qty) }, activeStoreId || 'gudang')
           } else {
             const newStock: any = {
               id: generateId(), store_id: activeStoreId,

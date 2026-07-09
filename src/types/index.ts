@@ -211,7 +211,7 @@ export interface SyncQueueItem {
   store_id: string
   table_name: string
   record_id: string
-  operation: 'insert' | 'update' | 'delete' | 'upsert'
+  operation: 'insert' | 'update' | 'delete' | 'upsert' | 'rpc_delta'
   payload: string
   status: 'pending' | 'syncing' | 'done' | 'failed'
   retry_count: number

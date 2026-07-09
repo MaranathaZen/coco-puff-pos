@@ -548,8 +548,7 @@ function ProduksiForm({ userId, isOwnerManager, onClose }: { userId: string; isO
         if (ps) {
           const newQty = Math.max(0, ps.qty_on_hand - qtyUsed)
           await db.production_stock.update(ps.id, { qty_on_hand: newQty, last_updated: now() })
-          const psFull = await db.production_stock.get(ps.id)
-          if (psFull) await addToSyncQueue('production_stock', ps.id, 'upsert' as any, psFull, storeCtx)
+          await addToSyncQueue('production_stock', ps.id, 'rpc_delta' as any, { table: 'production_stock', id: ps.id, delta: -qtyUsed }, storeCtx)
         }
       }
 
@@ -704,10 +703,10 @@ function KirimForm({ userId, onClose }: { userId: string; onClose: () => void })
         await addToSyncQueue('production_mutation_items', mi.id, 'upsert' as any, mi, 'produksi')
         if (fg) {
           const isReturn = type === 'return_from_store'
-          const newQty = isReturn ? fg.qty_on_hand + Number(item.qty) : Math.max(0, fg.qty_on_hand - Number(item.qty))
+          const delta = isReturn ? Number(item.qty) : -Number(item.qty)
+          const newQty = Math.max(0, fg.qty_on_hand + delta)
           await db.finished_goods_stock.update(fg.id, { qty_on_hand: newQty, last_updated: now() })
-          const fgFull = await db.finished_goods_stock.get(fg.id)
-          if (fgFull) await addToSyncQueue('finished_goods_stock', fg.id, 'upsert' as any, fgFull, 'produksi')
+          await addToSyncQueue('finished_goods_stock', fg.id, 'rpc_delta' as any, { table: 'finished_goods_stock', id: fg.id, delta }, 'produksi')
         }
       }
       toast.success('Pengiriman dicatat')
@@ -1152,8 +1151,7 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
         if (existing) {
           const newQty = Math.max(0, existing.qty_on_hand - used)
           await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
-          const stFull = await db.stock.get(existing.id)
-          if (stFull) await addToSyncQueue('stock', existing.id, 'upsert' as any, stFull, storeId)
+          await addToSyncQueue('stock', existing.id, 'rpc_delta' as any, { table: 'stock', id: existing.id, delta: -used }, storeId)
         } else {
           // FIX: kalau tidak ada di Dexie, cek langsung ke server (read only, fallback saat offline)
           const { data: serverStock } = await supabase.from('stock')
@@ -1165,7 +1163,7 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
             const newQty = Math.max(0, serverStock.qty_on_hand - used)
             const stFull: any = { ...serverStock, store_id: storeId, ingredient_id: ri.material_id, material_id: ri.material_id, qty_on_hand: newQty, last_updated: now() }
             await db.stock.put(stFull)
-            await addToSyncQueue('stock', stFull.id, 'upsert' as any, stFull, storeId)
+            await addToSyncQueue('stock', stFull.id, 'rpc_delta' as any, { table: 'stock', id: stFull.id, delta: -used }, storeId)
           } else {
             console.warn('[PTOKO] Stok tidak ditemukan untuk:', ri.material_id)
           }
@@ -1185,8 +1183,7 @@ function ProduksiTokoForm({ userId, storeId, recipes, onClose }: {
           const newQty = (existing?.qty_on_hand || 0) + finalYield
           if (existing) {
             await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
-            const stFull = await db.stock.get(existing.id)
-            if (stFull) await addToSyncQueue('stock', existing.id, 'upsert' as any, stFull, storeId)
+            await addToSyncQueue('stock', existing.id, 'rpc_delta' as any, { table: 'stock', id: existing.id, delta: finalYield }, storeId)
           } else {
             const newStock: any = { id: generateId(), store_id: storeId, ingredient_id: mat.id, material_id: mat.id, qty_on_hand: newQty, avg_cost: 0, last_updated: now() }
             await db.stock.add(newStock)

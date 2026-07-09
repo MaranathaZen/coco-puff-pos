@@ -742,8 +742,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           if (ss) {
             const newQty = Math.max(0, (ss.qty_on_hand || 0) - Number(item.qty))
             await db.stock.update(ss.id, { qty_on_hand: newQty, last_updated: now() } as any)
-            const full = await db.stock.get(ss.id)
-            if (full) await addToSyncQueue('stock', ss.id, 'upsert' as any, full, effectiveStoreId || 'gudang')
+            await addToSyncQueue('stock', ss.id, 'rpc_delta' as any, { table: 'stock', id: ss.id, delta: -Number(item.qty) }, effectiveStoreId || 'gudang')
           }
         } else if (effectiveRole === 'produksi') {
           const isFg = (type === 'to_store' || type === 'to_partner') &&
@@ -753,16 +752,14 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
             if (fg) {
               const n = Math.max(0, fg.qty_on_hand - Number(item.qty))
               await db.finished_goods_stock.update(fg.id, { qty_on_hand: n, last_updated: now() })
-              const full = await db.finished_goods_stock.get(fg.id)
-              if (full) await addToSyncQueue('finished_goods_stock', fg.id, 'upsert' as any, full, effectiveStoreId || 'gudang')
+              await addToSyncQueue('finished_goods_stock', fg.id, 'rpc_delta' as any, { table: 'finished_goods_stock', id: fg.id, delta: -Number(item.qty) }, effectiveStoreId || 'gudang')
             }
           } else {
             const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
             if (ps) {
               const n = Math.max(0, ps.qty_on_hand - Number(item.qty))
               await db.production_stock.update(ps.id, { qty_on_hand: n, last_updated: now() })
-              const full = await db.production_stock.get(ps.id)
-              if (full) await addToSyncQueue('production_stock', ps.id, 'upsert' as any, full, effectiveStoreId || 'gudang')
+              await addToSyncQueue('production_stock', ps.id, 'rpc_delta' as any, { table: 'production_stock', id: ps.id, delta: -Number(item.qty) }, effectiveStoreId || 'gudang')
             }
           }
         } else {
@@ -770,8 +767,7 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
           if (ws) {
             const n = Math.max(0, ws.qty_on_hand - Number(item.qty))
             await db.warehouse_stock.update(ws.id, { qty_on_hand: n, last_updated: now() })
-            const full = await db.warehouse_stock.get(ws.id)
-            if (full) await addToSyncQueue('warehouse_stock', ws.id, 'upsert' as any, full, effectiveStoreId || 'gudang')
+            await addToSyncQueue('warehouse_stock', ws.id, 'rpc_delta' as any, { table: 'warehouse_stock', id: ws.id, delta: -Number(item.qty) }, effectiveStoreId || 'gudang')
           }
         }
 

@@ -405,6 +405,21 @@ export async function pushToSupabase() {
       try {
         const payload = JSON.parse(item.payload)
 
+        if (item.operation === 'rpc_delta') {
+          // Atomic delta di server; payload = { table, id, delta }
+          const { data, error } = await supabase.rpc('adjust_stock_generic', {
+            p_table: payload.table, p_id: payload.id, p_delta: payload.delta,
+          })
+          if (error) throw error
+          if (typeof data === 'number') {
+            const dexieName = TABLE_MAP[payload.table] || payload.table
+            const dexieTable = (db as any)[dexieName]
+            if (dexieTable) await dexieTable.update(payload.id, { qty_on_hand: data, last_updated: now() })
+          }
+          await db.sync_queue.update(item.id, { status: 'done', synced_at: now(), error_msg: undefined })
+          continue
+        }
+
         if (item.operation === 'delete') {
           const { error } = await supabase.from(item.table_name).delete().eq('id', item.record_id)
           if (error) throw error

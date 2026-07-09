@@ -176,12 +176,6 @@ export default function Layout() {
 
   return (
     <div className="flex h-[100dvh] bg-gray-50">
-      {maintenanceMode && (
-        <div className="fixed top-2 right-2 z-50 bg-red-600 text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
-          Aplikasi dalam perbaikan
-        </div>
-      )}
       {/* ── DESKTOP SIDEBAR ── */}
       <aside className="hidden md:flex flex-col w-56 bg-white border-r border-gray-100 flex-shrink-0">
         <div className="px-4 py-4 border-b border-gray-100">
@@ -220,6 +214,12 @@ export default function Layout() {
 
       {/* ── MAIN CONTENT ── */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+        {maintenanceMode && (
+          <div className="bg-red-600 text-white text-xs font-medium text-center py-1.5 px-3 flex items-center justify-center gap-1.5 flex-shrink-0">
+            <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+            Aplikasi dalam perbaikan
+          </div>
+        )}
         {!isOnline && (
           <div className="bg-amber-500 text-white text-xs text-center py-1 px-3 flex items-center justify-center gap-1.5 flex-shrink-0">
             <WifiOff size={12} /><span>Offline — data tersimpan lokal</span>

@@ -255,6 +255,8 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
   }, [role, userId, storeId])
 
   const storeMap = Object.fromEntries((stores || []).map(s => [s.id, s.name]))
+  const usersList = useLiveQuery(() => db.users.toArray(), [])
+  const userMap = Object.fromEntries((usersList || []).map(u => [u.id, u.name]))
 
   const filtered = useMemo(() => {
     if (!purchases) return []
@@ -335,8 +337,11 @@ function PembelianList({ userId, role, storeId, setToolbarActions }: { userId: s
               {new Date(p.created_at).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})},{' '}
               {new Date(p.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false})}
               {(p as any).payment_method ? ` · ${(p as any).payment_method}` : ''}
-              {isOwnerManager && storeMap[(p as any).storeId] && (
-                <span className="ml-1 text-gray-300">· {storeMap[(p as any).storeId]}</span>
+              {isOwnerManager && storeMap[(p as any).store_id] && (
+                <span className="ml-1 text-gray-300">· {storeMap[(p as any).store_id]}</span>
+              )}
+              {userMap[p.created_by] && (
+                <span className="ml-1 text-gray-300">· oleh {userMap[p.created_by]}</span>
               )}
             </p>
             {p.notes && <p className="text-xs text-gray-500 italic mt-0.5">📝 {p.notes}</p>}

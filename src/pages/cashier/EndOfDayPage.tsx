@@ -213,7 +213,7 @@ export default function EndOfDayPage() {
   const totalSetorNum = Number(totalSetor) || 0
   const uangFisikNum = Number(uangFisik) || 0
   const cashPenjualan = todayData?.byMethod['cash'] || 0
-  const saldoAkhir = saldoAwalNum + saldoTambahanNum + cashPenjualan - totalSetorNum - totalBiaya - totalPembelian - totalPembelian
+  const saldoAkhir = saldoAwalNum + saldoTambahanNum + cashPenjualan - totalSetorNum - totalBiaya - totalPembelian
   const selisih = uangFisikNum - saldoAkhir
 
   function generateWAText(report: any): string {
@@ -240,6 +240,7 @@ export default function EndOfDayPage() {
       `Penjualan Tunai : ${formatRupiah(report.total_cash)}`,
       `Total Setor     : -${formatRupiah(report.total_setor)}`,
       report.total_biaya > 0 ? `Total Biaya     : -${formatRupiah(report.total_biaya)}` : '',
+      report.total_pembelian > 0 ? `Total Pembelian : -${formatRupiah(report.total_pembelian)}` : '',
       `*Saldo Akhir    : ${formatRupiah(report.saldo_akhir)}*`,
       `Uang Fisik      : ${formatRupiah(report.uang_fisik)}`,
       `*Selisih        : ${report.selisih >= 0 ? '+' : ''}${formatRupiah(report.selisih)}*`,

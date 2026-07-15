@@ -15,6 +15,37 @@ import toast from 'react-hot-toast'
 
 type Period = 'hari' | 'minggu' | 'bulan'
 
+function shareCloseOrderWA(report: any, storeName: string) {
+  const fRp = (n: number) => formatRupiah(n || 0)
+  const tgl = new Date(report.report_date).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  const nonTunai = (report.total_penjualan || 0) - (report.total_cash || 0)
+  const lines = [
+    `*CLOSE ORDER ${storeName.toUpperCase()}*`,
+    `_${tgl}_`,
+    '',
+    '*Penjualan Hari Ini*',
+    `Tunai      : ${fRp(report.total_cash)}`,
+    `Non Tunai  : ${fRp(nonTunai)}`,
+    `*Total     : ${fRp(report.total_penjualan)}*`,
+    report.voided_count ? `*Void: ${report.voided_count} transaksi (${fRp(report.voided_amount)})*` : '',
+    '',
+    '*Laporan Kas*',
+    `Saldo Awal      : ${fRp(report.saldo_awal)}`,
+    (report.saldo_tambahan || 0) > 0 ? `Saldo Tambahan  : ${fRp(report.saldo_tambahan)}` : '',
+    `Penjualan Tunai : ${fRp(report.total_cash)}`,
+    (report.total_setor || 0) > 0 ? `Total Setor     : -${fRp(report.total_setor)}` : '',
+    (report.total_biaya || 0) > 0 ? `Total Biaya     : -${fRp(report.total_biaya)}` : '',
+    (report.total_pembelian || 0) > 0 ? `Total Pembelian : -${fRp(report.total_pembelian)}` : '',
+    `*Saldo Akhir    : ${fRp(report.saldo_akhir)}*`,
+    `Uang Fisik      : ${fRp(report.uang_fisik)}`,
+    `*Selisih        : ${(report.selisih || 0) >= 0 ? '+' : ''}${fRp(report.selisih)}*`,
+    report.notes ? `\nKasir/Catatan: ${report.notes}` : '',
+    '',
+    '_Dikirim via Coco Puff POS_',
+  ].filter(Boolean)
+  window.open('https://wa.me/?text=' + encodeURIComponent(lines.join('\n')), '_blank')
+}
+
 const PAY_METHODS = [
   { key: 'total_cash',       label: 'Tunai'        },
   { key: 'total_qris',       label: 'QRIS'         },
@@ -258,6 +289,7 @@ export default function CloseOrderPage() {
                                {l:'Non Tunai',     v:(report.total_penjualan||0)-(report.total_cash||0)},
                               {l:'Total Setor',     v:report.total_setor,    neg:true},
                               {l:'Total Biaya',     v:report.total_biaya,    neg:true},
+                              {l:'Total Pembelian', v:report.total_pembelian, neg:true},
                               {l:'Saldo Akhir',     v:report.saldo_akhir,    bold:true},
                               {l:'Uang Fisik',      v:report.uang_fisik},
                             ].filter(r=>(r.v??0)>0||r.bold).map((row,i)=>(
@@ -277,6 +309,12 @@ export default function CloseOrderPage() {
                           </div>
                         </div>
                         {report.notes && <div className="px-4 py-2"><p className="text-xs text-gray-500 italic">📝 {report.notes}</p></div>}
+                        <div className="px-4 py-3">
+                          <button onClick={() => shareCloseOrderWA(report, store.name)}
+                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-green-600 text-white text-sm font-medium active:bg-green-700">
+                            <span>📲</span> Share WhatsApp
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>

@@ -3,6 +3,7 @@
 import LogPage from '@/pages/debug/LogPage'
 import { useState, useEffect } from 'react'
 import { db } from '@/lib/db'
+import { pushToSupabase } from '@/lib/sync'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
@@ -701,6 +702,21 @@ export default function DebugPage() {
                   navigator.clipboard.writeText(info).then(() => alert('Info debug disalin ke clipboard!'))
                 }} className="w-full py-2 text-sm text-left px-3 bg-amber-50 text-amber-700 rounded-lg border border-amber-100">
                   📋 Copy info debug ke clipboard (untuk laporan)
+                </button>
+
+                <button onClick={async () => {
+                  try {
+                    // Recovery: aktifkan lagi antrian failed/abandoned -> pending, lalu push.
+                    // Berguna setelah bug DB (kolom/constraint) diperbaiki agar data lama ke-sync.
+                    const items = await (db as any).sync_queue
+                      ?.filter((q: any) => q.status === 'failed' || q.status === 'abandoned').toArray() ?? []
+                    for (const item of items) await (db as any).sync_queue?.update(item.id, { status: 'pending', retry_count: 0, error_msg: undefined })
+                    await pushToSupabase()
+                    alert('Re-push ' + items.length + ' item. Cek lagi antrian pending setelah beberapa detik.')
+                    runChecks()
+                  } catch (e) { alert('Gagal: ' + String(e)) }
+                }} className="w-full py-2 text-sm text-left px-3 bg-green-50 text-green-700 rounded-lg border border-green-100">
+                  🔄 Push ulang antrian gagal/abandoned (recovery)
                 </button>
 
                 <button onClick={async () => {

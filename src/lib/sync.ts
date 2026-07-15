@@ -446,13 +446,15 @@ export async function pushToSupabase() {
               })
               continue
             }
+            // Schema mismatch / data ditolak (kolom/constraint): JANGAN mark done
+            // senyap — tandai failed biar kelihatan & auto-recover setelah DB diperbaiki.
             if (error.code === 'PGRST204') {
-              console.warn(`[SYNC] Schema mismatch ${item.table_name} â€” mark done, cek kolom DB`)
-              await db.sync_queue.update(item.id, { status: 'done', synced_at: now(), error_msg: error.message })
+              console.warn(`[SYNC] Schema mismatch ${item.table_name} â€” tunda (cek kolom DB)`)
+              await db.sync_queue.update(item.id, { status: 'failed', retry_count: item.retry_count + 1, error_msg: 'Schema mismatch: ' + error.message })
               continue
             }
-            // FIX v9: 409 conflict â†’ mark done, jangan retry
-            if (error.code === '409' || error.message?.includes('409') || error.code === '400' || String(error.message).includes('400 ')) {
+            // 409 conflict (row sudah ada) â†’ mark done, aman
+            if (error.code === '409' || error.message?.includes('409')) {
               console.warn(`[SYNC] 409 conflict ${item.table_name} ${item.record_id} â€” mark done`)
               await db.sync_queue.update(item.id, { status: 'done', synced_at: now(), error_msg: error.message })
               continue

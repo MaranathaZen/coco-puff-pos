@@ -1,4 +1,5 @@
 import { db } from '@/lib/db'
+import { supabase } from '@/lib/supabase'
 
 export async function shareWaMutasi(m: any, mutNo: string, tcLabel: string, pengirim: string, penerima: string) {
   const tgl = new Date(m.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -9,13 +10,25 @@ export async function shareWaMutasi(m: any, mutNo: string, tcLabel: string, peng
   const fgsMap = Object.fromEntries(fgsList.map((f: any) => [f.product_id ?? f.id, f.product_name]))
   const fmtRp = (n: number) => 'Rp' + Math.round(n || 0).toLocaleString('id-ID')
 
-  // Ambil item langsung dari DB by mutation id (jangan andalkan m.items yang
-  // bisa kosong/stale saat share). Dukung mutasi gudang & produksi.
+  // Ambil item dari SERVER dulu (sumber kebenaran) — device yang share belum
+  // tentu sudah pull item-nya ke Dexie. Fallback Dexie -> m.items saat offline.
   let rawItems: any[] = []
-  try { rawItems = await db.warehouse_mutation_items.where('mutation_id').equals(m.id).toArray() } catch {}
   let fromProduction = false
+  try {
+    const { data } = await supabase.from('warehouse_mutation_items').select('*').eq('mutation_id', m.id)
+    if (data?.length) rawItems = data
+  } catch {}
   if (!rawItems.length) {
-    try { rawItems = await db.production_mutation_items.where('mutation_id').equals(m.id).toArray(); fromProduction = true } catch {}
+    try {
+      const { data } = await supabase.from('production_mutation_items').select('*').eq('mutation_id', m.id)
+      if (data?.length) { rawItems = data; fromProduction = true }
+    } catch {}
+  }
+  if (!rawItems.length) {
+    try { rawItems = await db.warehouse_mutation_items.where('mutation_id').equals(m.id).toArray() } catch {}
+  }
+  if (!rawItems.length) {
+    try { rawItems = await db.production_mutation_items.where('mutation_id').equals(m.id).toArray(); if (rawItems.length) fromProduction = true } catch {}
   }
   if (!rawItems.length && Array.isArray(m.items)) rawItems = m.items
 

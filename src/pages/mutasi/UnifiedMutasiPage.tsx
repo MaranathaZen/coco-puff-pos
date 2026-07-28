@@ -17,6 +17,17 @@ import { getMarkupPercent } from '@/hooks/useAppSettings'
 import { Plus, RefreshCw, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 
+// Ambil warehouse_mutation_items untuk daftar mutation id secara batch,
+// supaya tidak kena cap 1000-row default Supabase (detail item mutasi lengkap).
+async function fetchWmItems(mutIds: string[]): Promise<any[]> {
+  let out: any[] = []
+  for (let i = 0; i < mutIds.length; i += 100) {
+    const { data } = await supabase.from('warehouse_mutation_items').select('*').in('mutation_id', mutIds.slice(i, i + 100))
+    if (data?.length) out = out.concat(data)
+  }
+  return out
+}
+
 const ToolbarCtx = createContext<(n: React.ReactNode) => void>(() => {})
 
 type Period = 'hari' | 'bulan'
@@ -128,9 +139,8 @@ export default function UnifiedMutasiPage() {
     async function mountSync() {
       setSyncing(true)
       try {
-        const [m, mi, mats, stores, partners, prods, fgStock, wstock, pstock, stock] = await Promise.all([
+        const [m, mats, stores, partners, prods, fgStock, wstock, pstock, stock] = await Promise.all([
           supabase.from('warehouse_mutations').select('*').order('created_at', { ascending: false }).limit(500),
-          supabase.from('warehouse_mutation_items').select('*'),
           supabase.from('materials').select('*'),
           supabase.from('stores').select('*'),
           supabase.from('partners').select('*'),
@@ -140,9 +150,11 @@ export default function UnifiedMutasiPage() {
           supabase.from('production_stock').select('*'),
           supabase.from('stock').select('*'),
         ])
+        // Item mutasi: fetch batched per mutation id (hindari cap 1000-row Supabase)
+        const miData = await fetchWmItems((m.data || []).map((x: any) => x.id))
         // Anti-clobber: pertahankan record lokal yang belum ter-push
         await replacePreservingUnsynced(db.warehouse_mutations, 'warehouse_mutations', m.data)
-        await replacePreservingUnsynced(db.warehouse_mutation_items, 'warehouse_mutation_items', mi.data)
+        await replacePreservingUnsynced(db.warehouse_mutation_items, 'warehouse_mutation_items', miData)
         if (mats.data?.length)     await db.materials.bulkPut(mats.data)
         if (stores.data?.length)   await db.stores.bulkPut(stores.data)
         if (partners.data?.length) await db.partners.bulkPut(partners.data)
@@ -160,9 +172,8 @@ export default function UnifiedMutasiPage() {
   async function syncData() {
     setSyncing(true)
     try {
-      const [m, mi, mats, stores, partners, prods, fgStock, wstock, pstock, stock] = await Promise.all([
+      const [m, mats, stores, partners, prods, fgStock, wstock, pstock, stock] = await Promise.all([
         supabase.from('warehouse_mutations').select('*').order('created_at', { ascending: false }).limit(500),
-        supabase.from('warehouse_mutation_items').select('*'),
         supabase.from('materials').select('*'),
         supabase.from('stores').select('*'),
         supabase.from('partners').select('*'),
@@ -172,9 +183,11 @@ export default function UnifiedMutasiPage() {
         supabase.from('production_stock').select('*'),
         supabase.from('stock').select('*'),
       ])
+      // Item mutasi: fetch batched per mutation id (hindari cap 1000-row Supabase)
+      const miData = await fetchWmItems((m.data || []).map((x: any) => x.id))
       // Anti-clobber: pertahankan record lokal yang belum ter-push
       await replacePreservingUnsynced(db.warehouse_mutations, 'warehouse_mutations', m.data)
-      await replacePreservingUnsynced(db.warehouse_mutation_items, 'warehouse_mutation_items', mi.data)
+      await replacePreservingUnsynced(db.warehouse_mutation_items, 'warehouse_mutation_items', miData)
       if (mats.data?.length)     await db.materials.bulkPut(mats.data)
       if (stores.data?.length)   await db.stores.bulkPut(stores.data)
       if (partners.data?.length) await db.partners.bulkPut(partners.data)

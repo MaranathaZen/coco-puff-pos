@@ -1,15 +1,15 @@
 """
-Coco Puff POS - Print Server v6.0
-- Pakai library 'websockets' yang dedicated (bukan flask-sock)
-- WSS di port 7676, HTTP health di port 7677
-- Self-signed cert otomatis dibuat
+Coco Puff POS - Print Server v6.1 (HTTP/WS, tanpa SSL)
+- WS di port 7676, HTTP health di port 7677 (plain, TANPA cert)
+- Tidak perlu accept cert / advanced>unsafe lagi
+- Chrome izinkan http/ws ke localhost dari halaman https (loopback trusted)
 
 Setup:
-  pip install websockets pywin32 pyopenssl pystray Pillow
+  pip install websockets pywin32 pystray Pillow
   python print_server_v6.py
 """
 
-import sys, os, threading, time, json, ssl, asyncio
+import sys, os, threading, time, json, asyncio
 
 if sys.platform == 'win32':
     import ctypes
@@ -19,8 +19,6 @@ if sys.platform == 'win32':
 
 BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE  = os.path.join(BASE_DIR, 'print_server.log')
-CERT_FILE = os.path.join(BASE_DIR, 'cert.pem')
-KEY_FILE  = os.path.join(BASE_DIR, 'key.pem')
 WS_PORT   = 7676
 HTTP_PORT = 7677
 
@@ -35,36 +33,6 @@ def log(msg):
         with open(LOG_FILE, 'a', encoding='utf-8') as f:
             f.write(line + '\n')
     except: pass
-
-def make_cert():
-    if os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE):
-        return True
-    try:
-        from OpenSSL import crypto
-        k = crypto.PKey()
-        k.generate_key(crypto.TYPE_RSA, 2048)
-        cert = crypto.X509()
-        cert.get_subject().CN = "localhost"
-        cert.set_serial_number(1000)
-        cert.gmtime_adj_notBefore(0)
-        cert.gmtime_adj_notAfter(365 * 24 * 60 * 60 * 10)
-        cert.set_issuer(cert.get_subject())
-        cert.set_pubkey(k)
-        try:
-            cert.add_extensions([
-                crypto.X509Extension(b"subjectAltName", False, b"DNS:localhost,IP:127.0.0.1"),
-            ])
-        except: pass
-        cert.sign(k, 'sha256')
-        with open(CERT_FILE, 'wb') as f:
-            f.write(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
-        with open(KEY_FILE, 'wb') as f:
-            f.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
-        log("SSL cert dibuat")
-        return True
-    except Exception as e:
-        log(f"Gagal buat cert: {e}")
-        return False
 
 def build_escpos(text: str, printer_name: str = "") -> bytes:
     data = bytearray()
@@ -109,7 +77,7 @@ def get_printer_name():
     except:
         return "Unknown"
 
-# ── HTTP health server (port 7677) ────────────────────────────
+# ── HTTP health server (port 7677, plain http) ────────────────
 def run_http_server():
     import http.server, socketserver
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -132,16 +100,13 @@ def run_http_server():
             self.end_headers()
         def log_message(self, *args): pass
 
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain(CERT_FILE, KEY_FILE)
     with socketserver.TCPServer(('0.0.0.0', HTTP_PORT), Handler) as httpd:
-        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
-        log(f"HTTP health: https://localhost:{HTTP_PORT}/health")
+        log(f"HTTP health: http://localhost:{HTTP_PORT}/health")
         httpd.serve_forever()
 
-# ── WSS WebSocket server (port 7676) ─────────────────────────
+# ── WS WebSocket server (port 7676, plain ws) ─────────────────
 async def ws_handler(websocket):
-    log(f"WSS client terhubung: {websocket.remote_address}")
+    log(f"WS client terhubung: {websocket.remote_address}")
     try:
         async for message in websocket:
             try:
@@ -168,14 +133,12 @@ async def ws_handler(websocket):
                 await websocket.send(json.dumps({"type": "error", "message": "Invalid JSON"}))
     except Exception as e:
         log(f"WS error: {e}")
-    log("WSS client disconnect")
+    log("WS client disconnect")
 
 async def run_ws_server():
     import websockets
-    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ssl_ctx.load_cert_chain(CERT_FILE, KEY_FILE)
-    async with websockets.serve(ws_handler, '0.0.0.0', WS_PORT, ssl=ssl_ctx):
-        log(f"WSS server: wss://localhost:{WS_PORT}/ws")
+    async with websockets.serve(ws_handler, '0.0.0.0', WS_PORT):
+        log(f"WS server: ws://localhost:{WS_PORT}/ws")
         await asyncio.Future()  # run forever
 
 def run_tray():
@@ -187,43 +150,23 @@ def run_tray():
         d.rectangle([8, 8, 56, 56], (255, 255, 255))
         d.text((18, 22), "CP", (30, 30, 30))
         menu = pystray.Menu(
-            pystray.MenuItem("Coco Puff Print Server v6", None, enabled=False),
-            pystray.MenuItem(f"WSS:{WS_PORT}", None, enabled=False),
+            pystray.MenuItem("Coco Puff Print Server v6.1", None, enabled=False),
+            pystray.MenuItem(f"WS:{WS_PORT}", None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Keluar", lambda i, item: (i.stop(), os._exit(0))),
         )
-        pystray.Icon("CP", img, f"CP Print v6", menu).run()
+        pystray.Icon("CP", img, f"CP Print v6.1", menu).run()
     except:
         while True: time.sleep(60)
 
-def open_browser_once():
-    flag = os.path.join(BASE_DIR, '.cert_accepted_v6')
-    if os.path.exists(flag): return
-    time.sleep(2)
-    import subprocess
-    subprocess.Popen(['start', f'https://localhost:{HTTP_PORT}/health'], shell=True)
-    with open(flag, 'w') as f: f.write('ok')
-
 if __name__ == '__main__':
-    log("=== Coco Puff Print Server v6.0 ===")
-
-    if not make_cert():
-        log("ERROR: Gagal buat SSL cert. Install pyopenssl: pip install pyopenssl")
-        input("Tekan Enter untuk keluar...")
-        sys.exit(1)
-
-    log(f"WSS WebSocket : wss://localhost:{WS_PORT}")
-    log(f"HTTPS Health  : https://localhost:{HTTP_PORT}/health")
-    log("")
-    log("PENTING - Lakukan SEKALI di Chrome:")
-    log(f"Buka https://localhost:{HTTP_PORT}/health")
-    log("Klik Advanced > Proceed to localhost")
+    log("=== Coco Puff POS Print Server v6.1 (HTTP/WS) ===")
+    log(f"WS WebSocket : ws://localhost:{WS_PORT}")
+    log(f"HTTP Health  : http://localhost:{HTTP_PORT}/health")
+    log("Tanpa SSL — tak perlu accept cert lagi.")
 
     # Start HTTP health server di thread terpisah
     threading.Thread(target=run_http_server, daemon=True).start()
-
-    # Auto buka browser untuk accept cert
-    threading.Thread(target=open_browser_once, daemon=True).start()
 
     # Start system tray
     if sys.platform == 'win32' and '--no-tray' not in sys.argv:

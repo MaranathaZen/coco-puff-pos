@@ -176,6 +176,18 @@ export async function pullMasterData() {
   } catch (e) { console.warn('[SYNC] pullMasterData error:', e) }
 }
 
+// EGRESS helper: tarik baris child by daftar parent-id (batch 100) — server-side filter, bukan full-table.
+async function pullChildrenIn(table: string, fkCol: string, parentIds: string[]): Promise<any[]> {
+  if (!parentIds.length) return []
+  let out: any[] = []
+  for (let i = 0; i < parentIds.length; i += 100) {
+    const batch = parentIds.slice(i, i + 100)
+    const { data } = await supabase.from(table).select('*').in(fkCol, batch)
+    if (data?.length) out = out.concat(data)
+  }
+  return out
+}
+
 export async function pullFromSupabase(storeId?: string) {
   const sid = storeId || currentStoreId
   if (!sid || isPulling) return
@@ -186,10 +198,9 @@ export async function pullFromSupabase(storeId?: string) {
 
     const [
       prices, promos, stock, wstock, pstock, fgstock,
-      wmuts, wmutItems, pmuts, pmutItems, recipeItems,
-      wexpenses, purchases, purchItems,
-      storeRecipes, storeRecipeItems,
-      prodLogs, prodLogMats,
+      wmuts, pmuts,
+      wexpenses, purchases,
+      prodLogs,
     ] = await Promise.all([
       supabase.from('store_product_prices').select('*').eq('store_id', sid),
       supabase.from('promotions').select('*').eq('store_id', sid),
@@ -198,17 +209,10 @@ export async function pullFromSupabase(storeId?: string) {
       supabase.from('production_stock').select('*'),
       supabase.from('finished_goods_stock').select('*'),
       supabase.from('warehouse_mutations').select('*').order('created_at', { ascending: false }).limit(200),
-      supabase.from('warehouse_mutation_items').select('*'),
       supabase.from('production_mutations').select('*').order('created_at', { ascending: false }).limit(200),
-      supabase.from('production_mutation_items').select('*'),
-      supabase.from('production_recipe_items').select('*').limit(1), // placeholder — ditarik di master
       supabase.from('warehouse_expenses').select('*').order('created_at', { ascending: false }).limit(500),
       supabase.from('purchases').select('*').order('created_at', { ascending: false }).limit(500),
-      supabase.from('purchase_items').select('*'),
-      supabase.from('store_recipes').select('*').limit(1), // placeholder — ditarik di master
-      supabase.from('store_recipe_items').select('*').limit(1), // placeholder — ditarik di master
       supabase.from('production_logs').select('*').order('created_at', { ascending: false }).limit(200),
-      supabase.from('production_log_materials').select('*'),
     ])
 
     // stock, prices, promotions: bulkPut saja (pull per store_id, orphan cleanup tidak relevan)
@@ -232,20 +236,29 @@ export async function pullFromSupabase(storeId?: string) {
     await replacePreservingUnsynced(db.finished_goods_stock, 'finished_goods_stock', fgstock.data)
     // store_recipes & production_recipe_items ditarik di pullMasterData()
 
-    const wMutIds = new Set((wmuts.data || []).map((m: any) => m.id))
-    const pMutIds = new Set((pmuts.data || []).map((m: any) => m.id))
-    const logIds = new Set((prodLogs.data || []).map((l: any) => l.id))
-    const purchIds = new Set((purchases.data || []).map((p: any) => p.id))
+    // EGRESS: item child-tables ditarik server-side by parent-id (dulu select('*') full-table tiap 30s → boros).
+    // Hasil di Dexie identik (item dari parent yang ada di limit), tapi download hanya yang relevan.
+    const wMutIds = (wmuts.data || []).map((m: any) => m.id).filter(Boolean)
+    const pMutIds = (pmuts.data || []).map((m: any) => m.id).filter(Boolean)
+    const purchIds = (purchases.data || []).map((p: any) => p.id).filter(Boolean)
+    const logIds = (prodLogs.data || []).map((l: any) => l.id).filter(Boolean)
+
+    const [wmutItemsData, pmutItemsData, purchItemsData, prodLogMatsData] = await Promise.all([
+      pullChildrenIn('warehouse_mutation_items', 'mutation_id', wMutIds),
+      pullChildrenIn('production_mutation_items', 'mutation_id', pMutIds),
+      pullChildrenIn('purchase_items', 'purchase_id', purchIds),
+      pullChildrenIn('production_log_materials', 'log_id', logIds),
+    ])
 
     if (wmuts.data?.length) await db.warehouse_mutations.bulkPut(wmuts.data)
-    if (wmutItems.data?.length) await db.warehouse_mutation_items.bulkPut((wmutItems.data || []).filter((i: any) => wMutIds.has(i.mutation_id)))
+    if (wmutItemsData.length) await db.warehouse_mutation_items.bulkPut(wmutItemsData)
     if (pmuts.data?.length) await db.production_mutations.bulkPut(pmuts.data)
-    if (pmutItems.data?.length) await db.production_mutation_items.bulkPut((pmutItems.data || []).filter((i: any) => pMutIds.has(i.mutation_id)))
+    if (pmutItemsData.length) await db.production_mutation_items.bulkPut(pmutItemsData)
     if (wexpenses.data?.length) await db.warehouse_expenses.bulkPut(wexpenses.data)
     if (purchases.data?.length) await db.purchases.bulkPut(purchases.data)
-    if (purchItems.data?.length) await db.purchase_items.bulkPut((purchItems.data || []).filter((i: any) => purchIds.has(i.purchase_id)))
+    if (purchItemsData.length) await db.purchase_items.bulkPut(purchItemsData)
     if (prodLogs.data?.length) await db.production_logs.bulkPut(prodLogs.data)
-    if (prodLogMats.data?.length) await db.production_log_materials.bulkPut((prodLogMats.data || []).filter((i: any) => logIds.has(i.log_id)))
+    if (prodLogMatsData.length) await db.production_log_materials.bulkPut(prodLogMatsData)
 
     const today = new Date().toLocaleDateString('sv-SE')
     const [txs, shifts] = await Promise.all([

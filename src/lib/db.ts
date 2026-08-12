@@ -34,16 +34,19 @@ export interface Partner {
 
 export interface WarehouseStock {
   id: string; material_id: string; qty_on_hand: number; last_updated: string
+  region?: string
 }
 
 export interface ProductionStock {
   id: string; material_id: string; qty_on_hand: number
   avg_cost?: number; last_updated: string
+  region?: string
 }
 
 export interface FinishedGoodsStock {
   id: string; product_id: string; product_name: string
   qty_on_hand: number; hpp_per_unit?: number; last_updated: string
+  region?: string
 }
 
 export interface Purchase {
@@ -262,6 +265,25 @@ export class CocoPuffDB extends Dexie {
       store_recipe_items:  'id, recipe_id, material_id',
       stock:               'id, store_id, ingredient_id, material_id, [store_id+ingredient_id], [store_id+material_id]',
       finished_goods_stock: 'id, product_id, product_name',
+    })
+    // v10: multi-region (cabang Bali). Tambah index `region` di tabel inti +
+    // compound [material_id+region] utk lookup stok gudang/produksi per region.
+    this.version(10).stores({
+      ...base, ...v3v4shared,
+      warehouse_expenses:  'id, category, expense_date, created_at, region',
+      menu_role_config:    'id, role, menu_path, [role+menu_path]',
+      purchases:           'id, supplier_id, status, created_at, po_number, region',
+      store_recipes:       'id, store_id, product_id, [store_id+product_id], is_active, region',
+      store_recipe_items:  'id, recipe_id, material_id, region',
+      stock:               'id, store_id, ingredient_id, material_id, [store_id+ingredient_id], [store_id+material_id], region',
+      finished_goods_stock: 'id, product_id, product_name, region, [product_id+region]',
+      stores:              'id, name, city, is_active, region',
+      users:               'id, store_id, username, role, is_active, region',
+      products:            'id, category_id, name, sku, is_active, region',
+      materials:           'id, name, category, is_active, region',
+      warehouse_stock:     'id, material_id, region, [material_id+region]',
+      production_stock:    'id, material_id, region, [material_id+region]',
+      transactions:        'id, store_id, shift_id, cashier_id, receipt_no, status, created_at, region',
     })
   }
 }

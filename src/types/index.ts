@@ -16,6 +16,8 @@ export interface User {
   is_active: boolean
   created_at: string
   password_hash?: string
+  region?: string          // multi-region: region asal user (default 'malang')
+  all_regions?: boolean     // true = super-user (HQ/admin) lihat semua region
 }
 
 export interface Store {
@@ -26,6 +28,7 @@ export interface Store {
   phone?: string
   is_active: boolean
   created_at: string
+  region?: string          // multi-region: 'malang' | 'bali'
 }
 
 export interface Shift {

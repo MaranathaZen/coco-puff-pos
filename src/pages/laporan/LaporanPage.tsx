@@ -115,12 +115,15 @@ function LapTokoView({ dateRange, role, storeId }: { dateRange: any; role: strin
 
     // Per produk
     const txItems = await db.transaction_items.toArray()
+    const prods = await db.products.toArray()
+    const pkgQtyMap: Record<string, number> = Object.fromEntries(prods.map(p => [p.id, (p as any).pkg_qty || 1]))
     const prodMap: Record<string, { name: string; qty: number; nilai: number }> = {}
     for (const t of txs) {
       const items = txItems.filter(i => i.transaction_id === t.id)
       for (const i of items) {
         if (!prodMap[i.product_id]) prodMap[i.product_id] = { name:i.product_name||'?', qty:0, nilai:0 }
-        prodMap[i.product_id].qty   += (i.qty_eceran||0) + (i.qty_dus||0)
+        // FIX: dus x pkg_qty (1 dus = pkg_qty pcs), samakan dgn pengurangan stok di CashierPage
+        prodMap[i.product_id].qty   += (i.qty_eceran||0) + (i.qty_dus||0) * (pkgQtyMap[i.product_id] || 1)
         prodMap[i.product_id].nilai += i.subtotal||0
       }
     }

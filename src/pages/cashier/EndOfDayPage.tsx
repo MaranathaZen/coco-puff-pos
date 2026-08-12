@@ -151,7 +151,9 @@ export default function EndOfDayPage() {
       for (const item of allItems.filter(i => i.transaction_id === tx.id)) {
         const prod = pMap[item.product_id]; if (!prod) continue
         if (!soldMap[item.product_id]) soldMap[item.product_id] = { name: prod.name, qty: 0, total: 0 }
-        const qty = (item as any).qty ?? ((item as any).qty_eceran ?? 0) + ((item as any).qty_dus ?? 0)
+        // FIX produk terjual: qty_dus harus dikali pkg_qty (1 dus = pkg_qty pcs), samakan dgn pengurangan stok di CashierPage.
+        const pkgQty = (prod as any).pkg_qty || 1
+        const qty = ((item as any).qty_eceran ?? 0) + ((item as any).qty_dus ?? 0) * pkgQty
         soldMap[item.product_id].qty += qty
         soldMap[item.product_id].total += item.subtotal ?? (qty * ((item as any).unit_price ?? 0))
       }

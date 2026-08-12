@@ -11,7 +11,15 @@
 import { supabase } from '@/lib/supabase'
 import { logger } from '@/lib/logger'
 import { db, now } from '@/lib/db'
+import { useAuthStore } from '@/store/auth'
+import { getVisibleRegions } from '@/lib/regions'
 import type { RealtimeChannel } from '@supabase/supabase-js'
+
+// Region yang boleh dilihat user aktif — untuk filter pull katalog & stok global.
+// users & stores TIDAK difilter (tabel kecil, dibutuhkan saat login sebelum user aktif).
+function visibleRegions(): string[] {
+  return getVisibleRegions(useAuthStore.getState().user)
+}
 
 let pushInterval: ReturnType<typeof setInterval> | null = null
 let pullInterval: ReturnType<typeof setInterval> | null = null
@@ -143,21 +151,22 @@ async function handleRealtimeChange(tableName: string, payload: any) {
 
 export async function pullMasterData() {
   try {
+    const regs = visibleRegions()
     const [cats, prods, mats, sups, parts, stores, recipes, pkgs, menuCfg, users,
            storeRecipes, storeRecipeItems, prodRecipeItems] = await Promise.all([
-      supabase.from('categories').select('*'),
-      supabase.from('products').select('*'),
-      supabase.from('materials').select('*'),
-      supabase.from('suppliers').select('*'),
-      supabase.from('partners').select('*'),
-      supabase.from('stores').select('*'),
-      supabase.from('production_recipes').select('*'),
-      supabase.from('packages').select('*'),
-      supabase.from('menu_role_config').select('*'),
-      supabase.from('users').select('*').eq('is_active', true),
-      supabase.from('store_recipes').select('*'),
-      supabase.from('store_recipe_items').select('*'),
-      supabase.from('production_recipe_items').select('*'),
+      supabase.from('categories').select('*').in('region', regs),
+      supabase.from('products').select('*').in('region', regs),
+      supabase.from('materials').select('*').in('region', regs),
+      supabase.from('suppliers').select('*').in('region', regs),
+      supabase.from('partners').select('*').in('region', regs),
+      supabase.from('stores').select('*'),                          // global (login butuh semua store)
+      supabase.from('production_recipes').select('*').in('region', regs),
+      supabase.from('packages').select('*').in('region', regs),
+      supabase.from('menu_role_config').select('*'),                // global (config peran)
+      supabase.from('users').select('*').eq('is_active', true),     // global (login butuh semua user)
+      supabase.from('store_recipes').select('*').in('region', regs),
+      supabase.from('store_recipe_items').select('*').in('region', regs),
+      supabase.from('production_recipe_items').select('*').in('region', regs),
     ])
     await safeReplace(db.categories, cats.data)
     await safeReplace(db.products, prods.data)
@@ -195,6 +204,7 @@ export async function pullFromSupabase(storeId?: string) {
 
   try {
     // Master data ditarik di pullMasterData(), bukan di sini
+    const regs = visibleRegions()
 
     const [
       prices, promos, stock, wstock, pstock, fgstock,
@@ -205,9 +215,9 @@ export async function pullFromSupabase(storeId?: string) {
       supabase.from('store_product_prices').select('*').eq('store_id', sid),
       supabase.from('promotions').select('*').eq('store_id', sid),
       supabase.from('stock').select('*').eq('store_id', sid),
-      supabase.from('warehouse_stock').select('*'),
-      supabase.from('production_stock').select('*'),
-      supabase.from('finished_goods_stock').select('*'),
+      supabase.from('warehouse_stock').select('*').in('region', regs),
+      supabase.from('production_stock').select('*').in('region', regs),
+      supabase.from('finished_goods_stock').select('*').in('region', regs),
       supabase.from('warehouse_mutations').select('*').order('created_at', { ascending: false }).limit(200),
       supabase.from('production_mutations').select('*').order('created_at', { ascending: false }).limit(200),
       supabase.from('warehouse_expenses').select('*').order('created_at', { ascending: false }).limit(500),

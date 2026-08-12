@@ -1,53 +1,54 @@
 -- Fase 0 — Multi-region (cabang Bali/franchise).
--- ALTER polos, idempoten (ADD COLUMN IF NOT EXISTS), TANPA transaksi/DO block.
--- Di Supabase tiap statement auto-commit → satu error tak membatalkan yang lain.
--- Tabel kritis di ATAS supaya dijamin masuk duluan.
+-- Versi ANTI-GAGAL + DIAGNOSTIK: tiap ALTER dibungkus BEGIN/EXCEPTION per tabel,
+-- jadi error di satu tabel TIDAK membatalkan yang lain, dan alasannya dicatat.
+-- Hasil akhir: tabel OK/GAGAL per item (paste hasilnya kalau ada yang GAGAL).
 --
--- Prinsip: pertahankan perilaku sekarang (semua data lama = 'malang',
--- semua user lama all_regions=true). User Bali dibuat eksplisit di Fase 5.
+-- Aman diulang (idempoten). Prinsip: data lama = 'malang', user lama all_regions=true.
 
--- === KRITIS (wajib berhasil) ===
-ALTER TABLE public.warehouse_stock      ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.production_stock     ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.finished_goods_stock ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.products             ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.materials            ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.stores               ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.users                ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.transactions         ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
+DROP TABLE IF EXISTS _mig;
+CREATE TEMP TABLE _mig (item text, status text);
 
--- users.all_regions + jaga akses user existing (semua = HQ Malang)
-ALTER TABLE public.users ADD COLUMN IF NOT EXISTS all_regions boolean NOT NULL DEFAULT false;
-UPDATE public.users SET all_regions = true WHERE all_regions = false;
+DO $$
+DECLARE
+  t text;
+  tables text[] := ARRAY[
+    'warehouse_stock','production_stock','finished_goods_stock','products','materials',
+    'stores','users','transactions','categories','suppliers','partners','packages',
+    'production_recipes','production_recipe_items','store_recipes','store_recipe_items',
+    'stock','shifts','warehouse_mutations','production_mutations','purchases',
+    'warehouse_expenses','store_product_prices','promotions','close_order_reports'
+  ];
+BEGIN
+  FOREACH t IN ARRAY tables LOOP
+    BEGIN
+      EXECUTE format(
+        'ALTER TABLE public.%I ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT ''malang''', t);
+      INSERT INTO _mig VALUES ('region.'||t, 'OK');
+    EXCEPTION WHEN OTHERS THEN
+      INSERT INTO _mig VALUES ('region.'||t, 'GAGAL: '||SQLERRM);
+    END;
+  END LOOP;
 
--- === KATALOG ===
-ALTER TABLE public.categories               ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.suppliers                ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.partners                 ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.packages                 ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.production_recipes       ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.production_recipe_items  ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.store_recipes            ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.store_recipe_items       ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
+  -- users.all_regions + jaga akses user existing (semua = HQ Malang)
+  BEGIN
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS all_regions boolean NOT NULL DEFAULT false;
+    UPDATE public.users SET all_regions = true WHERE all_regions = false;
+    INSERT INTO _mig VALUES ('users.all_regions', 'OK');
+  EXCEPTION WHEN OTHERS THEN
+    INSERT INTO _mig VALUES ('users.all_regions', 'GAGAL: '||SQLERRM);
+  END;
 
--- === TABEL ber-store_id (denormalisasi region utk filter sync) ===
-ALTER TABLE public.stock                    ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.shifts                   ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.warehouse_mutations      ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.production_mutations     ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.purchases                ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.warehouse_expenses       ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.store_product_prices     ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.promotions               ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
-ALTER TABLE public.close_order_reports      ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'malang';
+  -- Index region (opsional, guarded)
+  BEGIN
+    CREATE INDEX IF NOT EXISTS idx_warehouse_stock_region  ON public.warehouse_stock (region);
+    CREATE INDEX IF NOT EXISTS idx_production_stock_region  ON public.production_stock (region);
+    CREATE INDEX IF NOT EXISTS idx_finished_goods_stock_region ON public.finished_goods_stock (region);
+    CREATE INDEX IF NOT EXISTS idx_products_region          ON public.products (region);
+    CREATE INDEX IF NOT EXISTS idx_materials_region         ON public.materials (region);
+    INSERT INTO _mig VALUES ('index.region', 'OK');
+  EXCEPTION WHEN OTHERS THEN
+    INSERT INTO _mig VALUES ('index.region', 'GAGAL: '||SQLERRM);
+  END;
+END $$;
 
--- === INDEX region ===
-CREATE INDEX IF NOT EXISTS idx_warehouse_stock_region      ON public.warehouse_stock (region);
-CREATE INDEX IF NOT EXISTS idx_production_stock_region      ON public.production_stock (region);
-CREATE INDEX IF NOT EXISTS idx_finished_goods_stock_region  ON public.finished_goods_stock (region);
-CREATE INDEX IF NOT EXISTS idx_products_region              ON public.products (region);
-CREATE INDEX IF NOT EXISTS idx_materials_region             ON public.materials (region);
-
--- Verifikasi:
--- SELECT table_name FROM information_schema.columns
--- WHERE column_name='region' AND table_schema='public' ORDER BY table_name;
+SELECT * FROM _mig ORDER BY status DESC, item;

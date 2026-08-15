@@ -302,7 +302,7 @@ const REGION_SCOPED_TABLES = [
   'categories', 'suppliers', 'partners', 'packages', 'production_recipes',
   'production_recipe_items', 'store_recipes', 'store_recipe_items', 'transactions', 'stock',
   'shifts', 'warehouse_mutations', 'production_mutations', 'purchases', 'warehouse_expenses',
-  'store_product_prices', 'promotions', 'close_order_reports',
+  'store_product_prices', 'promotions', 'close_order_reports', 'cash_deposits', 'production_logs',
 ]
 for (const t of REGION_SCOPED_TABLES) {
   const table = (db as any)[t]

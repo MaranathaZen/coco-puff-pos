@@ -5,7 +5,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { User, Shift, Store } from '@/types'
 import { db, generateId, now, addToSyncQueue, purgeOtherRegions } from '@/lib/db'
-import { supabase } from '@/lib/supabase'
+import { supabase, setActiveQueryRegions } from '@/lib/supabase'
 import { hashPassword, verifyPassword } from '@/lib/utils'
 import { getVisibleRegions } from '@/lib/regions'
 
@@ -90,8 +90,10 @@ export const useAuthStore = create<AuthState>()(
             } catch (e) { console.warn('[AUTH] gagal upgrade hash', e) }
           }
 
-          // Multi-region: bersihkan sisa data region lain di Dexie (mis. bekas login owner region lain).
-          try { await purgeOtherRegions(getVisibleRegions(user)) } catch { /* ignore */ }
+          // Multi-region: set filter query + bersihkan sisa data region lain di Dexie.
+          const visible = getVisibleRegions(user)
+          setActiveQueryRegions(visible)
+          try { await purgeOtherRegions(visible) } catch { /* ignore */ }
 
           const store = await db.stores.get(user.store_id) || null
 
@@ -114,6 +116,7 @@ export const useAuthStore = create<AuthState>()(
         if (activeShift && activeShift.status === 'open') {
           await closeShift(activeShift)
         }
+        setActiveQueryRegions(['malang'])
         set({ user: null, store: null, activeShift: null })
       },
 

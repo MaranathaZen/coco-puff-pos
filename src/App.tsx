@@ -4,7 +4,8 @@ import { useAuthStore } from '@/store/auth'
 import { seedIfEmpty } from '@/lib/seed'
 import { startSyncWorker, stopSyncWorker } from '@/lib/sync'
 import { setWriteRegion } from '@/lib/db'
-import { getActiveRegion } from '@/lib/regions'
+import { getActiveRegion, getVisibleRegions } from '@/lib/regions'
+import { setActiveQueryRegions } from '@/lib/supabase'
 import { useAppSettings, applyFavicon } from '@/hooks/useAppSettings'
 
 import LoginPage            from '@/pages/auth/LoginPage'
@@ -115,7 +116,9 @@ export default function App() {
   useEffect(() => { seedIfEmpty() }, [])
   useEffect(() => {
     if (user?.store_id) {
-      setWriteRegion(getActiveRegion(user))   // multi-region: baris baru di-stamp region user
+      const visible = getVisibleRegions(user)
+      setActiveQueryRegions(visible)          // multi-region: filter query (juga saat reload/rehydrate)
+      setWriteRegion(getActiveRegion(user))   // baris baru di-stamp region user
       startSyncWorker(user.store_id)
     } else stopSyncWorker()
   }, [user?.store_id])

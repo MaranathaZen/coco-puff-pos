@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now, addToSyncQueue, type Supplier, type Partner, type MenuRoleConfig } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
+import { getVisibleRegions } from '@/lib/regions'
 import { useAuthStore } from '@/store/auth'
 import { hashPassword, verifyPassword, formatRupiah } from '@/lib/utils'
 import { hardResetLocal } from '@/lib/sync-helpers'
@@ -431,9 +432,10 @@ function UsersTab({ currentUser }: { currentUser: User }) {
 
   const users = useLiveQuery(async () => {
     if (isOwner) {
-      const storeIds = new Set((stores || []).map(s => s.id))
+      // Multi-region: owner hanya lihat user di region yang boleh dilihatnya (owner02 -> Bali saja).
+      const visible = getVisibleRegions(currentUser)
       const all = await db.users.toArray()
-      return all.filter(u => storeIds.has(u.store_id) || isOwner).sort((a, b) => a.name.localeCompare(b.name))
+      return all.filter(u => visible.includes((u as any).region || 'malang')).sort((a, b) => a.name.localeCompare(b.name))
     }
     return db.users.where('store_id').equals(currentUser.store_id).toArray()
   }, [isOwner, currentUser.store_id, stores])

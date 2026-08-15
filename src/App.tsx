@@ -3,7 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
 import { seedIfEmpty } from '@/lib/seed'
 import { startSyncWorker, stopSyncWorker } from '@/lib/sync'
-import { setWriteRegion } from '@/lib/db'
+import { setWriteRegion, purgeOtherRegions } from '@/lib/db'
 import { getActiveRegion, getVisibleRegions } from '@/lib/regions'
 import { setActiveQueryRegions } from '@/lib/supabase'
 import { useAppSettings, applyFavicon } from '@/hooks/useAppSettings'
@@ -119,6 +119,7 @@ export default function App() {
       const visible = getVisibleRegions(user)
       setActiveQueryRegions(visible)          // multi-region: filter query (juga saat reload/rehydrate)
       setWriteRegion(getActiveRegion(user))   // baris baru di-stamp region user
+      purgeOtherRegions(visible).catch(() => {}) // bersihkan sisa cache region lain (juga saat reload)
       startSyncWorker(user.store_id)
     } else stopSyncWorker()
   }, [user?.store_id])

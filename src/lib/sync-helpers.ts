@@ -4,19 +4,26 @@
 
 import { db } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/auth'
+import { getVisibleRegions } from '@/lib/regions'
 import toast from 'react-hot-toast'
+
+// Region yang boleh dilihat user aktif (pre-login user=null → default malang).
+// stores & users tetap global (login butuh semua); katalog & stok difilter.
+function regs(): string[] { return getVisibleRegions(useAuthStore.getState().user) }
 
 /** Sync master data dengan REPLACE total */
 export async function syncMasterData() {
   try {
+    const r = regs()
     const [storesRes, usersRes, matsRes, suppRes, partRes, prodsRes, catsRes] = await Promise.all([
-      supabase.from('stores').select('*').eq('is_active', true),
-      supabase.from('users').select('*').eq('is_active', true),
-      supabase.from('materials').select('*'),
-      supabase.from('suppliers').select('*'),
-      supabase.from('partners').select('*'),
-      supabase.from('products').select('*').eq('is_active', true),
-      supabase.from('categories').select('*'),
+      supabase.from('stores').select('*').eq('is_active', true),   // global (login butuh semua store)
+      supabase.from('users').select('*').eq('is_active', true),    // global (login butuh semua user)
+      supabase.from('materials').select('*').in('region', r),
+      supabase.from('suppliers').select('*').in('region', r),
+      supabase.from('partners').select('*').in('region', r),
+      supabase.from('products').select('*').eq('is_active', true).in('region', r),
+      supabase.from('categories').select('*').in('region', r),
     ])
     // REPLACE: clear dulu
     if (storesRes.data !== null) { await db.stores.clear(); if (storesRes.data.length) await db.stores.bulkPut(storesRes.data) }
@@ -33,17 +40,18 @@ export async function syncMasterData() {
 /** Sync transactional data — REPLACE per tabel */
 export async function syncStoreData(storeId: string) {
   try {
+    const r = regs()
     const [txRes, wsRes, psRes, fgsRes, expRes, purRes, mutRes, mutItemRes, prodLogsRes, prodMutRes] = await Promise.all([
       supabase.from('transactions').select('*').eq('store_id', storeId),
-      supabase.from('warehouse_stock').select('*'),
-      supabase.from('production_stock').select('*'),
-      supabase.from('finished_goods_stock').select('*'),
-      supabase.from('warehouse_expenses').select('*'),
-      supabase.from('purchases').select('*'),
-      supabase.from('warehouse_mutations').select('*'),
+      supabase.from('warehouse_stock').select('*').in('region', r),
+      supabase.from('production_stock').select('*').in('region', r),
+      supabase.from('finished_goods_stock').select('*').in('region', r),
+      supabase.from('warehouse_expenses').select('*').in('region', r),
+      supabase.from('purchases').select('*').in('region', r),
+      supabase.from('warehouse_mutations').select('*').in('region', r),
       supabase.from('warehouse_mutation_items').select('*'),
       supabase.from('production_logs').select('*').order('created_at',{ascending:false}).limit(200),
-      supabase.from('production_mutations').select('*').order('created_at',{ascending:false}).limit(200),
+      supabase.from('production_mutations').select('*').in('region', r).order('created_at',{ascending:false}).limit(200),
     ])
 
     // Transactions: REPLACE per store

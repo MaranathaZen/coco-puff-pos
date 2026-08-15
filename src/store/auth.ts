@@ -4,9 +4,10 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { User, Shift, Store } from '@/types'
-import { db, generateId, now, addToSyncQueue } from '@/lib/db'
+import { db, generateId, now, addToSyncQueue, purgeOtherRegions } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { hashPassword, verifyPassword } from '@/lib/utils'
+import { getVisibleRegions } from '@/lib/regions'
 
 interface AuthState {
   user:        User | null
@@ -88,6 +89,9 @@ export const useAuthStore = create<AuthState>()(
               user.password_hash = nh
             } catch (e) { console.warn('[AUTH] gagal upgrade hash', e) }
           }
+
+          // Multi-region: bersihkan sisa data region lain di Dexie (mis. bekas login owner region lain).
+          try { await purgeOtherRegions(getVisibleRegions(user)) } catch { /* ignore */ }
 
           const store = await db.stores.get(user.store_id) || null
 

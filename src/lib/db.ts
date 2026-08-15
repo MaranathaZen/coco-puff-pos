@@ -312,6 +312,20 @@ for (const t of REGION_SCOPED_TABLES) {
     })
   }
 }
+
+// Hapus baris region yang TIDAK boleh dilihat user (dipanggil saat login).
+// Membersihkan sisa data region lain di Dexie browser bersama (mis. bekas owner01).
+// `users` dibiarkan (login butuh semua user); `stores` ikut dibersihkan.
+export async function purgeOtherRegions(visibleRegions: string[]) {
+  const tables = [...REGION_SCOPED_TABLES, 'stores']
+  for (const t of tables) {
+    const table = (db as any)[t]
+    if (!table?.filter) continue
+    try {
+      await table.filter((r: any) => !visibleRegions.includes(r.region || 'malang')).delete()
+    } catch { /* ignore */ }
+  }
+}
 export function generateId(): string { return crypto.randomUUID() }
 export function now(): string { return new Date().toISOString() }
 

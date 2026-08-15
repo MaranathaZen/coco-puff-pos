@@ -159,7 +159,7 @@ export async function pullMasterData() {
       supabase.from('materials').select('*').in('region', regs),
       supabase.from('suppliers').select('*').in('region', regs),
       supabase.from('partners').select('*').in('region', regs),
-      supabase.from('stores').select('*'),                          // global (login butuh semua store)
+      supabase.from('stores').select('*').in('region', regs),       // region (login pakai syncMasterData global)
       supabase.from('production_recipes').select('*').in('region', regs),
       supabase.from('packages').select('*').in('region', regs),
       supabase.from('menu_role_config').select('*'),                // global (config peran)

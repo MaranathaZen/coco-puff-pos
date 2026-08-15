@@ -27,6 +27,7 @@ const REGION_QUERY_TABLES = new Set([
   'warehouse_stock', 'production_stock', 'finished_goods_stock', 'transactions', 'stock',
   'shifts', 'warehouse_mutations', 'production_mutations', 'purchases', 'warehouse_expenses',
   'store_product_prices', 'promotions', 'close_order_reports', 'cash_deposits', 'production_logs',
+  'stores',   // stores ikut difilter (semua halaman); login pakai rawFrom (di bawah)
 ])
 const _origFrom = supabase.from.bind(supabase)
 ;(supabase as any).from = (table: string) => {
@@ -36,6 +37,10 @@ const _origFrom = supabase.from.bind(supabase)
   qb.select = (...args: any[]) => origSelect(...args).in('region', queryRegions)
   return qb
 }
+
+// Akses MENTAH tanpa filter region — HANYA untuk kebutuhan login sebelum ada user
+// aktif (mis. tarik semua stores/users di syncMasterData). Jangan dipakai di halaman.
+export function rawFrom(table: string) { return _origFrom(table) }
 
 // STORE_ID dan STORE_NAME sekarang diambil dari user yang login
 // bukan dari env variable — lihat auth store

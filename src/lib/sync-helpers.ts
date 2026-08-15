@@ -3,7 +3,7 @@
 // Mencegah data lama/duplikat muncul lokal
 
 import { db } from '@/lib/db'
-import { supabase } from '@/lib/supabase'
+import { supabase, rawFrom } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { getVisibleRegions } from '@/lib/regions'
 import toast from 'react-hot-toast'
@@ -15,9 +15,14 @@ function regs(): string[] { return getVisibleRegions(useAuthStore.getState().use
 /** Sync master data dengan REPLACE total */
 export async function syncMasterData() {
   try {
-    const r = regs()
+    const user = useAuthStore.getState().user
+    const r = getVisibleRegions(user)
+    // stores: sebelum login (user null) tarik SEMUA (login butuh); setelah login filter region.
+    const storesQuery = user
+      ? rawFrom('stores').select('*').eq('is_active', true).in('region', r)
+      : rawFrom('stores').select('*').eq('is_active', true)
     const [storesRes, usersRes, matsRes, suppRes, partRes, prodsRes, catsRes] = await Promise.all([
-      supabase.from('stores').select('*').eq('is_active', true),   // global (login butuh semua store)
+      storesQuery,
       supabase.from('users').select('*').eq('is_active', true),    // global (login butuh semua user)
       supabase.from('materials').select('*').in('region', r),
       supabase.from('suppliers').select('*').in('region', r),

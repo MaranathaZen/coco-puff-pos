@@ -289,6 +289,29 @@ export class CocoPuffDB extends Dexie {
 }
 
 export const db = new CocoPuffDB()
+
+// ── Multi-region: stamp `region` pada baris BARU yang dibuat lokal ───────────
+// Baris hasil sync dari server sudah punya region → tidak ditimpa (guard !obj.region).
+// writeRegion di-set dari App saat login / ganti region (lihat setWriteRegion).
+let writeRegion = 'malang'
+export function setWriteRegion(r: string) { if (r) writeRegion = r }
+export function getWriteRegion() { return writeRegion }
+
+const REGION_SCOPED_TABLES = [
+  'warehouse_stock', 'production_stock', 'finished_goods_stock', 'products', 'materials',
+  'categories', 'suppliers', 'partners', 'packages', 'production_recipes',
+  'production_recipe_items', 'store_recipes', 'store_recipe_items', 'transactions', 'stock',
+  'shifts', 'warehouse_mutations', 'production_mutations', 'purchases', 'warehouse_expenses',
+  'store_product_prices', 'promotions', 'close_order_reports',
+]
+for (const t of REGION_SCOPED_TABLES) {
+  const table = (db as any)[t]
+  if (table?.hook) {
+    table.hook('creating', (_pk: any, obj: any) => {
+      if (obj && !obj.region) obj.region = writeRegion
+    })
+  }
+}
 export function generateId(): string { return crypto.randomUUID() }
 export function now(): string { return new Date().toISOString() }
 

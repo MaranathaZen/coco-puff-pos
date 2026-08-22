@@ -659,13 +659,20 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
   async function handleDelete() {
     if (!material || !isOwner || !confirm(`Hapus "${material.name}" permanen?`)) return
     try {
+      // Hapus SEMUA referensi FK dulu (kalau tidak, delete material gagal FK)
       await supabase.from('warehouse_mutation_items').delete().eq('material_id', material.id)
       await supabase.from('purchase_items').delete().eq('material_id', material.id)
+      await supabase.from('production_recipe_items').delete().eq('material_id', material.id)
+      await supabase.from('store_recipe_items').delete().eq('material_id', material.id)
+      await supabase.from('production_mutation_items').delete().eq('material_id', material.id)
       await supabase.from('warehouse_stock').delete().eq('material_id', material.id)
       await supabase.from('production_stock').delete().eq('material_id', material.id)
       await supabase.from('materials').delete().eq('id', material.id)
       await db.warehouse_mutation_items.where('material_id').equals(material.id).delete()
       await db.purchase_items.where('material_id').equals(material.id).delete()
+      await (db as any).production_recipe_items?.where('material_id').equals(material.id).delete()
+      await (db as any).store_recipe_items?.where('material_id').equals(material.id).delete()
+      await (db as any).production_mutation_items?.where('material_id').equals(material.id).delete()
       await db.warehouse_stock.where('material_id').equals(material.id).delete()
       await db.production_stock.where('material_id').equals(material.id).delete()
       await db.materials.delete(material.id)
@@ -683,7 +690,8 @@ function MaterialForm({ material, isOwner, onClose }: { material: Material | nul
     }
     setSaving(true)
     try {
-      const data: Material = { id: material?.id || generateId(), name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock), is_active: isActive, created_at: material?.created_at || now(), updated_at: now() }
+      // Spread material lama dulu -> avg_cost & akumulator pembelian TIDAK hilang saat edit.
+      const data: any = { ...(material || {}), id: material?.id || generateId(), name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock), is_active: isActive, created_at: material?.created_at || now(), updated_at: now() }
       await db.materials.put(data)
       const { error } = await supabase.from('materials').upsert(data)
       if (error) throw error

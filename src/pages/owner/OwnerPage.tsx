@@ -1,8 +1,9 @@
 // src/pages/owner/OwnerPage.tsx
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useNavigate } from 'react-router-dom'
 import { db } from '@/lib/db'
+import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
 import { syncAll } from '@/lib/sync-helpers'
@@ -35,6 +36,22 @@ export default function OwnerPage() {
     if (period === 'bulan')  { start.setDate(1); start.setHours(0,0,0,0) }
     return { start: start.toISOString(), end: end.toISOString() }
   }, [period])
+
+  // Akurasi omzet per toko: tarik SEMUA transaksi periode ini utk semua toko (otomatis
+  // terfilter region). Cache lokal per-store tidak lengkap utk toko selain milik owner.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data } = await supabase.from('transactions').select('*')
+          .eq('status', 'completed')
+          .gte('created_at', dateRange.start).lte('created_at', dateRange.end)
+          .order('created_at', { ascending: false }).limit(10000)
+        if (!cancelled && data?.length) await db.transactions.bulkPut(data as any)
+      } catch { /* offline: pakai cache */ }
+    })()
+    return () => { cancelled = true }
+  }, [dateRange])
 
   // Hanya toko real (bukan virtual gudang/produksi)
   const stores = useLiveQuery(() =>

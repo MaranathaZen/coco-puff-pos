@@ -28,6 +28,7 @@ const REGION_QUERY_TABLES = new Set([
   'shifts', 'warehouse_mutations', 'production_mutations', 'purchases', 'warehouse_expenses',
   'store_product_prices', 'promotions', 'close_order_reports', 'cash_deposits', 'production_logs',
   'stores',   // stores ikut difilter (semua halaman); login pakai rawFrom (di bawah)
+  'accounting_periods',   // tutup buku bulanan per region
 ])
 // Region tunggal utk STAMP saat menulis (insert/upsert). Set saat login/rehydrate.
 let writeRegionSingle = 'malang'

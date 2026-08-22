@@ -29,17 +29,36 @@ const REGION_QUERY_TABLES = new Set([
   'store_product_prices', 'promotions', 'close_order_reports', 'cash_deposits', 'production_logs',
   'stores',   // stores ikut difilter (semua halaman); login pakai rawFrom (di bawah)
 ])
+// Region tunggal utk STAMP saat menulis (insert/upsert). Set saat login/rehydrate.
+let writeRegionSingle = 'malang'
+export function setWriteQueryRegion(r: string) { if (r) writeRegionSingle = r }
+export function getWriteQueryRegion() { return writeRegionSingle }
+
+// Tabel yg baris barunya WAJIB ber-region saat ditulis (termasuk users; stores sudah di query set).
+const REGION_WRITE_TABLES = new Set([...REGION_QUERY_TABLES, 'users'])
+function stampRegion(values: any): any {
+  const one = (row: any) =>
+    (row && typeof row === 'object' && !Array.isArray(row) && row.region == null)
+      ? { ...row, region: writeRegionSingle } : row
+  return Array.isArray(values) ? values.map(one) : one(values)
+}
+
 const _origFrom = supabase.from.bind(supabase)
 ;(supabase as any).from = (table: string) => {
   const qb: any = _origFrom(table)
-  if (!REGION_QUERY_TABLES.has(table)) return qb
-  const origSelect = qb.select.bind(qb)
-  qb.select = (...args: any[]) => origSelect(...args).in('region', queryRegions)
+  if (REGION_QUERY_TABLES.has(table)) {
+    const origSelect = qb.select.bind(qb)
+    qb.select = (...args: any[]) => origSelect(...args).in('region', queryRegions)
+  }
+  if (REGION_WRITE_TABLES.has(table)) {
+    const oi = qb.insert.bind(qb); qb.insert = (v: any, o?: any) => oi(stampRegion(v), o)
+    const ou = qb.upsert.bind(qb); qb.upsert = (v: any, o?: any) => ou(stampRegion(v), o)
+  }
   return qb
 }
 
-// Akses MENTAH tanpa filter region — HANYA untuk kebutuhan login sebelum ada user
-// aktif (mis. tarik semua stores/users di syncMasterData). Jangan dipakai di halaman.
+// Akses MENTAH tanpa filter/stamp region — HANYA untuk kebutuhan login sebelum ada
+// user aktif (mis. tarik semua stores/users di syncMasterData). Jangan dipakai di halaman.
 export function rawFrom(table: string) { return _origFrom(table) }
 
 // STORE_ID dan STORE_NAME sekarang diambil dari user yang login

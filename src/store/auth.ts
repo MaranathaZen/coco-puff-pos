@@ -5,9 +5,9 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { User, Shift, Store } from '@/types'
 import { db, generateId, now, addToSyncQueue, purgeOtherRegions } from '@/lib/db'
-import { supabase, setActiveQueryRegions } from '@/lib/supabase'
+import { supabase, setActiveQueryRegions, setWriteQueryRegion } from '@/lib/supabase'
 import { hashPassword, verifyPassword } from '@/lib/utils'
-import { getVisibleRegions } from '@/lib/regions'
+import { getVisibleRegions, getActiveRegion } from '@/lib/regions'
 
 interface AuthState {
   user:        User | null
@@ -93,6 +93,7 @@ export const useAuthStore = create<AuthState>()(
           // Multi-region: set filter query + bersihkan sisa data region lain di Dexie.
           const visible = getVisibleRegions(user)
           setActiveQueryRegions(visible)
+          setWriteQueryRegion(getActiveRegion(user))   // region utk stamp penulisan (owner02 -> bali)
           try { await purgeOtherRegions(visible) } catch { /* ignore */ }
 
           const store = await db.stores.get(user.store_id) || null
@@ -117,6 +118,7 @@ export const useAuthStore = create<AuthState>()(
           await closeShift(activeShift)
         }
         setActiveQueryRegions(['malang'])
+        setWriteQueryRegion('malang')
         set({ user: null, store: null, activeShift: null })
       },
 

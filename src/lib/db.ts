@@ -312,6 +312,16 @@ for (const t of REGION_SCOPED_TABLES) {
     })
   }
 }
+// users & stores: cap region JUGA saat buat baris baru (mis. admin Bali buat user),
+// tapi TIDAK ikut di-purge (purgeOtherRegions tak menyertakan users; stores login-safe).
+for (const t of ['users', 'stores']) {
+  const table = (db as any)[t]
+  if (table?.hook) {
+    table.hook('creating', (_pk: any, obj: any) => {
+      if (obj && !obj.region) obj.region = writeRegion
+    })
+  }
+}
 
 // Hapus baris region yang TIDAK boleh dilihat user (dipanggil saat login).
 // Membersihkan sisa data region lain di Dexie browser bersama (mis. bekas owner01).

@@ -5,7 +5,7 @@ import { seedIfEmpty } from '@/lib/seed'
 import { startSyncWorker, stopSyncWorker } from '@/lib/sync'
 import { setWriteRegion, purgeOtherRegions } from '@/lib/db'
 import { getActiveRegion, getVisibleRegions } from '@/lib/regions'
-import { setActiveQueryRegions } from '@/lib/supabase'
+import { setActiveQueryRegions, setWriteQueryRegion } from '@/lib/supabase'
 import { useAppSettings, applyFavicon } from '@/hooks/useAppSettings'
 
 import LoginPage            from '@/pages/auth/LoginPage'
@@ -118,7 +118,8 @@ export default function App() {
     if (user?.store_id) {
       const visible = getVisibleRegions(user)
       setActiveQueryRegions(visible)          // multi-region: filter query (juga saat reload/rehydrate)
-      setWriteRegion(getActiveRegion(user))   // baris baru di-stamp region user
+      setWriteQueryRegion(getActiveRegion(user)) // stamp region penulisan (insert/upsert)
+      setWriteRegion(getActiveRegion(user))   // baris baru di-stamp region user (Dexie hook)
       purgeOtherRegions(visible).catch(() => {}) // bersihkan sisa cache region lain (juga saat reload)
       startSyncWorker(user.store_id)
     } else stopSyncWorker()

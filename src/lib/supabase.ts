@@ -1,3 +1,4 @@
+// build: 2026-08-24 rebuild trigger (env refresh per-deployment)
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string

@@ -10,27 +10,22 @@ export async function shareWaMutasi(m: any, mutNo: string, tcLabel: string, peng
   const fgsMap = Object.fromEntries(fgsList.map((f: any) => [f.product_id ?? f.id, f.product_name]))
   const fmtRp = (n: number) => 'Rp' + Math.round(n || 0).toLocaleString('id-ID')
 
-  // Ambil item dari SERVER dulu (sumber kebenaran) — device yang share belum
-  // tentu sudah pull item-nya ke Dexie. Fallback Dexie -> m.items saat offline.
-  let rawItems: any[] = []
+  // GABUNG server + lokal (union by id) supaya item SELALU lengkap: item yang
+  // baru dibuat & belum ter-push masih ada di Dexie; item dari device lain ada
+  // di server. Dulu ambil server-dulu -> item belum ter-push hilang (6 jadi 4).
   let fromProduction = false
-  try {
-    const { data } = await supabase.from('warehouse_mutation_items').select('*').eq('mutation_id', m.id)
-    if (data?.length) rawItems = data
-  } catch {}
-  if (!rawItems.length) {
-    try {
-      const { data } = await supabase.from('production_mutation_items').select('*').eq('mutation_id', m.id)
-      if (data?.length) { rawItems = data; fromProduction = true }
-    } catch {}
+  const byId = new Map<string, any>()
+  const add = (arr: any[]) => { for (const it of (arr || [])) if (it) byId.set(it.id ?? JSON.stringify(it), it) }
+  // Mutasi gudang: server + lokal
+  try { const { data } = await supabase.from('warehouse_mutation_items').select('*').eq('mutation_id', m.id); add(data as any[]) } catch {}
+  try { add(await db.warehouse_mutation_items.where('mutation_id').equals(m.id).toArray()) } catch {}
+  // Kalau bukan mutasi gudang (tak ada item gudang), coba mutasi produksi: server + lokal
+  if (byId.size === 0) {
+    try { const { data } = await supabase.from('production_mutation_items').select('*').eq('mutation_id', m.id); if (data?.length) { add(data as any[]); fromProduction = true } } catch {}
+    try { const dx = await db.production_mutation_items.where('mutation_id').equals(m.id).toArray(); if (dx.length) { add(dx); fromProduction = true } } catch {}
   }
-  if (!rawItems.length) {
-    try { rawItems = await db.warehouse_mutation_items.where('mutation_id').equals(m.id).toArray() } catch {}
-  }
-  if (!rawItems.length) {
-    try { rawItems = await db.production_mutation_items.where('mutation_id').equals(m.id).toArray(); if (rawItems.length) fromProduction = true } catch {}
-  }
-  if (!rawItems.length && Array.isArray(m.items)) rawItems = m.items
+  if (byId.size === 0 && Array.isArray(m.items)) add(m.items)
+  const rawItems: any[] = [...byId.values()]
 
   // List barang (nama + qty + satuan, tanpa harga per-item) + Total semua
   let totalNilai = 0

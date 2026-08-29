@@ -506,7 +506,8 @@ export default function CashierPage() {
             if (storeStock) {
               const newQty = Math.max(0, storeStock.qty_on_hand - qty)
               await db.stock.update(storeStock.id, { qty_on_hand: newQty, last_updated: now() })
-              await supabase.rpc('adjust_stock_qty', { p_stock_id: storeStock.id, p_delta: -qty }).then(({ data, error }) => { if (!error && typeof data === 'number') db.stock.update(storeStock.id, { qty_on_hand: data, last_updated: now() }) })
+              // DURABLE: antri rpc_delta (delta atomik + retry kalau offline/gagal) — bukan RPC fire-and-forget yg bisa hilang
+              await addToSyncQueue('stock', storeStock.id, 'rpc_delta' as any, { table: 'stock', id: storeStock.id, delta: -qty }, storeId)
             } else {
               console.warn('[BOM] Stok tidak ditemukan untuk:', matMap[ri.material_id]?.name || ri.material_id)
             }
@@ -554,7 +555,8 @@ export default function CashierPage() {
             if (storeStock) {
               const newQty = storeStock.qty_on_hand + qty
               await db.stock.update(storeStock.id, { qty_on_hand: newQty, last_updated: now() })
-              supabase.rpc('adjust_stock_qty', { p_stock_id: storeStock.id, p_delta: qty }).then(({ data, error }) => { if (!error && typeof data === 'number') db.stock.update(storeStock.id, { qty_on_hand: data, last_updated: now() }) })
+              // DURABLE: antri rpc_delta (restore stok saat void) — retry kalau gagal
+              await addToSyncQueue('stock', storeStock.id, 'rpc_delta' as any, { table: 'stock', id: storeStock.id, delta: qty }, storeId)
             }
           }
         }

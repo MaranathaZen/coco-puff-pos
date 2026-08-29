@@ -22,22 +22,18 @@ export function setActiveQueryRegions(regs: string[]) {
 }
 export function getActiveQueryRegions() { return queryRegions }
 
-const REGION_QUERY_TABLES = new Set([
-  'products', 'materials', 'categories', 'suppliers', 'partners', 'packages',
-  'production_recipes', 'production_recipe_items', 'store_recipes', 'store_recipe_items',
-  'warehouse_stock', 'production_stock', 'finished_goods_stock', 'transactions', 'stock',
-  'shifts', 'warehouse_mutations', 'production_mutations', 'purchases', 'warehouse_expenses',
-  'store_product_prices', 'promotions', 'close_order_reports', 'cash_deposits', 'production_logs',
-  'stores',   // stores ikut difilter (semua halaman); login pakai rawFrom (di bawah)
-  'accounting_periods',   // tutup buku bulanan per region
-])
+// DINONAKTIFKAN 2026-08-29: Bali sudah DB Supabase TERPISAH (single-tenant), jadi
+// filter/stamp region ini tak berguna & sempat mengganggu runtime Malang (stok tak
+// terpotong, close order gagal). Set dikosongkan -> wrapper jadi no-op, perilaku
+// kembali seperti sebelum kerja region (single-tenant murni).
+const REGION_QUERY_TABLES = new Set<string>([])
 // Region tunggal utk STAMP saat menulis (insert/upsert). Set saat login/rehydrate.
 let writeRegionSingle = 'malang'
 export function setWriteQueryRegion(r: string) { if (r) writeRegionSingle = r }
 export function getWriteQueryRegion() { return writeRegionSingle }
 
-// Tabel yg baris barunya WAJIB ber-region saat ditulis (termasuk users; stores sudah di query set).
-const REGION_WRITE_TABLES = new Set([...REGION_QUERY_TABLES, 'users'])
+// DINONAKTIFKAN 2026-08-29 (lihat catatan di atas) — kosong = tak ada stamp region saat tulis.
+const REGION_WRITE_TABLES = new Set<string>([])
 function stampRegion(values: any): any {
   const one = (row: any) =>
     (row && typeof row === 'object' && !Array.isArray(row) && row.region == null)

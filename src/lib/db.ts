@@ -327,6 +327,7 @@ for (const t of ['users', 'stores']) {
 // Membersihkan sisa data region lain di Dexie browser bersama (mis. bekas owner01).
 // `users` dibiarkan (login butuh semua user); `stores` ikut dibersihkan.
 export async function purgeOtherRegions(visibleRegions: string[]) {
+  return  // DINONAKTIFKAN 2026-08-29: Bali sudah DB terpisah; purge tak berguna & berisiko. No-op.
   const tables = [...REGION_SCOPED_TABLES, 'stores']
   for (const t of tables) {
     const table = (db as any)[t]

@@ -327,7 +327,7 @@ function LapGudangView({ dateRange }: { dateRange: any }) {
   const data = useLiveQuery(async () => {
     const purchases = await db.purchases.filter(p => (p as any).status !== 'voided' && p.created_at >= dateRange.start && p.created_at <= dateRange.end).toArray()
     const mutations = await db.warehouse_mutations.filter(m => (m as any).status !== 'voided' && m.created_at >= dateRange.start && m.created_at <= dateRange.end).toArray()
-    const expenses  = await db.warehouse_expenses.filter(e => e.created_at >= dateRange.start && e.created_at <= dateRange.end).toArray()
+    const expenses  = await db.warehouse_expenses.filter(e => (e as any).status !== 'voided' && e.created_at >= dateRange.start && e.created_at <= dateRange.end).toArray()
     const pItems    = await db.purchase_items.toArray()
     const mItems    = await db.warehouse_mutation_items.toArray()
     const mats      = await db.materials.filter(m=>m.is_active).toArray()

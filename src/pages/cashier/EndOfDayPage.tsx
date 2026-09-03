@@ -172,12 +172,13 @@ export default function EndOfDayPage() {
   }, [storeId, today])
 
   const biayaHariIni = useLiveQuery(async () => {
+    // FIX: kecualikan biaya yang di-void (status='voided') — dulu ikut terhitung di close order
     const byStore = await db.warehouse_expenses
-      .filter(e => (e as any).store_id === storeId && new Date(e.created_at).toLocaleDateString('sv-SE') === today)
+      .filter(e => (e as any).store_id === storeId && (e as any).status !== 'voided' && new Date(e.created_at).toLocaleDateString('sv-SE') === today)
       .toArray()
     if (byStore.length) return byStore.reduce((s, e) => s + e.amount, 0)
     return (await db.warehouse_expenses
-      .filter(e => e.created_by === user?.id && new Date(e.created_at).toLocaleDateString('sv-SE') === today)
+      .filter(e => e.created_by === user?.id && (e as any).status !== 'voided' && new Date(e.created_at).toLocaleDateString('sv-SE') === today)
       .toArray()).reduce((s, e) => s + e.amount, 0)
   }, [storeId, user?.id, today])
 

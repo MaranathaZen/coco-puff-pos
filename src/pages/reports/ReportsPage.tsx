@@ -88,7 +88,7 @@ export default function ReportsPage() {
     db.purchases.filter(p => (p as any).status !== 'voided' && p.created_at >= dateRange.start && p.created_at <= dateRange.end).toArray()
   , [dateRange])
   const expenses     = useLiveQuery(async () =>
-    db.warehouse_expenses.filter(e => e.created_at >= dateRange.start && e.created_at <= dateRange.end).toArray()
+    db.warehouse_expenses.filter(e => (e as any).status !== 'voided' && e.created_at >= dateRange.start && e.created_at <= dateRange.end).toArray()
   , [dateRange])
   const productionLogs = useLiveQuery(async () =>
     db.production_logs.filter(l => (l as any).status !== 'voided' && l.created_at >= dateRange.start && l.created_at <= dateRange.end).toArray()

@@ -99,7 +99,7 @@ export default function LaporanGudangPage() {
   // Biaya dalam periode
   const biayaData = useLiveQuery(async () => {
     const expenses = await db.warehouse_expenses
-      .filter(e => e.created_at >= dateRange.start && e.created_at <= dateRange.end)
+      .filter(e => (e as any).status !== 'voided' && e.created_at >= dateRange.start && e.created_at <= dateRange.end)
       .toArray()
     const total = expenses.reduce((s, e) => s + e.amount, 0)
     const byKat: Record<string, number> = {}

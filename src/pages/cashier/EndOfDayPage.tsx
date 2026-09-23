@@ -5,9 +5,9 @@
 // - MOBILE: tidak ada perubahan sama sekali
 // - FIX: floating point qty stok (103.400000... → 103.4)
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, generateId, now, addToSyncQueue } from '@/lib/db'
+import { db, now, addToSyncQueue } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
@@ -64,6 +64,7 @@ export default function EndOfDayPage() {
 
   const [syncing, setSyncing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
   const [saved, setSaved] = useState(false)
   const [savedReport, setSavedReport] = useState<any>(null)
   const [existingReport, setExistingReport] = useState<any>(null)
@@ -262,6 +263,13 @@ export default function EndOfDayPage() {
   }
 
   async function handleSave() {
+    // Kunci sinkron: klik beruntun dulu lolos sebelum setSaving -> close order dobel (Mitra 11 & 21 Sep)
+    if (savingRef.current) return
+    savingRef.current = true
+    try { await doSave() } finally { savingRef.current = false }
+  }
+
+  async function doSave() {
     if (!saldoAwal || Number(saldoAwal) <= 0) return toast.error('Saldo awal wajib diisi dan lebih dari 0')
     if (!uangFisik || Number(uangFisik) <= 0) return toast.error('Uang fisik di laci wajib diisi dan lebih dari 0')
     if (!notes.trim()) return toast.error('Nama kasir wajib diisi')
@@ -278,7 +286,8 @@ export default function EndOfDayPage() {
     setSaving(true)
     try {
       const reportData = {
-        id: generateId(),
+        // ID tetap per toko+tanggal: kalau tetap terkirim 2x, upsert menimpa baris yang sama (tak dobel)
+        id: `co-${storeId}-${today}`,
         store_id: storeId,
         report_date: today,
         saldo_awal: saldoAwalNum,
@@ -308,7 +317,7 @@ export default function EndOfDayPage() {
 
       if (totalSetorNum > 0) {
         const dep: any = {
-          id: generateId(),
+          id: `dep-co-${storeId}-${today}`,
           store_id: storeId,
           amount: totalSetorNum,
           deposit_date: today,

@@ -720,6 +720,7 @@ export default function DebugPage() {
                 </button>
 
                 <button onClick={async () => {
+                  if (!confirm('PERINGATAN: data di antrian ini (close order, transaksi, potong stok) BELUM masuk server dan akan HILANG PERMANEN.\n\nCoba dulu "Push ulang antrian". Tetap hapus?')) return
                   try {
                     const stuck = await (db as any).sync_queue?.filter((q: any) => (q.retry_count || 0) >= 5).toArray() ?? []
                     for (const item of stuck) await (db as any).sync_queue?.update(item.id, { status: 'abandoned' })

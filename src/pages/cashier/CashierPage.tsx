@@ -219,11 +219,7 @@ export default function CashierPage() {
   useEffect(() => {
     async function checkPending() {
       try {
-        const stuck = await db.sync_queue
-          .where('status').anyOf(['pending', 'failed'])
-          .filter((q: any) => (q.retry_count || 0) >= 5)
-          .toArray()
-        for (const item of stuck) await db.sync_queue.update(item.id, { status: 'abandoned' })
+        // Tidak ada lagi abandon otomatis — sync worker terus retry sampai terkirim.
         const count = await db.sync_queue.where('status').anyOf(['pending', 'failed']).count()
         setPendingSync(count)
       } catch { }
@@ -817,15 +813,17 @@ pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;wh
           </div>
           <button
             onClick={async () => {
+              // Dulu tombol ini "Bersihkan" = MENGHAPUS antrian gagal -> close order/
+              // transaksi/potong stok hilang permanen. Sekarang: kirim ulang saja.
               try {
-                await db.sync_queue.where('status').anyOf(['abandoned', 'failed']).delete()
-                const stuck = await db.sync_queue.filter((q: any) => (q.retry_count || 0) >= 5).toArray()
-                for (const item of stuck) await db.sync_queue.update(item.id, { status: 'abandoned' })
-                setPendingSync(0)
+                const items = await db.sync_queue.where('status').anyOf(['failed', 'abandoned']).toArray()
+                for (const item of items) await db.sync_queue.update(item.id, { status: 'pending', retry_count: 0 })
+                await pushToSupabase()
+                toast.success('Mengirim ulang data ke server...')
               } catch { }
             }}
             className="text-white underline text-xs opacity-80 flex-shrink-0">
-            Bersihkan
+            Kirim ulang
           </button>
         </div>
       )}

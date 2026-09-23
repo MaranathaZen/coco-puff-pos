@@ -3,7 +3,7 @@
  * FIX v9: infinite pull loop â€” guard realtimeConnected di subscribe callback
  * FIX v9: startSyncWorker guard lebih ketat (cek realtimeChannel juga)
  * FIX: replaceTable pakai bulkPut saja (tidak clear dulu) â€” hindari data kosong kalau putus
- * FIX: retry_count >= 5 â†’ mark abandoned bukan stuck (banner hilang)
+ * FIX 2026-09: TIDAK abandon lagi — retry dgn backoff (maks 10 mnt), skip saat offline, abandoned tabel catatan dihidupkan lagi
  * FIX: push interval 5s
  * FIX: pull interval 30s
  */
@@ -38,6 +38,12 @@ const TABLE_PUSH_ORDER = [
   'shifts',
   'transactions',
   'transaction_items',
+]
+
+// Tabel catatan (insert id unik, upsert idempoten) — aman di-push ulang kapan pun.
+const REVIVE_TABLES = [
+  'close_order_reports', 'cash_deposits', 'transactions', 'transaction_items',
+  'warehouse_expenses', 'purchases', 'purchase_items', 'shifts',
 ]
 
 const TABLE_MAP: Record<string, keyof typeof db> = {
@@ -398,20 +404,26 @@ export async function pushToSupabase() {
   if (isSyncing) return
   isSyncing = true
   try {
+    // Offline: jangan coba push — dulu tiap 5 dtk gagal & retry_count habis dalam ~25 dtk
+    // lalu item di-abandon (close order Mitra 22 Sep hilang karena ini).
+    if (!navigator.onLine) return
+
+    // TIDAK ADA LAGI abandon otomatis: item gagal terus dicoba dengan backoff
+    // (maks tiap 10 menit) sampai berhasil. Item 'abandoned' lama dari tabel
+    // catatan (idempoten, id unik) ikut dihidupkan lagi supaya data yang
+    // tertahan di device ter-push. Tabel stok TIDAK dihidupkan (bisa basi).
+    const nowMs = Date.now()
+    const due = (q: any) => {
+      if ((q.retry_count || 0) < 5) return true
+      const wait = Math.min(600_000, (q.retry_count || 0) * 30_000)
+      const last = q.last_attempt_at ? new Date(q.last_attempt_at).getTime() : 0
+      return nowMs - last >= wait
+    }
     const pending = await db.sync_queue
-      .where('status').anyOf(['pending', 'failed'])
-      .filter(q => q.retry_count < 5)
+      .where('status').anyOf(['pending', 'failed', 'abandoned'])
+      .filter(q => (q.status !== 'abandoned' || REVIVE_TABLES.includes(q.table_name)) && due(q))
       .limit(50)
       .toArray()
-
-    const abandoned = await db.sync_queue
-      .where('status').anyOf(['pending', 'failed'])
-      .filter(q => q.retry_count >= 5)
-      .toArray()
-    for (const item of abandoned) {
-      console.warn(`[SYNC] Abandoned ${item.table_name} ${item.record_id} â€” retry_count >= 5`)
-      await db.sync_queue.update(item.id, { status: 'abandoned', error_msg: 'Max retry reached' })
-    }
 
     if (!pending.length) return
 
@@ -464,8 +476,8 @@ export async function pushToSupabase() {
             if (error.code === '23503') {
               console.warn(`[SYNC] FK violation ${item.table_name} ${item.record_id} â€” skip, retry nanti`)
               await db.sync_queue.update(item.id, {
-                retry_count: item.retry_count + 1,
-                error_msg: 'FK violation: parent record belum sync',
+                retry_count: item.retry_count + 1, last_attempt_at: now(),
+                status: 'failed', error_msg: 'FK violation: parent record belum sync',
               })
               continue
             }
@@ -473,7 +485,7 @@ export async function pushToSupabase() {
             // senyap — tandai failed biar kelihatan & auto-recover setelah DB diperbaiki.
             if (error.code === 'PGRST204') {
               console.warn(`[SYNC] Schema mismatch ${item.table_name} â€” tunda (cek kolom DB)`)
-              await db.sync_queue.update(item.id, { status: 'failed', retry_count: item.retry_count + 1, error_msg: 'Schema mismatch: ' + error.message })
+              await db.sync_queue.update(item.id, { status: 'failed', retry_count: item.retry_count + 1, last_attempt_at: now(), error_msg: 'Schema mismatch: ' + error.message })
               continue
             }
             // 409 conflict (row sudah ada) â†’ mark done, aman
@@ -492,7 +504,7 @@ export async function pushToSupabase() {
         console.warn(`[SYNC] Push gagal ${item.table_name}:`, msg)
         await db.sync_queue.update(item.id, {
           status: 'failed',
-          retry_count: item.retry_count + 1,
+          retry_count: item.retry_count + 1, last_attempt_at: now(),
           error_msg: msg,
         })
       }

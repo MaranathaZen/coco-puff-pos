@@ -216,9 +216,10 @@ export interface SyncQueueItem {
   record_id: string
   operation: 'insert' | 'update' | 'delete' | 'upsert' | 'rpc_delta'
   payload: string
-  status: 'pending' | 'syncing' | 'done' | 'failed'
+  status: 'pending' | 'syncing' | 'done' | 'failed' | 'abandoned'
   retry_count: number
   error_msg?: string
   created_at: string
+  last_attempt_at?: string
   synced_at?: string
 }

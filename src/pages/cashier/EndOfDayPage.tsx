@@ -106,38 +106,71 @@ export default function EndOfDayPage() {
     checkExisting()
   }, [storeId, today])
 
-  async function syncData() {
+  // Tarik data HARI INI saja. Dulu transaction_items diambil semua (tanpa filter)
+  // -> lemot & terpotong batas 1000 baris Supabase -> "produk terjual" kurang.
+  async function syncData(showToast = true) {
+    if (!storeId) return
     setSyncing(true)
     try {
-      const [txRes, tiRes, prodRes, stockRes, matsRes, expRes, purRes] = await Promise.all([
-        supabase.from('transactions').select('*').eq('store_id', storeId).gte('created_at', today + 'T00:00:00+07:00'),
-        supabase.from('transaction_items').select('*'),
+      const dayStart = today + 'T00:00:00+07:00'
+      const dayEnd = today + 'T23:59:59.999+07:00'
+      const [txRes, prodRes, stockRes, matsRes, expRes, purRes] = await Promise.all([
+        supabase.from('transactions').select('*').eq('store_id', storeId)
+          .gte('created_at', dayStart).lte('created_at', dayEnd),
         supabase.from('products').select('*').eq('is_active', true),
         supabase.from('stock').select('*').eq('store_id', storeId),
         supabase.from('materials').select('*'),
-        supabase.from('warehouse_expenses').select('*').eq('store_id', storeId),
-        supabase.from('purchases').select('*').eq('store_id', storeId),
+        supabase.from('warehouse_expenses').select('*')
+          .or(`store_id.eq.${storeId}${user?.id ? `,created_by.eq.${user.id}` : ''}`)
+          .gte('created_at', dayStart).lte('created_at', dayEnd),
+        supabase.from('purchases').select('*')
+          .or(`store_id.eq.${storeId}${user?.id ? `,created_by.eq.${user.id}` : ''}`)
+          .gte('created_at', dayStart).lte('created_at', dayEnd),
       ])
-      if (txRes.data?.length) await db.transactions.bulkPut(txRes.data)
-      if (tiRes.data?.length) await db.transaction_items.bulkPut(tiRes.data)
+      if (txRes.error) throw txRes.error
+      const txs = txRes.data || []
+      if (txs.length) await db.transactions.bulkPut(txs)
+
+      // Item transaksi hanya milik transaksi hari ini, dicicil per 100 id (batas panjang URL)
+      const ids = txs.map((t: any) => t.id)
+      for (let i = 0; i < ids.length; i += 100) {
+        const { data: items, error } = await supabase.from('transaction_items').select('*')
+          .in('transaction_id', ids.slice(i, i + 100))
+        if (error) throw error
+        if (items?.length) await db.transaction_items.bulkPut(items)
+      }
+
       if (prodRes.data?.length) await db.products.bulkPut(prodRes.data)
       if (stockRes.data?.length) await db.stock.bulkPut(stockRes.data)
       if (matsRes.data?.length) await db.materials.bulkPut(matsRes.data)
       if (expRes.data?.length) await db.warehouse_expenses.bulkPut(expRes.data)
       if (purRes.data?.length) await db.purchases.bulkPut(purRes.data)
-      toast.success('Data diperbarui')
-    } catch { toast.error('Gagal sync') }
-    finally { setSyncing(false) }
+      if (showToast) toast.success('Data diperbarui')
+    } catch (e) {
+      console.warn('[CloseOrder sync]', e)
+      if (showToast) toast.error('Gagal sync — data yang tampil dari HP ini')
+    } finally { setSyncing(false) }
   }
 
+  // Sync otomatis saat dibuka: angka close order = data server, bukan cuma data lokal HP ini
+  useEffect(() => { syncData(false) }, [storeId, today])
+
   const todayData = useLiveQuery(async () => {
-    const allTxs = await db.transactions
-      .filter(t => t.store_id === storeId && new Date(t.created_at).toLocaleDateString('sv-SE') === today)
+    // Pakai index store_id & transaction_id — dulu memindai SELURUH tabel lokal (makin lama makin lemot)
+    const allTxs = await db.transactions.where('store_id').equals(storeId)
+      .filter(t => new Date(t.created_at).toLocaleDateString('sv-SE') === today)
       .toArray()
     const completedTxs = allTxs.filter(t => t.status === 'completed')
     const voidedTxs = allTxs.filter(t => t.status === 'voided')
     const reqVoidTxs = allTxs.filter(t => (t as any).status === 'void_requested')
-    const allItems = await db.transaction_items.toArray()
+    const todayItems = completedTxs.length
+      ? await db.transaction_items.where('transaction_id').anyOf(completedTxs.map(t => t.id)).toArray()
+      : []
+    const itemsByTx = new Map<string, any[]>()
+    for (const it of todayItems) {
+      const arr = itemsByTx.get(it.transaction_id)
+      if (arr) arr.push(it); else itemsByTx.set(it.transaction_id, [it])
+    }
     const prods = await db.products.toArray()
     const pMap = Object.fromEntries(prods.map(p => [p.id, p]))
 
@@ -149,7 +182,7 @@ export default function EndOfDayPage() {
 
     const soldMap: Record<string, { name: string; qty: number; total: number }> = {}
     for (const tx of completedTxs) {
-      for (const item of allItems.filter(i => i.transaction_id === tx.id)) {
+      for (const item of itemsByTx.get(tx.id) || []) {
         const prod = pMap[item.product_id]; if (!prod) continue
         if (!soldMap[item.product_id]) soldMap[item.product_id] = { name: prod.name, qty: 0, total: 0 }
         // FIX produk terjual: qty_dus harus dikali pkg_qty (1 dus = pkg_qty pcs), samakan dgn pengurangan stok di CashierPage.
@@ -518,7 +551,7 @@ export default function EndOfDayPage() {
               {saving ? 'Menyimpan...' : 'Simpan Close Order'}
             </button>
           )}
-          <button onClick={syncData} disabled={syncing} className="p-2 text-gray-400">
+          <button onClick={() => syncData()} disabled={syncing} className="p-2 text-gray-400">
             <RefreshCw size={16} className={syncing ? 'animate-spin text-blue-500' : ''} />
           </button>
         </div>

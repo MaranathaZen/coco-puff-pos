@@ -9,6 +9,7 @@ import { useState, useMemo, useEffect, useContext, createContext } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now, addToSyncQueue, type WarehouseMutationItem } from '@/lib/db'
 import { shareWaMutasi } from '@/lib/shareWa'
+import { queueStockOp } from '@/lib/stockOps'
 import { supabase } from '@/lib/supabase'
 import { replacePreservingUnsynced, mergePreservingUnsynced } from '@/lib/sync'
 import { useAuthStore } from '@/store/auth'
@@ -746,84 +747,30 @@ function MutasiForm({ userId, role, storeId, onClose }: { userId: string; role: 
         await db.warehouse_mutation_items.put(mi as any)
         await addToSyncQueue('warehouse_mutation_items', mi.id, 'upsert' as any, mi, effectiveStoreId || 'gudang')
 
+        // Stok diubah SERVER lewat operasi "kurangi/tambah X" (tepat sekali), bukan menimpa angka.
+        // Dulu: sisi penerima menulis qty absolut dari salinan HP -> penjualan sejak HP
+        // terakhir sync tertimpa; sisi pengirim dilewati kalau baris tak ada di HP.
+        const qtyN = Number(item.qty)
+        const qStore = effectiveStoreId || 'gudang'
+        const base = { source: 'mutasi' as const, refId: mutId, queueStore: qStore }
+
+        // Pengirim
         if (effectiveRole === 'kasir') {
-          const ss = await db.stock.filter(s =>
-            s.store_id === effectiveStoreId && (
-              (s as any).material_id === item.material_id || s.ingredient_id === item.material_id
-            )
-          ).first()
-          if (ss) {
-            const newQty = Math.max(0, (ss.qty_on_hand || 0) - Number(item.qty))
-            await db.stock.update(ss.id, { qty_on_hand: newQty, last_updated: now() } as any)
-            await addToSyncQueue('stock', ss.id, 'rpc_delta' as any, { table: 'stock', id: ss.id, delta: -Number(item.qty) }, effectiveStoreId || 'gudang')
-          }
+          await queueStockOp({ ...base, table: 'stock', storeId: effectiveStoreId, key: item.material_id, delta: -qtyN })
         } else if (effectiveRole === 'produksi') {
           const isFg = (type === 'to_store' || type === 'to_partner') &&
             (fgStocks || []).some((f: any) => (f.product_id ?? f.id) === item.material_id)
-          if (isFg) {
-            const fg = await db.finished_goods_stock.filter((f: any) => (f.product_id ?? f.id) === item.material_id).first()
-            if (fg) {
-              const n = Math.max(0, fg.qty_on_hand - Number(item.qty))
-              await db.finished_goods_stock.update(fg.id, { qty_on_hand: n, last_updated: now() })
-              await addToSyncQueue('finished_goods_stock', fg.id, 'rpc_delta' as any, { table: 'finished_goods_stock', id: fg.id, delta: -Number(item.qty) }, effectiveStoreId || 'gudang')
-            }
-          } else {
-            const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
-            if (ps) {
-              const n = Math.max(0, ps.qty_on_hand - Number(item.qty))
-              await db.production_stock.update(ps.id, { qty_on_hand: n, last_updated: now() })
-              await addToSyncQueue('production_stock', ps.id, 'rpc_delta' as any, { table: 'production_stock', id: ps.id, delta: -Number(item.qty) }, effectiveStoreId || 'gudang')
-            }
-          }
+          await queueStockOp({ ...base, table: isFg ? 'finished_goods_stock' : 'production_stock', key: item.material_id, delta: -qtyN })
         } else {
-          const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
-          if (ws) {
-            const n = Math.max(0, ws.qty_on_hand - Number(item.qty))
-            await db.warehouse_stock.update(ws.id, { qty_on_hand: n, last_updated: now() })
-            await addToSyncQueue('warehouse_stock', ws.id, 'rpc_delta' as any, { table: 'warehouse_stock', id: ws.id, delta: -Number(item.qty) }, effectiveStoreId || 'gudang')
-          }
+          await queueStockOp({ ...base, table: 'warehouse_stock', key: item.material_id, delta: -qtyN })
         }
 
+        // Penerima (harga rata-rata tertimbang dgn harga snapshot mutasi)
         if (type === 'to_production') {
-          const ps = await db.production_stock.where('material_id').equals(item.material_id).first()
-          const prevQty  = ps?.qty_on_hand || 0
-          const prevCost = (ps as any)?.avg_cost || 0
-          const inQty    = Number(item.qty)
-          const newQty   = prevQty + inQty
-          const newAvg   = newQty > 0 ? (prevQty * prevCost + inQty * snapshotCost) / newQty : snapshotCost
-          const psd: any = { id: ps?.id || generateId(), material_id: item.material_id, qty_on_hand: newQty, avg_cost: newAvg, last_updated: now() }
-          await db.production_stock.put(psd)
-          await addToSyncQueue('production_stock', psd.id, 'upsert' as any, psd, effectiveStoreId || 'gudang')
+          await queueStockOp({ ...base, table: 'production_stock', key: item.material_id, delta: qtyN, cost: snapshotCost, costMode: 'weighted' })
         }
-
         if (type === 'to_store' && destId) {
-          let existingStock = await db.stock.filter(s =>
-            s.store_id === destId && (
-              (s as any).material_id === item.material_id || s.ingredient_id === item.material_id
-            )
-          ).first()
-          if (!existingStock) {
-            const { data: sv } = await supabase.from('stock').select('*').eq('store_id', destId).eq('material_id', item.material_id).maybeSingle()
-            if (sv) { await db.stock.put(sv); existingStock = sv }
-          }
-          const prevQty  = existingStock?.qty_on_hand || 0
-          const prevCost = (existingStock as any)?.avg_cost ?? 0
-          const inQty    = Number(item.qty)
-          const newQty   = prevQty + inQty
-          const newAvg   = newQty > 0 ? (prevQty * prevCost + inQty * snapshotCost) / newQty : snapshotCost
-          if (existingStock) {
-            await db.stock.update(existingStock.id, { qty_on_hand: newQty, avg_cost: newAvg, last_updated: now() } as any)
-            const full = await db.stock.get(existingStock.id)
-            if (full) await addToSyncQueue('stock', existingStock.id, 'upsert' as any, full, destId)
-          } else {
-            const newStock: any = {
-              id: generateId(), store_id: destId,
-              ingredient_id: item.material_id, material_id: item.material_id,
-              qty_on_hand: inQty, avg_cost: newAvg, last_updated: now(),
-            }
-            await db.stock.add(newStock)
-            await addToSyncQueue('stock', newStock.id, 'upsert' as any, newStock, destId)
-          }
+          await queueStockOp({ ...base, table: 'stock', storeId: destId, key: item.material_id, delta: qtyN, cost: snapshotCost, costMode: 'weighted' })
         }
       }
       toast.success('Mutasi berhasil dicatat')

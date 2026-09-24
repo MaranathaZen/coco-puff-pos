@@ -443,10 +443,29 @@ export async function pushToSupabase() {
       try {
         const payload = JSON.parse(item.payload)
 
+        if (item.operation === 'stock_op') {
+          // Operasi stok berbasis kunci, diterapkan server TEPAT SEKALI (op_id = id antrian)
+          const { data, error } = await supabase.rpc('apply_stock_op', {
+            p_op_id: item.id, p_table: payload.table, p_store_id: payload.store_id, p_key: payload.key,
+            p_delta: payload.delta, p_cost: payload.cost, p_cost_mode: payload.cost_mode, p_name: payload.name,
+            p_new_id: payload.local_id, p_source: payload.source, p_ref_id: payload.ref_id,
+          })
+          if (error) throw error
+          const dexieTable = (db as any)[TABLE_MAP[payload.table] || payload.table]
+          if (dexieTable && data && !(data as any).skipped) {
+            // Baris sementara di HP diganti baris resmi dari server (kalau id-nya beda)
+            if (payload.local_id && payload.local_id !== (data as any).id) await dexieTable.delete(payload.local_id).catch(() => { })
+            await dexieTable.put(data)
+          }
+          await db.sync_queue.update(item.id, { status: 'done', synced_at: now(), error_msg: undefined })
+          continue
+        }
+
         if (item.operation === 'rpc_delta') {
-          // Atomic delta di server; payload = { table, id, delta }
-          const { data, error } = await supabase.rpc('adjust_stock_generic', {
-            p_table: payload.table, p_id: payload.id, p_delta: payload.delta,
+          // Atomic delta di server, TEPAT SEKALI (op_id = id antrian): kalau respons hilang
+          // lalu antrian mengulang, server tidak menerapkan dua kali. payload = { table, id, delta }
+          const { data, error } = await supabase.rpc('adjust_stock_once', {
+            p_op_id: item.id, p_table: payload.table, p_id: payload.id, p_delta: payload.delta,
           })
           if (error) throw error
           // data null = baris belum ada di server (insert belum ter-push) → retry, JANGAN mark done

@@ -7,7 +7,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, generateId, now, addToSyncQueue } from '@/lib/db'
-import type { WarehouseStock } from '@/lib/db'
+import { queueStockOp } from '@/lib/stockOps'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
@@ -539,36 +539,14 @@ function PembelianForm({ userId, storeId, role, onClose }: { userId: string; sto
         await db.purchase_items.add(pi)
         await addToSyncQueue('purchase_items', pi.id, 'upsert' as any, pi, activeStoreId || 'gudang')
 
-        if (isInputAsGudang) {
-          const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
-          const wsd: WarehouseStock = {
-            id: ws?.id || generateId(),
-            material_id: item.material_id,
-            qty_on_hand: (ws?.qty_on_hand || 0) + Number(item.qty),
-            last_updated: now()
-          }
-          await db.warehouse_stock.put(wsd)
-          if (ws) await addToSyncQueue('warehouse_stock', wsd.id, 'rpc_delta' as any, { table: 'warehouse_stock', id: wsd.id, delta: Number(item.qty) }, activeStoreId || 'gudang')
-          else await addToSyncQueue('warehouse_stock', wsd.id, 'upsert' as any, wsd, activeStoreId || 'gudang')
-        } else {
-          const existing = await db.stock
-            .filter(s => s.store_id === activeStoreId &&
-              (s.ingredient_id === item.material_id || (s as any).material_id === item.material_id))
-            .first()
-          const newQty = (existing?.qty_on_hand || 0) + Number(item.qty)
-          if (existing) {
-            await db.stock.update(existing.id, { qty_on_hand: newQty, last_updated: now() })
-            await addToSyncQueue('stock', existing.id, 'rpc_delta' as any, { table: 'stock', id: existing.id, delta: Number(item.qty) }, activeStoreId || 'gudang')
-          } else {
-            const newStock: any = {
-              id: generateId(), store_id: activeStoreId,
-              ingredient_id: item.material_id, material_id: item.material_id,
-              qty_on_hand: newQty, avg_cost: uc, last_updated: now()
-            }
-            await db.stock.add(newStock)
-            await addToSyncQueue('stock', newStock.id, 'upsert' as any, newStock, activeStoreId || 'gudang')
-          }
-        }
+        // Stok masuk diterapkan SERVER (tepat sekali, cari barisnya sendiri) — dulu
+        // barang yang belum ada di salinan HP dibuat baris baru dgn qty absolut (bisa dobel/menimpa).
+        await queueStockOp({
+          table: isInputAsGudang ? 'warehouse_stock' : 'stock',
+          storeId: isInputAsGudang ? undefined : activeStoreId,
+          key: item.material_id, delta: Number(item.qty), cost: uc, costMode: 'none',
+          source: 'pembelian', refId: purchId, queueStore: activeStoreId || 'gudang',
+        })
 
         if (uc > 0) {
           const mat = await db.materials.get(item.material_id)

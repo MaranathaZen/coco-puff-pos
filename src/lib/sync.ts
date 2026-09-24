@@ -41,8 +41,11 @@ const TABLE_PUSH_ORDER = [
 ]
 
 // Tabel catatan (insert id unik, upsert idempoten) — aman di-push ulang kapan pun.
+// close_order_reports & cash_deposits SENGAJA tidak: app lama membuat id acak tiap klik
+// simpan, jadi antrian lama berisi puluhan salinan (Mog 28 Agu: 54 close order + 54
+// setoran pending ikut terkirim saat dihidupkan). Item baru tetap di-retry normal.
 const REVIVE_TABLES = [
-  'close_order_reports', 'cash_deposits', 'transactions', 'transaction_items',
+  'transactions', 'transaction_items',
   'warehouse_expenses', 'purchases', 'purchase_items', 'shifts',
 ]
 

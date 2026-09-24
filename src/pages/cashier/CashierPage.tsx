@@ -414,6 +414,16 @@ export default function CashierPage() {
   const canVoid = ['owner', 'manager', 'kasir'].includes(user?.role || '')
   const isOnlineOrder = orderType === 'online'
 
+  // Simpan perubahan status transaksi (void/setuju/tolak) lewat antrian sync supaya tidak
+  // hilang saat offline (dulu langsung ke supabase -> gagal diam-diam kalau sinyal putus).
+  async function saveTxStatus(tx: any) {
+    const { items: _items, ...row } = tx
+    await db.transactions.put(row)
+    await addToSyncQueue('transactions', row.id, 'upsert' as any, row, row.store_id || STORE_ID)
+    pushToSupabase().catch(() => { })
+  }
+  const isServerStock = (tx: any) => tx?.stock_mode === 'server'
+
   async function handleVoid() {
     if (!voidTx || !voidReason.trim()) return toast.error('Alasan void wajib diisi')
     setIsVoiding(true)
@@ -421,12 +431,10 @@ export default function CashierPage() {
       const isOwnerMgr = ['owner', 'manager'].includes(user?.role || '')
       const newStatus = isOwnerMgr ? 'voided' : 'void_requested'
       const updated: any = { ...voidTx, status: newStatus, void_reason: voidReason.trim(), voided_by: user!.id, voided_at: now() }
-      await db.transactions.put(updated)
-      const { items: _items, ...updatedForSupabase } = updated
-      const { error } = await supabase.from('transactions').upsert(updatedForSupabase)
-      if (error) console.error('[VOID ERROR]', error)
+      await saveTxStatus(updated)
       if (isOwnerMgr) {
-        await restoreStockFromVoid(voidTx.id, STORE_ID)
+        // Transaksi mode server: stok dikembalikan trigger server; di HP cuma tampilan
+        await restoreStockFromVoid(voidTx.id, STORE_ID, isServerStock(voidTx))
         toast.success(`Transaksi ${voidTx.receipt_no} di-void & stok dikembalikan`)
       } else {
         toast.success(`Request void ${voidTx.receipt_no} dikirim ke owner`)
@@ -461,7 +469,9 @@ export default function CashierPage() {
   }
   function hapusPaketCart(i: number) { setCartPakets(prev => prev.filter((_, idx) => idx !== i)) }
 
-  async function deductStockFromRecipes(txItems: any[], storeId: string) {
+  // serverMode=true: stok resmi dipotong TRIGGER di server (db/2026-09-24_stock_server_side.sql);
+  // di sini cuma update tampilan lokal HP, TIDAK mengirim delta (anti potong dobel).
+  async function deductStockFromRecipes(txItems: any[], storeId: string, serverMode = false) {
     try {
       const allRecipes = await db.store_recipes.where('store_id').equals(storeId).filter(r => r.is_active).toArray()
       const bomRecipes = allRecipes.filter(r =>
@@ -503,7 +513,7 @@ export default function CashierPage() {
               const newQty = Math.max(0, storeStock.qty_on_hand - qty)
               await db.stock.update(storeStock.id, { qty_on_hand: newQty, last_updated: now() })
               // DURABLE: antri rpc_delta (delta atomik + retry kalau offline/gagal) — bukan RPC fire-and-forget yg bisa hilang
-              await addToSyncQueue('stock', storeStock.id, 'rpc_delta' as any, { table: 'stock', id: storeStock.id, delta: -qty }, storeId)
+              if (!serverMode) await addToSyncQueue('stock', storeStock.id, 'rpc_delta' as any, { table: 'stock', id: storeStock.id, delta: -qty }, storeId)
             } else {
               console.warn('[BOM] Stok tidak ditemukan untuk:', matMap[ri.material_id]?.name || ri.material_id)
             }
@@ -513,7 +523,7 @@ export default function CashierPage() {
     } catch (e) { console.warn('[BOM]', e) }
   }
 
-  async function restoreStockFromVoid(txId: string, storeId: string) {
+  async function restoreStockFromVoid(txId: string, storeId: string, serverMode = false) {
     try {
       const txItems = await db.transaction_items.where('transaction_id').equals(txId).toArray()
       const allRecipes = await db.store_recipes.where('store_id').equals(storeId).filter(r => r.is_active).toArray()
@@ -552,7 +562,7 @@ export default function CashierPage() {
               const newQty = storeStock.qty_on_hand + qty
               await db.stock.update(storeStock.id, { qty_on_hand: newQty, last_updated: now() })
               // DURABLE: antri rpc_delta (restore stok saat void) — retry kalau gagal
-              await addToSyncQueue('stock', storeStock.id, 'rpc_delta' as any, { table: 'stock', id: storeStock.id, delta: qty }, storeId)
+              if (!serverMode) await addToSyncQueue('stock', storeStock.id, 'rpc_delta' as any, { table: 'stock', id: storeStock.id, delta: qty }, storeId)
             }
           }
         }
@@ -576,6 +586,7 @@ export default function CashierPage() {
         subtotal: rawSubtotal, discount: rawDiscount, ppn_amount: ppnAmount, ppn_percent: ppnPct,
         total: grandTotal, payment_method: finalPay, cash_paid: paidAmt, change_given: paidAmt - grandTotal,
         status: 'completed', order_type: orderType,
+        stock_mode: 'server',  // stok dipotong trigger server, bukan HP
         order_source: isOnlineOrder ? onlinePlatform : 'pos',
         online_order_no: isOnlineOrder ? onlineOrderNo.trim() : null,
         online_buyer: isOnlineOrder ? (onlineBuyer.trim() || null) : null,
@@ -612,7 +623,7 @@ export default function CashierPage() {
       await addToSyncQueue('transactions', txId, 'upsert' as any, tx, STORE_ID)
       for (const item of [...txItems, ...txPakets])
         await addToSyncQueue('transaction_items', item.id, 'upsert' as any, item, STORE_ID)
-      await deductStockFromRecipes([...txItems, ...txPakets], STORE_ID)
+      await deductStockFromRecipes([...txItems, ...txPakets], STORE_ID, true)
       pushToSupabase().catch(() => { })
 
       const storeRec = await db.stores.get(STORE_ID)
@@ -889,15 +900,13 @@ pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;wh
                   <div className="flex gap-1">
                     <button onClick={async e => {
                       e.stopPropagation()
-                      await restoreStockFromVoid(tx.id, (tx as any).store_id || STORE_ID)
-                      await db.transactions.put({ ...tx, status: 'voided' } as any)
-                      await supabase.from('transactions').update({ status: 'voided' }).eq('id', tx.id)
+                      await restoreStockFromVoid(tx.id, (tx as any).store_id || STORE_ID, isServerStock(tx))
+                      await saveTxStatus({ ...tx, status: 'voided' })
                       toast.success('Void disetujui')
                     }} className="text-xs text-white bg-red-500 px-2 py-1 rounded-lg">✓ Setuju</button>
                     <button onClick={async e => {
                       e.stopPropagation()
-                      await db.transactions.put({ ...tx, status: 'completed' } as any)
-                      await supabase.from('transactions').update({ status: 'completed' }).eq('id', tx.id)
+                      await saveTxStatus({ ...tx, status: 'completed' })
                       toast.success('Ditolak')
                     }} className="text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded-lg">✗ Tolak</button>
                   </div>
@@ -961,17 +970,13 @@ pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;wh
                           <div className="flex gap-1">
                             <button onClick={async e => {
                               e.stopPropagation()
-                              await restoreStockFromVoid(tx.id, (tx as any).store_id || STORE_ID)
-                              const { items: _i1, ...upd1 } = { ...tx, status: 'voided' } as any
-                              await db.transactions.put({ ...tx, status: 'voided' } as any)
-                              await supabase.from('transactions').upsert(upd1)
+                              await restoreStockFromVoid(tx.id, (tx as any).store_id || STORE_ID, isServerStock(tx))
+                              await saveTxStatus({ ...tx, status: 'voided' })
                               toast.success('Void disetujui & stok dikembalikan')
                             }} className="text-xs text-white bg-red-500 px-2 py-0.5 rounded-lg">✓</button>
                             <button onClick={async e => {
                               e.stopPropagation()
-                              const { items: _i2, ...upd2 } = { ...tx, status: 'completed' } as any
-                              await db.transactions.put({ ...tx, status: 'completed' } as any)
-                              await supabase.from('transactions').upsert(upd2)
+                              await saveTxStatus({ ...tx, status: 'completed' })
                               toast.success('Ditolak')
                             }} className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-lg">✗</button>
                           </div>

@@ -8,6 +8,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, now, addToSyncQueue } from '@/lib/db'
+import { pushToSupabase } from '@/lib/sync'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
@@ -363,7 +364,8 @@ export default function EndOfDayPage() {
       }
 
       setSavedReport(reportData); setSaved(true)
-      toast.success('Close Order disimpan!' + (totalSetorNum > 0 ? ' Setoran otomatis dibuat.' : ''))
+      toast.success('Close Order disimpan, mengirim ke server...')
+      pushToSupabase().catch(() => { })
     } catch (e) {
       console.error(e)
       toast.error('Gagal simpan. Coba lagi.')
@@ -503,6 +505,36 @@ export default function EndOfDayPage() {
     </div>
   ) : null
 
+  // Status kirim ke server. Dulu setelah simpan langsung tampil "tersimpan" hijau walau
+  // data baru ada di HP -> kasir tutup app/matikan internet -> close order & setoran tak
+  // pernah sampai (Mitra 22 & 25 Sep). Sekarang hijau hanya kalau sudah sampai server.
+  const reportId = `co-${storeId}-${today}`
+  const pendingSend = useLiveQuery(async () => {
+    const rows = await db.sync_queue.where('table_name').anyOf(['close_order_reports', 'cash_deposits'])
+      .filter(q => q.status !== 'done' && (q.record_id === reportId || q.record_id === `dep-${reportId}`))
+      .toArray()
+    return rows.length
+  }, [reportId]) ?? 0
+  const notSent = saved && pendingSend > 0
+
+  useEffect(() => {
+    if (!notSent) return
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [notSent])
+
+  async function sendNow() {
+    const items = await db.sync_queue.where('table_name').anyOf(['close_order_reports', 'cash_deposits'])
+      .filter(q => q.status !== 'done').toArray()
+    for (const it of items) await db.sync_queue.update(it.id, { status: 'pending', retry_count: 0 })
+    if (!navigator.onLine) return toast.error('HP sedang offline. Nyalakan internet dulu.')
+    await pushToSupabase()
+    const left = await db.sync_queue.where('table_name').anyOf(['close_order_reports', 'cash_deposits'])
+      .filter(q => q.status !== 'done' && (q.record_id === reportId || q.record_id === `dep-${reportId}`)).count()
+    left ? toast.error('Belum berhasil terkirim. Cek internet lalu coba lagi.') : toast.success('Close order terkirim ke server')
+  }
+
   const sectionActions = !saved ? (
     <button onClick={handleSave} disabled={saving}
       className="w-full py-3.5 rounded-xl bg-gray-900 text-white text-sm font-semibold disabled:opacity-50">
@@ -510,10 +542,24 @@ export default function EndOfDayPage() {
     </button>
   ) : (
     <div className="space-y-3">
+      {notSent ? (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 space-y-2">
+          <div className="flex items-start gap-2">
+            <AlertCircle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm text-amber-800 font-semibold">Close Order BELUM terkirim ke server</p>
+              <p className="text-xs text-amber-700">Baru tersimpan di HP ini. Pastikan internet menyala dan JANGAN tutup aplikasi sampai tulisan ini berubah hijau.</p>
+            </div>
+          </div>
+          <button onClick={sendNow} className="w-full py-2 rounded-lg bg-amber-600 text-white text-sm font-medium">
+            Kirim sekarang
+          </button>
+        </div>
+      ) : (
       <div className="bg-green-50 border border-green-100 rounded-xl px-4 py-3 flex items-center gap-2">
         <CheckCircle size={16} className="text-green-500 flex-shrink-0" />
         <div>
-          <p className="text-sm text-green-700 font-medium">Close Order sudah tersimpan</p>
+          <p className="text-sm text-green-700 font-medium">Close Order tersimpan & terkirim ke server</p>
           {existingReport?.submitted_at && (
             <p className="text-xs text-green-600">
               {new Date(existingReport.submitted_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })}
@@ -521,6 +567,7 @@ export default function EndOfDayPage() {
           )}
         </div>
       </div>
+      )}
       <button onClick={() => shareWhatsApp(savedReport || existingReport)}
         className="w-full py-3.5 rounded-xl bg-green-600 text-white text-sm font-semibold flex items-center justify-center gap-2">
         <Share2 size={16} />Share ke WhatsApp

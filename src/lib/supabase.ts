@@ -8,8 +8,23 @@ if (!supabaseUrl || !supabaseKey) {
   throw new Error('VITE_SUPABASE_URL dan VITE_SUPABASE_ANON_KEY wajib diisi di .env')
 }
 
+// Batas waktu tiap permintaan: di sinyal jelek fetch bisa "menggantung" lama dan menahan
+// seluruh antrian sync (push berikutnya dilewati selama push sebelumnya belum selesai).
+const REQUEST_TIMEOUT_MS = 30_000
+function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(new DOMException('Timeout permintaan ke server', 'TimeoutError')), REQUEST_TIMEOUT_MS)
+  const outer = init?.signal
+  if (outer) {
+    if (outer.aborted) ctrl.abort(outer.reason)
+    else outer.addEventListener('abort', () => ctrl.abort(outer.reason), { once: true })
+  }
+  return fetch(input, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(timer))
+}
+
 export const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: true, autoRefreshToken: true }
+  auth: { persistSession: true, autoRefreshToken: true },
+  global: { fetch: fetchWithTimeout },
 })
 
 // ── Multi-region: filter otomatis .in('region', ...) pada SETIAP .select() tabel ber-region ──

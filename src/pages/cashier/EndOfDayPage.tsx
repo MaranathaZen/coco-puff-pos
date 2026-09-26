@@ -374,6 +374,37 @@ export default function EndOfDayPage() {
     }
   }
 
+  // (Hook WAJIB di atas return awal di bawah — dulu ditaruh setelahnya -> halaman blank)
+  // Status kirim ke server. Dulu setelah simpan langsung tampil "tersimpan" hijau walau
+  // data baru ada di HP -> kasir tutup app/matikan internet -> close order & setoran tak
+  // pernah sampai (Mitra 22 & 25 Sep). Sekarang hijau hanya kalau sudah sampai server.
+  const reportId = `co-${storeId}-${today}`
+  const pendingSend = useLiveQuery(async () => {
+    const rows = await db.sync_queue.where('table_name').anyOf(['close_order_reports', 'cash_deposits'])
+      .filter(q => q.status !== 'done' && (q.record_id === reportId || q.record_id === `dep-${reportId}`))
+      .toArray()
+    return rows.length
+  }, [reportId]) ?? 0
+  const notSent = saved && pendingSend > 0
+
+  useEffect(() => {
+    if (!notSent) return
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [notSent])
+
+  async function sendNow() {
+    const items = await db.sync_queue.where('table_name').anyOf(['close_order_reports', 'cash_deposits'])
+      .filter(q => q.status !== 'done').toArray()
+    for (const it of items) await db.sync_queue.update(it.id, { status: 'pending', retry_count: 0 })
+    if (!navigator.onLine) return toast.error('HP sedang offline. Nyalakan internet dulu.')
+    await pushToSupabase()
+    const left = await db.sync_queue.where('table_name').anyOf(['close_order_reports', 'cash_deposits'])
+      .filter(q => q.status !== 'done' && (q.record_id === reportId || q.record_id === `dep-${reportId}`)).count()
+    left ? toast.error('Belum berhasil terkirim. Cek internet lalu coba lagi.') : toast.success('Close order terkirim ke server')
+  }
+
   if (checkingExisting) {
     return (
       <div className="flex flex-col h-full bg-gray-50 items-center justify-center">
@@ -504,36 +535,6 @@ export default function EndOfDayPage() {
       )}
     </div>
   ) : null
-
-  // Status kirim ke server. Dulu setelah simpan langsung tampil "tersimpan" hijau walau
-  // data baru ada di HP -> kasir tutup app/matikan internet -> close order & setoran tak
-  // pernah sampai (Mitra 22 & 25 Sep). Sekarang hijau hanya kalau sudah sampai server.
-  const reportId = `co-${storeId}-${today}`
-  const pendingSend = useLiveQuery(async () => {
-    const rows = await db.sync_queue.where('table_name').anyOf(['close_order_reports', 'cash_deposits'])
-      .filter(q => q.status !== 'done' && (q.record_id === reportId || q.record_id === `dep-${reportId}`))
-      .toArray()
-    return rows.length
-  }, [reportId]) ?? 0
-  const notSent = saved && pendingSend > 0
-
-  useEffect(() => {
-    if (!notSent) return
-    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
-    window.addEventListener('beforeunload', warn)
-    return () => window.removeEventListener('beforeunload', warn)
-  }, [notSent])
-
-  async function sendNow() {
-    const items = await db.sync_queue.where('table_name').anyOf(['close_order_reports', 'cash_deposits'])
-      .filter(q => q.status !== 'done').toArray()
-    for (const it of items) await db.sync_queue.update(it.id, { status: 'pending', retry_count: 0 })
-    if (!navigator.onLine) return toast.error('HP sedang offline. Nyalakan internet dulu.')
-    await pushToSupabase()
-    const left = await db.sync_queue.where('table_name').anyOf(['close_order_reports', 'cash_deposits'])
-      .filter(q => q.status !== 'done' && (q.record_id === reportId || q.record_id === `dep-${reportId}`)).count()
-    left ? toast.error('Belum berhasil terkirim. Cek internet lalu coba lagi.') : toast.success('Close order terkirim ke server')
-  }
 
   const sectionActions = !saved ? (
     <button onClick={handleSave} disabled={saving}

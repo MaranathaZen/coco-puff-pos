@@ -25,7 +25,7 @@ export function formatDateOnly(dateStr: string): string {
 
 // Tag device stabil (acak 3 char, disimpan sekali) — cegah bentrok receipt_no
 // antar-device di toko sama (counter per-device di localStorage).
-function getDeviceTag(): string {
+export function getDeviceTag(): string {
   let t = localStorage.getItem('cocopuff_device_tag')
   if (!t) {
     t = Math.random().toString(36).slice(2, 5).toUpperCase()

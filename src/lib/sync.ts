@@ -13,6 +13,7 @@ import { logger } from '@/lib/logger'
 import { db, now } from '@/lib/db'
 import { useAuthStore } from '@/store/auth'
 import { getVisibleRegions } from '@/lib/regions'
+import { getDeviceTag } from '@/lib/utils'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 // Region yang boleh dilihat user aktif — untuk filter pull katalog & stok global.
@@ -403,9 +404,12 @@ export async function replacePreservingUnsynced(
   }
 }
 
+let syncStartedAt = 0
 export async function pushToSupabase() {
-  if (isSyncing) return
+  // Pengaman: kalau push sebelumnya macet (> 2 mnt), jangan tahan antrian selamanya
+  if (isSyncing && Date.now() - syncStartedAt < 120_000) return
   isSyncing = true
+  syncStartedAt = Date.now()
   try {
     // Offline: jangan coba push — dulu tiap 5 dtk gagal & retry_count habis dalam ~25 dtk
     // lalu item di-abandon (close order Mitra 22 Sep hilang karena ini).
@@ -533,7 +537,44 @@ export async function pushToSupabase() {
     }
   } finally {
     isSyncing = false
+    reportSyncStatus().catch(() => { })
   }
+}
+
+// ── Status sync perangkat -> server (tabel device_sync_status) ────────────
+// Supaya dari server kelihatan perangkat mana yang masih menahan data, sejak kapan,
+// dan error apa (dulu close order Mitra tertahan di PC tanpa ada yang tahu).
+let lastStatusSent = 0
+let lastStatusSig = ''
+export async function reportSyncStatus(force = false) {
+  try {
+    if (!navigator.onLine) return
+    const user = useAuthStore.getState().user as any
+    const storeId = currentStoreId || user?.store_id
+    if (!storeId) return
+    const items = await db.sync_queue.where('status').anyOf(['pending', 'failed', 'abandoned']).toArray()
+    const pending = items.length
+    const byTable: Record<string, number> = {}
+    let oldest: string | null = null
+    for (const it of items) {
+      byTable[it.table_name] = (byTable[it.table_name] || 0) + 1
+      if (!oldest || it.created_at < oldest) oldest = it.created_at
+    }
+    const errors = items.filter(i => i.error_msg)
+      .sort((a, b) => (b.last_attempt_at || '').localeCompare(a.last_attempt_at || ''))
+      .slice(0, 5)
+      .map(i => ({ table: i.table_name, record_id: i.record_id, op: i.operation, status: i.status, retry: i.retry_count, msg: i.error_msg, at: i.last_attempt_at }))
+    const sig = JSON.stringify([pending, byTable, errors.map(e => e.msg)])
+    const since = Date.now() - lastStatusSent
+    // Hemat kuota: kirim kalau berubah (maks tiap 15 dtk), atau tiap 1 mnt (ada antrian) / 10 mnt (kosong)
+    if (!force && (since < 15_000 || (sig === lastStatusSig && since < (pending ? 60_000 : 600_000)))) return
+    lastStatusSent = Date.now(); lastStatusSig = sig
+    await supabase.from('device_sync_status').upsert({
+      device_tag: getDeviceTag(), store_id: storeId, user_id: user?.id ?? null, username: user?.username ?? null,
+      pending, oldest_pending: oldest, by_table: byTable, errors, online: navigator.onLine,
+      user_agent: navigator.userAgent.slice(0, 200), last_seen: new Date().toISOString(),
+    }, { onConflict: 'device_tag,store_id' })
+  } catch { /* status hanya informasi, jangan ganggu sync */ }
 }
 
 export function startSyncWorker(storeId: string) {
@@ -552,6 +593,7 @@ export function startSyncWorker(storeId: string) {
   startRealtime(storeId)
 
   pushInterval = setInterval(() => { pushToSupabase() }, 5_000)
+  setTimeout(() => { reportSyncStatus(true) }, 3_000)
   pullInterval = setInterval(() => { pullFromSupabase(storeId) }, 30_000)
   masterInterval = setInterval(() => { pullMasterData() }, 600_000) // 10 menit
 

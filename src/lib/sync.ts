@@ -488,6 +488,18 @@ export async function pushToSupabase() {
         if (item.operation === 'delete') {
           const { error } = await supabase.from(item.table_name).delete().eq('id', item.record_id)
           if (error) throw error
+        } else if (item.operation === 'update' && item.table_name === 'users'
+          && Date.now() - new Date(item.created_at).getTime() > 24 * 3600_000) {
+          // Update user (password) yang tertahan > 24 jam: JANGAN diterapkan — bisa mengembalikan
+          // password lama/salah (antrian macet sejak Juli di beberapa perangkat).
+          await db.sync_queue.update(item.id, { status: 'abandoned', error_msg: 'Kedaluwarsa: update user lama tidak diterapkan' })
+          continue
+        } else if (item.operation === 'update') {
+          // Update sebagian kolom (mis. {id, password_hash}). Dulu dikirim sebagai upsert ->
+          // INSERT gagal NOT NULL (store_id) -> antrian macet di tiap HP & reset password tak sampai.
+          const { id: _id, ...fields } = payload
+          const { error } = await supabase.from(item.table_name).update(fields).eq('id', item.record_id)
+          if (error) throw error
         } else {
           const { error } = await supabase
             .from(item.table_name)
@@ -552,9 +564,13 @@ export async function reportSyncStatus(force = false) {
     const user = useAuthStore.getState().user as any
     const storeId = currentStoreId || user?.store_id
     if (!storeId) return
-    const items = await db.sync_queue.where('status').anyOf(['pending', 'failed', 'abandoned']).toArray()
+    const all = await db.sync_queue.where('status').anyOf(['pending', 'failed', 'abandoned']).toArray()
+    // 'abandoned' = antrian lama yang sudah ditinggalkan (tak dikirim lagi) -> dihitung terpisah
+    const items = all.filter(i => i.status !== 'abandoned')
     const pending = items.length
     const byTable: Record<string, number> = {}
+    const abandoned = all.length - items.length
+    if (abandoned) byTable._ditinggalkan = abandoned
     let oldest: string | null = null
     for (const it of items) {
       byTable[it.table_name] = (byTable[it.table_name] || 0) + 1

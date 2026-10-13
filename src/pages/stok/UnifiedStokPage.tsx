@@ -10,6 +10,8 @@ import { useAuthStore } from '@/store/auth'
 import { formatRupiah } from '@/lib/utils'
 import { Warehouse, FlaskConical, Store, RefreshCw, AlertCircle, Plus, Package, X, Trash2, Edit } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { fetchServerQty, queueStockAdjust } from '@/lib/stockOps'
+import { useServerBaseline, BaselineInfo, KartuStok } from './stockAdjust'
 import toast from 'react-hot-toast'
 
 type StokTab = 'gudang' | 'produksi' | 'toko'
@@ -402,22 +404,29 @@ function FgsEditForm({ fgs, onClose }: { fgs: any; onClose: () => void }) {
   const [qty, setQty] = useState(String(fgs?.qty_on_hand || ''))
   const [hpp, setHpp] = useState(String(fgs?.hpp_per_unit || ''))
   const [saving, setSaving] = useState(false)
+  const [productId] = useState<string>(fgs?.product_id || `fgs-${generateId().slice(0, 8)}`)
+  // Opname berbasis selisih: angka stok terbaru dari server saat form dibuka
+  const b = useServerBaseline('finished_goods_stock', fgs ? productId : undefined, undefined, Number(fgs?.qty_on_hand) || 0, fgs?.product_name)
+  const [qtyTouched, setQtyTouched] = useState(false)
+  useEffect(() => { if (fgs && !b.loading && !qtyTouched) setQty(String(b.baseline)) }, [b.loading])
 
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama produk wajib diisi')
     if (Number(qty) < 0) return toast.error('Qty tidak boleh negatif')
+    if (b.loading) return toast.error('Tunggu, stok terbaru masih dimuat')
     setSaving(true)
     try {
-      const data: any = {
-        id: fgs?.id || generateId(),
-        product_id: fgs?.product_id || `fgs-${generateId().slice(0, 8)}`,
-        product_name: name.trim(),
-        qty_on_hand: Number(qty),
-        hpp_per_unit: Number(hpp) || 0,
-        last_updated: now(),
+      // Ganti nama: update kolom nama saja (tidak menyentuh qty)
+      if (fgs && name.trim() !== fgs.product_name) {
+        await db.finished_goods_stock.update(fgs.id, { product_name: name.trim() } as any)
+        await addToSyncQueue('finished_goods_stock', fgs.id, 'update', { id: fgs.id, product_name: name.trim() }, 'gudang')
       }
-      await db.finished_goods_stock.put(data)
-      await addToSyncQueue('finished_goods_stock', data.id, 'upsert' as any, data, 'gudang')
+      // Qty: kirim SELISIH terhadap angka server saat form dibuka (bukan menimpa)
+      await queueStockAdjust({
+        table: 'finished_goods_stock', key: productId, name: name.trim(), target: Number(qty), baseline: fgs ? b.baseline : 0,
+        cost: Number(hpp) || 0, costChanged: !!fgs && b.rowExists && Number(hpp) !== Number(fgs?.hpp_per_unit || 0),
+        rowExists: !!fgs && b.rowExists, source: fgs ? 'opname' : 'stok_awal', queueStore: 'gudang',
+      })
       toast.success(fgs ? 'Stok produk jadi diupdate' : 'Produk jadi ditambahkan')
       onClose()
     } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }
@@ -428,9 +437,11 @@ function FgsEditForm({ fgs, onClose }: { fgs: any; onClose: () => void }) {
     <Modal title={fgs ? 'Edit Produk Jadi' : 'Tambah Produk Jadi'} onClose={onClose}>
       <div><Label required>Nama Produk</Label><input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus /></div>
       <div className="grid grid-cols-2 gap-3">
-        <div><Label required>Qty (pcs)</Label><input className="input" type="number" value={qty} onChange={e => setQty(e.target.value)} /></div>
+        <div><Label required>{fgs ? 'Qty fisik (pcs)' : 'Qty (pcs)'}</Label><input className="input" type="number" value={qty} onChange={e => { setQty(e.target.value); setQtyTouched(true) }} /></div>
         <div><Label>HPP/pcs (Rp)</Label><input className="input" type="number" value={hpp} onChange={e => setHpp(e.target.value)} /></div>
       </div>
+      {fgs && <BaselineInfo b={b} unit="pcs" />}
+      {fgs && <KartuStok table="finished_goods_stock" rowId={fgs.id} unit="pcs" />}
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700">Batal</button>
         <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium disabled:opacity-50">{saving ? 'Menyimpan...' : 'Simpan'}</button>
@@ -457,6 +468,10 @@ function PsEditForm({ ps, isOwner, onClose }: { ps: any; isOwner?: boolean; onCl
   const [avg, setAvg] = useState(String((ps as any)?.avg_cost || ''))
   const [isActive, setIsActive] = useState(true)
   const [saving, setSaving] = useState(false)
+  // Opname berbasis selisih: angka stok terbaru dari server saat form dibuka / bahan dipilih
+  const b = useServerBaseline('production_stock', matId || undefined, undefined, Number(ps?.qty_on_hand) || 0)
+  const [qtyTouched, setQtyTouched] = useState(false)
+  useEffect(() => { if (!b.loading && !qtyTouched) setQty(String(b.baseline)) }, [b.loading, matId])
 
   // Load material data when mat changes
   useEffect(() => {
@@ -490,6 +505,7 @@ function PsEditForm({ ps, isOwner, onClose }: { ps: any; isOwner?: boolean; onCl
     if (!name.trim()) return toast.error('Nama wajib diisi')
     if (!unit) return toast.error('Satuan wajib diisi')
     if (Number(qty) < 0) return toast.error('Qty tidak boleh negatif')
+    if (b.loading) return toast.error('Tunggu, stok terbaru masih dimuat')
     setSaving(true)
     try {
       // Update material data
@@ -504,17 +520,12 @@ function PsEditForm({ ps, isOwner, onClose }: { ps: any; isOwner?: boolean; onCl
       const matFull = await db.materials.get(matId)
       if (matFull) await addToSyncQueue('materials', matId, 'upsert' as any, matFull, 'gudang')
 
-      // Update production stock
-      const existing = ps || await db.production_stock.where('material_id').equals(matId).first()
-      const data: any = {
-        id: existing?.id || generateId(),
-        material_id: matId,
-        qty_on_hand: Number(qty),
-        avg_cost: Number(avg) || Number(unitCost) || 0,
-        last_updated: now(),
-      }
-      await db.production_stock.put(data)
-      await addToSyncQueue('production_stock', data.id, 'upsert' as any, data, 'gudang')
+      // Stok produksi: kirim SELISIH terhadap angka server saat form dibuka (bukan menimpa)
+      await queueStockAdjust({
+        table: 'production_stock', key: matId, target: Number(qty), baseline: b.baseline,
+        cost: Number(avg) || Number(unitCost) || 0, costChanged: b.rowExists && Number(avg) !== Number((ps as any)?.avg_cost || 0),
+        rowExists: b.rowExists, source: 'opname', queueStore: 'gudang',
+      })
       toast.success('Stok bahan produksi diupdate')
       onClose()
     } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }
@@ -556,9 +567,11 @@ function PsEditForm({ ps, isOwner, onClose }: { ps: any; isOwner?: boolean; onCl
         {customUnit && <input className="input" value={unit} onChange={e => setUnit(e.target.value)} placeholder="Ketik satuan..." />}
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <div><Label required>Qty Stok</Label><input className="input" type="number" value={qty} onChange={e => setQty(e.target.value)} /></div>
+        <div><Label required>Qty fisik</Label><input className="input" type="number" value={qty} onChange={e => { setQty(e.target.value); setQtyTouched(true) }} /></div>
         <div><Label>Avg Cost (Rp)</Label><input className="input" type="number" value={avg} onChange={e => setAvg(e.target.value)} /></div>
       </div>
+      {matId && <BaselineInfo b={b} unit={unit} />}
+      <KartuStok table="production_stock" rowId={ps?.id} unit={unit} />
       <div className="grid grid-cols-2 gap-3">
         <div><Label>Harga Default/Satuan (Rp)</Label><input className="input" type="number" value={unitCost} onChange={e => setUnitCost(e.target.value)} /></div>
         <div><Label>Min. Stok (alert)</Label><input className="input" type="number" value={minStock} onChange={e => setMinStock(e.target.value)} /></div>
@@ -758,7 +771,7 @@ function StokTokoContent({ storeId, isOwnerManager, isOwner, setHeaderActions }:
         )}
       </div>
       {showStokAwal && isOwnerManager && <StokAwalTokoForm storeId={storeId} onClose={() => setShowStokAwal(false)} />}
-      {editStock && isOwnerManager && <EditStokTokoForm stock={editStock} isOwner={isOwner} onClose={() => setEditStock(null)} />}
+      {editStock && isOwnerManager && <EditStokTokoForm stock={editStock} storeId={storeId} isOwner={isOwner} onClose={() => setEditStock(null)} />}
     </div>
   )
 }
@@ -775,23 +788,16 @@ function StokAwalTokoForm({ storeId, onClose }: { storeId: string; onClose: () =
     setSaving(true)
     try {
       for (const item of valid) {
-        const existing = await db.stock.filter(s =>
-          s.store_id === storeId && (
-            (s as any).material_id === item.material_id ||
-            s.ingredient_id === item.material_id
-          )
-        ).first()
-        const data: any = {
-          id: existing?.id || generateId(),
-          store_id: storeId,
-          ingredient_id: item.material_id,
-          material_id: item.material_id,
-          qty_on_hand: Number(item.qty),
-          avg_cost: Number(item.avg_cost) || 0,
-          last_updated: now(),
-        }
-        await db.stock.put(data)
-        await addToSyncQueue('stock', data.id, 'upsert' as any, data, storeId)
+        // Set ke qty ini = kirim SELISIH terhadap angka server sekarang (bukan menimpa)
+        const local = await db.stock.filter(s => s.store_id === storeId &&
+          ((s as any).material_id === item.material_id || s.ingredient_id === item.material_id)).first()
+        const sv = await fetchServerQty('stock', item.material_id, storeId)
+        const cost = Number(item.avg_cost) || 0
+        await queueStockAdjust({
+          table: 'stock', storeId, key: item.material_id, target: Number(item.qty),
+          baseline: sv ? sv.qty : (Number(local?.qty_on_hand) || 0), rowExists: sv ? !!sv.rowId : !!local,
+          cost, costChanged: cost > 0, source: 'stok_awal', queueStore: storeId,
+        })
       }
       toast.success(`${valid.length} item stok toko disimpan`)
       onClose()
@@ -841,7 +847,7 @@ function StokAwalTokoForm({ storeId, onClose }: { storeId: string; onClose: () =
 // ── FORM: Edit Stok Toko ──────────────────────────────────────
 // ── FORM: Edit Stok Toko (FULL - sama dengan gudang) ──────────────────────────────────
 // ── FORM: Edit Stok Toko (FULL - sama dengan gudang) ──────────────────────────────────
-function EditStokTokoForm({ stock, isOwner, onClose }: { stock: any; isOwner?: boolean; onClose: () => void }) {
+function EditStokTokoForm({ stock, storeId, isOwner, onClose }: { stock: any; storeId: string; isOwner?: boolean; onClose: () => void }) {
   const materials = useLiveQuery(() => db.materials.filter(m => m.is_active).toArray(), [])
   const mat = materials?.find(m => m.id === stock.ingredient_id)
 
@@ -855,6 +861,10 @@ function EditStokTokoForm({ stock, isOwner, onClose }: { stock: any; isOwner?: b
   const [avg, setAvg] = useState(String(stock.avg_cost || 0))
   const [isActive, setIsActive] = useState(true)
   const [saving, setSaving] = useState(false)
+  // Opname berbasis selisih: angka stok terbaru dari server saat form dibuka
+  const b = useServerBaseline('stock', stock.ingredient_id, storeId, Number(stock.qty_on_hand) || 0)
+  const [qtyTouched, setQtyTouched] = useState(false)
+  useEffect(() => { if (!b.loading && !qtyTouched) setQty(String(b.baseline)) }, [b.loading])
 
   useEffect(() => {
     if (!mat) return
@@ -885,6 +895,8 @@ function EditStokTokoForm({ stock, isOwner, onClose }: { stock: any; isOwner?: b
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama wajib diisi')
     if (!unit) return toast.error('Satuan wajib diisi')
+    if (Number(qty) < 0) return toast.error('Qty tidak boleh negatif')
+    if (b.loading) return toast.error('Tunggu, stok terbaru masih dimuat')
     setSaving(true)
     try {
       // Update material data kalau ada
@@ -895,10 +907,14 @@ function EditStokTokoForm({ stock, isOwner, onClose }: { stock: any; isOwner?: b
         const matFull = await db.materials.get(mat.id)
         if (matFull) await addToSyncQueue('materials', mat.id, 'upsert' as any, matFull, 'gudang')
       }
-      // Update stock toko
-      await db.stock.update(stock.stockId, { qty_on_hand: Number(qty), avg_cost: Number(avg), last_updated: now() } as any)
-      const stFull = await db.stock.get(stock.stockId)
-      if (stFull) await addToSyncQueue('stock', stock.stockId, 'upsert' as any, stFull, (stFull as any).store_id || 'gudang')
+      // Stok toko: kirim SELISIH terhadap angka server saat form dibuka (dulu menimpa qty
+      // dgn angka dari perangkat -> penjualan sejak perangkat terakhir sync tertimpa).
+      // Ubah nama/harga saja -> qty tidak disentuh.
+      await queueStockAdjust({
+        table: 'stock', storeId, key: stock.ingredient_id, target: Number(qty), baseline: b.baseline,
+        cost: Number(avg), costChanged: Number(avg) !== Number(stock.avg_cost || 0), rowExists: b.rowExists,
+        source: 'opname', queueStore: storeId,
+      })
       toast.success('Stok diupdate')
       onClose()
     } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }
@@ -948,9 +964,11 @@ function EditStokTokoForm({ stock, isOwner, onClose }: { stock: any; isOwner?: b
         </>
       )}
       <div className="grid grid-cols-2 gap-3">
-        <div><Label required>Qty ({unit || stock.displayUnit})</Label><input className="input" type="number" value={qty} onChange={e => setQty(e.target.value)} autoFocus={stock.isProduk} /></div>
+        <div><Label required>Qty fisik ({unit || stock.displayUnit})</Label><input className="input" type="number" value={qty} onChange={e => { setQty(e.target.value); setQtyTouched(true) }} autoFocus={stock.isProduk} /></div>
         <div><Label>Avg Cost (Rp)</Label><input className="input" type="number" value={avg} onChange={e => setAvg(e.target.value)} /></div>
       </div>
+      <BaselineInfo b={b} unit={unit || stock.displayUnit} />
+      <KartuStok table="stock" rowId={stock.stockId} unit={unit || stock.displayUnit} />
       <div className="flex gap-3">
         {isOwner && !stock.isProduk && mat && (
           <button onClick={handleDelete} disabled={saving} className="px-4 py-3 rounded-xl border border-red-200 text-red-500 text-sm font-medium flex items-center gap-1"><Trash2 size={14}/>Hapus</button>
@@ -1093,10 +1111,14 @@ function OpeningStockForm({ onClose }: { onClose: () => void }) {
       for (const item of valid) {
         const qty = Number(item.qty)
         const cost = Number(item.unit_cost) || 0
+        // Set ke qty ini = kirim SELISIH terhadap angka server sekarang (bukan menimpa)
         const ws = await db.warehouse_stock.where('material_id').equals(item.material_id).first()
-        const wsd: WarehouseStock = { id: ws?.id || generateId(), material_id: item.material_id, qty_on_hand: qty, last_updated: now() }
-        await db.warehouse_stock.put(wsd)
-        await addToSyncQueue('warehouse_stock', wsd.id, 'upsert' as any, wsd, 'gudang')
+        const sv = await fetchServerQty('warehouse_stock', item.material_id)
+        await queueStockAdjust({
+          table: 'warehouse_stock', key: item.material_id, target: qty,
+          baseline: sv ? sv.qty : (Number(ws?.qty_on_hand) || 0), rowExists: sv ? !!sv.rowId : !!ws,
+          cost, costChanged: false, source: 'stok_awal', queueStore: 'gudang',
+        })
         if (cost > 0) {
           await db.materials.update(item.material_id, { unit_cost: cost, avg_cost: cost, updated_at: now() })
           const matFull = await db.materials.get(item.material_id)
@@ -1173,19 +1195,28 @@ function EditStokGudangForm({ item, onClose }: { item: any; onClose: () => void 
   const [qty, setQty] = useState(String(item.qty || 0))
   const [avg, setAvg] = useState(String(item.avg_cost || 0))
   const [saving, setSaving] = useState(false)
+  // Opname berbasis selisih: angka stok terbaru dari server saat form dibuka
+  const b = useServerBaseline('warehouse_stock', item.id, undefined, Number(item.qty) || 0)
+  const [qtyTouched, setQtyTouched] = useState(false)
+  useEffect(() => { if (!b.loading && !qtyTouched) setQty(String(b.baseline)) }, [b.loading])
+  const [wsRowId, setWsRowId] = useState<string | null>(null)
+  useEffect(() => { db.warehouse_stock.where('material_id').equals(item.id).first().then(w => setWsRowId(w?.id ?? null)) }, [item.id])
   async function handleSave() {
     if (!name.trim()) return toast.error('Nama wajib diisi')
     if (!unit) return toast.error('Satuan wajib diisi')
     if (Number(qty) < 0) return toast.error('Qty tidak boleh negatif')
+    if (b.loading) return toast.error('Tunggu, stok terbaru masih dimuat')
     setSaving(true)
     try {
       await db.materials.update(item.id, { name: name.trim(), category, unit, unit_cost: Number(unitCost), min_stock: Number(minStock), updated_at: now() })
       const matFull = await db.materials.get(item.id)
       if (matFull) await addToSyncQueue('materials', item.id, 'upsert' as any, matFull, 'gudang')
-      const ws = await db.warehouse_stock.where('material_id').equals(item.id).first()
-      const wsd: any = { id: ws?.id || generateId(), material_id: item.id, qty_on_hand: Number(qty), avg_cost: Number(avg) || Number(unitCost) || 0, last_updated: now() }
-      await db.warehouse_stock.put(wsd)
-      await addToSyncQueue('warehouse_stock', wsd.id, 'upsert' as any, wsd, 'gudang')
+      // Stok gudang: kirim SELISIH terhadap angka server saat form dibuka (bukan menimpa)
+      await queueStockAdjust({
+        table: 'warehouse_stock', key: item.id, target: Number(qty), baseline: b.baseline,
+        cost: Number(avg) || Number(unitCost) || 0, costChanged: b.rowExists && Number(avg) !== Number(item.avg_cost || 0),
+        rowExists: b.rowExists, source: 'opname', queueStore: 'gudang',
+      })
       toast.success('Stok gudang diperbarui')
       onClose()
     } catch (e) { toast.error('Gagal: ' + String((e as any)?.message || e)) }
@@ -1222,11 +1253,13 @@ function EditStokGudangForm({ item, onClose }: { item: any; onClose: () => void 
         {customUnit && <input className="input" placeholder="Satuan custom" value={unit} onChange={e => setUnit(e.target.value)} />}
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <div><Label required>QTY Stok</Label><input className="input" type="number" value={qty} onChange={e => setQty(e.target.value)} /></div>
+        <div><Label required>QTY fisik</Label><input className="input" type="number" value={qty} onChange={e => { setQty(e.target.value); setQtyTouched(true) }} /></div>
         <div><Label>Avg Cost (Rp)</Label><input className="input" type="number" value={avg} onChange={e => setAvg(e.target.value)} /></div>
         <div><Label>Harga Default (Rp)</Label><input className="input" type="number" value={unitCost} onChange={e => setUnitCost(e.target.value)} /></div>
         <div><Label>Min. Stok</Label><input className="input" type="number" value={minStock} onChange={e => setMinStock(e.target.value)} /></div>
       </div>
+      <BaselineInfo b={b} unit={unit} />
+      <KartuStok table="warehouse_stock" rowId={wsRowId} unit={unit} />
       <div className="flex items-center justify-between py-2">
         <div><p className="text-sm font-medium text-gray-700">Aktif</p><p className="text-xs text-gray-400">Nonaktif tidak muncul di stok</p></div>
         <button onClick={() => setIsActive(!isActive)} className={`w-12 h-6 rounded-full transition-colors ${isActive?'bg-gray-900':'bg-gray-200'}`}>

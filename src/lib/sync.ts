@@ -142,9 +142,20 @@ function startRealtime(storeId: string) {
     })
 }
 
+// Penjualan di perangkat ini yang belum terkirim ke server. Selama ada, angka stok
+// server BELUM termasuk potongannya -> jangan timpa stok lokal (dulu tampilan stok di
+// kasir "naik lagi" seolah penjualan tak memotong, lalu turun setelah terkirim).
+async function hasPendingSales(): Promise<boolean> {
+  try {
+    return (await db.sync_queue.where('table_name').anyOf(['transactions', 'transaction_items'])
+      .filter(q => q.status === 'pending' || q.status === 'failed').count()) > 0
+  } catch { return false }
+}
+
 async function handleRealtimeChange(tableName: string, payload: any) {
   const dexieTableName = TABLE_MAP[tableName]
   if (!dexieTableName) return
+  if (tableName === 'stock' && await hasPendingSales()) return
   const table = (db as any)[dexieTableName]
   if (!table) return
   try {
@@ -238,7 +249,7 @@ export async function pullFromSupabase(storeId?: string) {
     // stock, prices, promotions: bulkPut saja (pull per store_id, orphan cleanup tidak relevan)
     if (prices.data?.length) await db.store_product_prices.bulkPut(prices.data)
     if (promos.data?.length) await db.promotions.bulkPut(promos.data)
-    if (stock.data) {
+    if (stock.data && !(await hasPendingSales())) {
       // Anti-clobber: hapus stok toko yang tak ada di server KECUALI yang belum ter-push
       const unsyncedStock = await getUnsyncedIds('stock')
       const serverStockIds = new Set(stock.data.map((r: any) => r.id).filter(Boolean))

@@ -16,4 +16,4 @@ patch_*.ps1
 patch_*.cjs
 patch_*.js
 produksi_patch.ps1
-fix_insert.cjs
+fix_insert.cjsbackups/

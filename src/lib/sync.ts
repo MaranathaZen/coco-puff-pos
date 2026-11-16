@@ -569,6 +569,7 @@ export async function pushToSupabase() {
 // dan error apa (dulu close order Mitra tertahan di PC tanpa ada yang tahu).
 let lastStatusSent = 0
 let lastStatusSig = ''
+let lastStatusPending = 0
 export async function reportSyncStatus(force = false) {
   try {
     if (!navigator.onLine) return
@@ -593,9 +594,12 @@ export async function reportSyncStatus(force = false) {
       .map(i => ({ table: i.table_name, record_id: i.record_id, op: i.operation, status: i.status, retry: i.retry_count, msg: i.error_msg, at: i.last_attempt_at }))
     const sig = JSON.stringify([pending, byTable, errors.map(e => e.msg)])
     const since = Date.now() - lastStatusSent
+    // Antrian baru saja kosong -> lapor SEGERA (dulu tertahan jeda 15 dtk; kalau app ditutup
+    // dalam jeda itu, server terus melihat "tertunda" padahal datanya sudah masuk — iPhone Bali)
+    const justCleared = pending === 0 && lastStatusPending > 0
     // Hemat kuota: kirim kalau berubah (maks tiap 15 dtk), atau tiap 1 mnt (ada antrian) / 10 mnt (kosong)
-    if (!force && (since < 15_000 || (sig === lastStatusSig && since < (pending ? 60_000 : 600_000)))) return
-    lastStatusSent = Date.now(); lastStatusSig = sig
+    if (!force && !justCleared && (since < 15_000 || (sig === lastStatusSig && since < (pending ? 60_000 : 600_000)))) return
+    lastStatusSent = Date.now(); lastStatusSig = sig; lastStatusPending = pending
     await supabase.from('device_sync_status').upsert({
       device_tag: getDeviceTag(), store_id: storeId, user_id: user?.id ?? null, username: user?.username ?? null,
       pending, oldest_pending: oldest, by_table: byTable, errors, online: navigator.onLine,

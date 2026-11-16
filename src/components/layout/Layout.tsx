@@ -12,6 +12,8 @@ import { useAuthStore } from '@/store/auth'
 import { useAppSettings, applyFavicon } from '@/hooks/useAppSettings'
 import { db } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
+import { pushToSupabase } from '@/lib/sync'
+import toast from 'react-hot-toast'
 import {
   LogOut, Wifi, WifiOff,
   ShoppingCart, FlaskConical,
@@ -113,6 +115,27 @@ export default function Layout() {
     window.addEventListener('offline', dn)
     return () => { window.removeEventListener('online', up); window.removeEventListener('offline', dn) }
   }, [])
+
+  // Data di perangkat ini yang belum terkirim ke server (tanggal berapa pun, semua halaman).
+  // Dulu hanya ada di halaman Kasir (online saja) & Close Order (hari ini saja), jadi close
+  // order kemarin yg tertahan saat HP offline tidak kelihatan (Bali 15 Nov, Mitra 22/25 Sep).
+  const [tick, setTick] = useState(0)
+  useEffect(() => { const t = setInterval(() => setTick(x => x + 1), 15_000); return () => clearInterval(t) }, [])
+  const unsent = useLiveQuery(async () => {
+    const items = await db.sync_queue.where('status').anyOf(['pending', 'failed']).toArray()
+    const old = items.filter(i => Date.now() - new Date(i.created_at).getTime() > 30_000)  // abaikan yg baru dibuat (sedang dikirim)
+    if (!old.length) return null
+    const oldest = old.reduce((m, i) => (i.created_at < m ? i.created_at : m), old[0].created_at)
+    return { n: old.length, oldest }
+  }, [tick]) ?? null
+  async function sendNow() {
+    const items = await db.sync_queue.where('status').anyOf(['failed', 'pending']).toArray()
+    for (const it of items) await db.sync_queue.update(it.id, { status: 'pending', retry_count: 0 })
+    if (!navigator.onLine) return toast.error('Perangkat sedang offline. Nyalakan internet dulu.')
+    await pushToSupabase()
+    toast.success('Mengirim data ke server...')
+  }
+  const sinceLabel = (iso: string) => new Date(iso).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })
 
   // Apply favicon & title dari settings
   useEffect(() => {
@@ -220,9 +243,21 @@ export default function Layout() {
             Aplikasi dalam perbaikan
           </div>
         )}
-        {!isOnline && (
+        {!isOnline && !unsent && (
           <div className="bg-amber-500 text-white text-xs text-center py-1 px-3 flex items-center justify-center gap-1.5 flex-shrink-0">
             <WifiOff size={12} /><span>Offline — data tersimpan lokal</span>
+          </div>
+        )}
+        {unsent && (
+          <div className={`${isOnline ? 'bg-orange-500' : 'bg-red-600'} text-white text-xs py-1.5 px-3 flex items-center justify-center gap-2 flex-shrink-0 text-center`}>
+            {!isOnline && <WifiOff size={12} className="flex-shrink-0" />}
+            <span>
+              {isOnline ? '' : 'Offline — '}<b>{unsent.n} data belum terkirim ke server</b> (sejak {sinceLabel(unsent.oldest)}).
+              {isOnline ? '' : ' Nyalakan internet, data akan terkirim otomatis. Jangan hapus data browser.'}
+            </span>
+            {isOnline && (
+              <button onClick={sendNow} className="underline font-semibold flex-shrink-0">Kirim sekarang</button>
+            )}
           </div>
         )}
         <div className="flex-1 overflow-hidden relative w-full">

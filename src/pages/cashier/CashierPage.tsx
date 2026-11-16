@@ -811,33 +811,8 @@ pre{font-family:'Courier New',Courier,monospace;font-size:9px;line-height:1.4;wh
 
   return (
     <div className="flex flex-col h-full">
-      {isOffline && (
-        <div className="bg-amber-500 text-white text-xs font-medium px-4 py-2 flex items-center gap-2 flex-shrink-0">
-          <WifiOff size={13} />Mode offline — transaksi tersimpan lokal
-        </div>
-      )}
-      {!isOffline && pendingSync > 0 && (
-        <div className="bg-orange-500 text-white text-xs font-medium px-4 py-2 flex items-center justify-between gap-2 flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <RefreshCw size={13} className="animate-spin" />
-            {pendingSync} transaksi belum tersync ke server
-          </div>
-          <button
-            onClick={async () => {
-              // Dulu tombol ini "Bersihkan" = MENGHAPUS antrian gagal -> close order/
-              // transaksi/potong stok hilang permanen. Sekarang: kirim ulang saja.
-              try {
-                const items = await db.sync_queue.where('status').anyOf(['failed', 'abandoned']).toArray()
-                for (const item of items) await db.sync_queue.update(item.id, { status: 'pending', retry_count: 0 })
-                await pushToSupabase()
-                toast.success('Mengirim ulang data ke server...')
-              } catch { }
-            }}
-            className="text-white underline text-xs opacity-80 flex-shrink-0">
-            Kirim ulang
-          </button>
-        </div>
-      )}
+      {/* Banner offline & data belum terkirim kini di Layout (semua halaman). Tombol "Kirim ulang"
+          lama di sini juga menghidupkan antrian 'abandoned' (potongan stok basi) -> dihapus. */}
       {printServerOk === false && getPrinterConfig(STORE_ID || userStoreId).printMode === 'server' && (
         <div className="bg-red-500 text-white text-xs font-medium px-4 py-2 flex items-center justify-between gap-2 flex-shrink-0">
           <span>Print server mati — struk tidak bisa tercetak</span>
